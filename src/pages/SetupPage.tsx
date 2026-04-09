@@ -3,6 +3,9 @@ import { signOut, linkWithPopup, unlink, EmailAuthProvider, linkWithCredential }
 import { auth, googleProvider } from '../lib/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { showToast } from '../components/ui/Toast'
+import { useRegisterSW } from 'virtual:pwa-register/react'
+
+declare const __APP_VERSION__: string
 
 export default function SetupPage() {
   const uid_user = useAppStore(s => s.uid)
@@ -17,6 +20,23 @@ export default function SetupPage() {
   const [linkError, setLinkError]   = useState('')
   const [linkLoading, setLinkLoading] = useState(false)
   const [showLinkForm, setShowLinkForm] = useState(false)
+
+  // SW update
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW()
+  const [checking, setChecking] = useState(false)
+  const [checked, setChecked]   = useState(false)
+
+  const handleCheckUpdate = async () => {
+    setChecking(true)
+    setChecked(false)
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration()
+      await reg?.update()
+      setTimeout(() => { setChecking(false); setChecked(true) }, 800)
+    } catch {
+      setChecking(false)
+    }
+  }
 
   const handleSignOut = async () => {
     if (!confirm('Sign out?')) return
@@ -81,7 +101,7 @@ export default function SetupPage() {
 
       {/* Header */}
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 py-3">
-        <h1 className="text-xl font-bold text-slate-900">Setup</h1>
+        <h1 className="text-xl font-bold text-slate-900">Settings</h1>
       </div>
 
       {/* Content */}
@@ -202,18 +222,51 @@ export default function SetupPage() {
           </div>
         </section>
 
-        {/* ── App info ──────────────────────────────────────────────────────── */}
+        {/* ── App info + update ─────────────────────────────────────────────── */}
         <section>
-          <div className="bg-white rounded-2xl border border-slate-200 px-4 py-3.5">
-            <div className="flex items-center justify-between">
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">App</h2>
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+
+            {/* Version row */}
+            <div className="px-4 py-3.5 flex items-center justify-between border-b border-slate-100">
               <div>
                 <p className="text-sm font-semibold text-slate-800">NimWizard</p>
-                <p className="text-xs text-slate-400 mt-0.5">Your relationship intelligence app</p>
+                <p className="text-xs text-slate-400 mt-0.5">v{__APP_VERSION__}</p>
               </div>
               <div className="text-right">
                 <p className="text-xs text-slate-400">User ID</p>
                 <p className="text-[10px] font-mono text-slate-300 truncate max-w-[120px]">{uid_user ?? '—'}</p>
               </div>
+            </div>
+
+            {/* Check for update row */}
+            <div className="px-4 py-3.5 flex items-center gap-3 min-h-[56px]">
+              <div className="w-8 h-8 rounded-lg bg-slate-50 flex items-center justify-center flex-shrink-0">
+                <svg width="15" height="15" viewBox="0 0 15 15" fill="none">
+                  <path d="M13 7.5A5.5 5.5 0 1 1 7.5 2" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round"/>
+                  <path d="M13 2v4h-4" stroke="#94a3b8" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium text-slate-800">Check for update</p>
+                <p className="text-xs text-slate-400">
+                  {needRefresh ? 'Update available — tap Install to apply' : checked ? 'You\'re on the latest version' : 'Check if a newer version is available'}
+                </p>
+              </div>
+              {needRefresh ? (
+                <button
+                  onClick={() => updateServiceWorker(true)}
+                  className="text-xs font-semibold text-white bg-blue-500 hover:bg-blue-600 px-3 py-2 rounded-xl min-h-[36px] transition-colors">
+                  Install
+                </button>
+              ) : (
+                <button
+                  onClick={handleCheckUpdate}
+                  disabled={checking}
+                  className="text-xs font-semibold text-blue-500 hover:text-blue-700 border border-blue-200 hover:bg-blue-50 px-3 py-2 rounded-xl min-h-[36px] transition-colors disabled:opacity-50">
+                  {checking ? 'Checking…' : 'Check'}
+                </button>
+              )}
             </div>
           </div>
         </section>

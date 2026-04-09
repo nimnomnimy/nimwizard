@@ -70,7 +70,7 @@ export default function AppShell() {
               }`
             }>
             <SetupIcon />
-            Setup
+            Settings
           </NavLink>
           <div className="flex items-center justify-between px-3 pt-1">
             <span className="text-[10px] text-white/20 font-mono">v{version}</span>
