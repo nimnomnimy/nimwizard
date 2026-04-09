@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Task, SubTask } from '../../types'
 import { useAppStore } from '../../store/useAppStore'
 
@@ -40,18 +40,16 @@ export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, onE
   const progress = task.progress ?? 0
   const subTasks = task.subTasks ?? []
   const [collapsed, setCollapsed] = useState(task.collapsed ?? false)
-  const taskBuckets = useAppStore(s => s.taskBuckets)
-  const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
+
+  // When subtasks are added externally, auto-expand
+  useEffect(() => {
+    if (subTasks.length > 0) setCollapsed(false)
+  }, [subTasks.length])
 
   function toggleSubTaskDone(sub: SubTask) {
-    const updated: Task = {
-      ...task,
-      subTasks: subTasks.map(s => s.id === sub.id ? { ...s, done: !s.done } : s),
-    }
-    const newBuckets = taskBuckets.map(b =>
-      b.id === bucketId ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) } : b
-    )
-    setTaskBuckets(newBuckets)
+    const updated = { ...sub, done: !sub.done }
+    saveSubTaskWithTimelineSync(bucketId, task.id, updated, updated.id)
   }
 
   return (
@@ -110,9 +108,12 @@ export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, onE
                 {task.priority}
               </span>
             )}
-            {task.due && (
+            {(task.startDate || task.due) && (
               <span className={`text-[11px] font-medium ${overdue ? 'text-red-500' : 'text-slate-400'}`}>
-                {overdue ? '⚠ ' : ''}{fmtDate(task.due)}
+                {overdue ? '⚠ ' : ''}
+                {task.startDate && task.due
+                  ? `${fmtDate(task.startDate)} – ${fmtDate(task.due)}`
+                  : task.due ? fmtDate(task.due) : fmtDate(task.startDate!)}
               </span>
             )}
             {subTasks.length > 0 && (

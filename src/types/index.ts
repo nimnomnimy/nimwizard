@@ -75,14 +75,16 @@ export interface Task {
   id: string
   text: string
   priority?: 'low' | 'medium' | 'high'
-  due?: string
+  startDate?: string       // YYYY-MM-DD, defaults to today
+  due?: string             // YYYY-MM-DD end / due date
   notes?: string
   progress?: number       // 0–100
   createdAt: number
   subTasks?: SubTask[]
   collapsed?: boolean
   predecessorIds?: string[]  // ids of other Tasks
-  timelineId?: string        // set when created from a timeline
+  timelineId?: string        // linked timeline id
+  swimLaneId?: string        // linked swim lane id within that timeline
 }
 
 export interface TaskBucket {

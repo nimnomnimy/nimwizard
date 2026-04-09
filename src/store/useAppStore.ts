@@ -73,6 +73,15 @@ interface StoreState extends AppState {
   ) => void
 
   /**
+   * Save/update a task AND create-or-update its corresponding TimelineItem.
+   * Used when a task is created/edited from TaskDrawer with a timeline assigned.
+   */
+  saveTaskWithTimelineItem: (
+    bucketId: string,
+    task: import('../types').Task,
+  ) => void
+
+  /**
    * Save/update a subtask on a parent task AND sync the matching TimelineSubItem
    * on the timeline bar that has taskId === parentTaskId.
    * If no matching bar exists nothing bad happens.
@@ -216,14 +225,17 @@ export const useAppStore = create<StoreState>()(
           const idx = bucket.tasks.findIndex(t => t.id === task.id)
           if (idx >= 0) bucket.tasks[idx] = task
         }
-        // Sync progress to linked timeline items
-        if (task.progress !== undefined) {
-          s.timelines.forEach(tl => {
-            tl.items.forEach(item => {
-              if (item.taskId === task.id) item.progress = task.progress ?? 0
-            })
+        // Sync label, dates, and progress to linked timeline items
+        s.timelines.forEach(tl => {
+          tl.items.forEach(item => {
+            if (item.taskId === task.id) {
+              item.label = task.text
+              if (task.startDate) item.startDate = task.startDate
+              if (task.due) item.endDate = task.due
+              if (task.progress !== undefined) item.progress = task.progress ?? 0
+            }
           })
-        }
+        })
       })
       get().saveUserData()
     },
@@ -237,6 +249,64 @@ export const useAppStore = create<StoreState>()(
         if (taskIdx < 0) return
         const [task] = fromBucket.tasks.splice(taskIdx, 1)
         toBucket.tasks.push(task)
+      })
+      get().saveUserData()
+    },
+
+    saveTaskWithTimelineItem: (bucketId, task) => {
+      set(s => {
+        // 1. Upsert the task in its bucket
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) {
+          const idx = bucket.tasks.findIndex(t => t.id === task.id)
+          if (idx >= 0) bucket.tasks[idx] = task
+          else bucket.tasks.push(task)
+        }
+
+        // 2. If task has a timelineId, create or update the timeline bar
+        if (task.timelineId) {
+          const tl = s.timelines.find(x => x.id === task.timelineId)
+          if (tl) {
+            const existingItem = tl.items.find(i => i.taskId === task.id)
+            const today = new Date().toISOString().split('T')[0]
+            const sevenDays = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+            const laneId = task.swimLaneId ?? tl.swimLanes[0]?.id ?? ''
+            if (existingItem) {
+              // Update existing bar — sync label, dates
+              existingItem.label = task.text
+              if (task.startDate) existingItem.startDate = task.startDate
+              if (task.due) existingItem.endDate = task.due
+              if (task.progress !== undefined) existingItem.progress = task.progress ?? 0
+              if (task.swimLaneId) existingItem.swimLaneId = task.swimLaneId
+            } else {
+              // Create new bar
+              const lane = tl.swimLanes.find(l => l.id === laneId)
+              tl.items.push({
+                id: task.id + '_bar',  // stable, derived from taskId
+                swimLaneId: laneId,
+                label: task.text,
+                type: 'bar',
+                startDate: task.startDate ?? today,
+                endDate: task.due ?? sevenDays,
+                color: lane?.color ?? '#6366f1',
+                progress: task.progress ?? 0,
+                taskId: task.id,
+              })
+            }
+          }
+        } else {
+          // timelineId cleared — sync label/progress to any existing linked bar
+          s.timelines.forEach(tl => {
+            tl.items.forEach(item => {
+              if (item.taskId === task.id) {
+                item.label = task.text
+                if (task.startDate) item.startDate = task.startDate
+                if (task.due) item.endDate = task.due
+                if (task.progress !== undefined) item.progress = task.progress ?? 0
+              }
+            })
+          })
+        }
       })
       get().saveUserData()
     },

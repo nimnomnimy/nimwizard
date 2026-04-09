@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import { uid } from '../../lib/utils'
 import { showToast } from '../ui/Toast'
@@ -17,30 +17,50 @@ const PRIORITIES = [
   { value: 'high',   label: 'High',   color: 'text-red-600 bg-red-50' },
 ]
 
-export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
-  const taskBuckets  = useAppStore(s => s.taskBuckets)
-  const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
-  const updateTask   = useAppStore(s => s.updateTask)
-  const timelines    = useAppStore(s => s.timelines)
+function todayStr() { return new Date().toISOString().split('T')[0] }
 
-  const [text,          setText]         = useState('')
-  const [notes,         setNotes]        = useState('')
-  const [priority,      setPriority]     = useState<'low' | 'medium' | 'high'>('medium')
-  const [due,           setDue]          = useState('')
-  const [progress,      setProgress]     = useState(0)
-  const [targetBucket,  setTargetBucket] = useState(bucketId)
-  const [timelineId,    setTimelineId]   = useState<string>('')
+export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
+  const taskBuckets           = useAppStore(s => s.taskBuckets)
+  const timelines             = useAppStore(s => s.timelines)
+  const saveTaskWithTimelineItem = useAppStore(s => s.saveTaskWithTimelineItem)
+  const setTaskBuckets        = useAppStore(s => s.setTaskBuckets)
+
+  const [text,         setText]        = useState('')
+  const [notes,        setNotes]       = useState('')
+  const [priority,     setPriority]    = useState<'low' | 'medium' | 'high'>('medium')
+  const [startDate,    setStartDate]   = useState(todayStr())
+  const [due,          setDue]         = useState('')
+  const [progress,     setProgress]    = useState(0)
+  const [targetBucket, setTargetBucket] = useState(bucketId)
+  const [timelineId,   setTimelineId]  = useState<string>('')
+  const [swimLaneId,   setSwimLaneId]  = useState<string>('')
   const titleRef = useRef<HTMLInputElement>(null)
+
+  const selectedTimeline = useMemo(
+    () => timelines.find(tl => tl.id === timelineId) ?? null,
+    [timelines, timelineId],
+  )
+
+  // Reset swim lane when timeline changes
+  useEffect(() => {
+    if (selectedTimeline) {
+      setSwimLaneId(prev => selectedTimeline.swimLanes.some(l => l.id === prev) ? prev : (selectedTimeline.swimLanes[0]?.id ?? ''))
+    } else {
+      setSwimLaneId('')
+    }
+  }, [timelineId])
 
   useEffect(() => {
     if (open) {
       setText(task?.text ?? '')
       setNotes(task?.notes ?? '')
       setPriority(task?.priority ?? 'medium')
+      setStartDate(task?.startDate ?? todayStr())
       setDue(task?.due ?? '')
       setProgress(task?.progress ?? 0)
       setTargetBucket(bucketId)
       setTimelineId(task?.timelineId ?? '')
+      setSwimLaneId(task?.swimLaneId ?? '')
       setTimeout(() => titleRef.current?.focus(), 100)
     }
   }, [open, task, bucketId])
@@ -54,6 +74,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       text: text.trim(),
       notes: notes.trim() || undefined,
       priority,
+      startDate: startDate || undefined,
       due: due || undefined,
       progress: progress > 0 ? progress : undefined,
       createdAt: task?.createdAt ?? Date.now(),
@@ -62,25 +83,17 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       collapsed: task?.collapsed,
       predecessorIds: task?.predecessorIds,
       timelineId: timelineId || undefined,
+      swimLaneId: swimLaneId || undefined,
     }
 
-    if (task && targetBucket === bucketId) {
-      // Simple update — use updateTask to also sync timeline items
-      updateTask(bucketId, updated)
-    } else {
-      // Move between buckets or new task — use setTaskBuckets
-      const newBuckets = taskBuckets.map((b: TaskBucket) => {
-        if (task && b.id !== targetBucket) {
-          return { ...b, tasks: b.tasks.filter(t => t.id !== task.id) }
-        }
-        if (b.id === targetBucket) {
-          if (task) {
-            return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) }
-          }
-          return { ...b, tasks: [...b.tasks, updated] }
-        }
-        return b
-      })
+    // Use atomic action — handles bucket upsert + timeline bar create/update
+    saveTaskWithTimelineItem(targetBucket, updated)
+
+    // If bucket changed for an existing task, also remove from old bucket
+    if (task && targetBucket !== bucketId) {
+      const newBuckets = taskBuckets.map((b: TaskBucket) =>
+        b.id === bucketId ? { ...b, tasks: b.tasks.filter(t => t.id !== task.id) } : b
+      )
       setTaskBuckets(newBuckets)
     }
 
@@ -121,6 +134,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
         </div>
 
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto scroll-touch px-4 py-4 flex flex-col gap-4">
+
           {/* Title */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Task <span className="text-red-400">*</span></label>
@@ -129,7 +143,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
               className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px]" />
           </div>
 
-          {/* Bucket */}
+          {/* Column */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Column</label>
             <select value={targetBucket} onChange={e => setTargetBucket(e.target.value)}
@@ -137,23 +151,6 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
               {taskBuckets.map((b: TaskBucket) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           </div>
-
-          {/* Timeline assignment */}
-          {timelines.length > 0 && (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Timeline</label>
-              <select value={timelineId} onChange={e => setTimelineId(e.target.value)}
-                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
-                <option value="">— None —</option>
-                {timelines.map(tl => (
-                  <option key={tl.id} value={tl.id}>{tl.name}</option>
-                ))}
-              </select>
-              {timelineId && (
-                <p className="text-[11px] text-slate-400">This task will appear in the selected timeline's filter.</p>
-              )}
-            </div>
-          )}
 
           {/* Priority */}
           <div className="flex flex-col gap-1.5">
@@ -170,11 +167,19 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
             </div>
           </div>
 
-          {/* Due date */}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
-            <input type="date" value={due} onChange={e => setDue(e.target.value)}
-              className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+          {/* Dates */}
+          <div className="flex gap-3">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Start Date</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+            </div>
+            <div className="flex-1 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
+              <input type="date" value={due} onChange={e => setDue(e.target.value)}
+                min={startDate}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+            </div>
           </div>
 
           {/* Progress */}
@@ -194,6 +199,29 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
               ))}
             </div>
           </div>
+
+          {/* Timeline assignment */}
+          {timelines.length > 0 && (
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Timeline</label>
+              <select value={timelineId} onChange={e => setTimelineId(e.target.value)}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
+                <option value="">— None —</option>
+                {timelines.map(tl => (
+                  <option key={tl.id} value={tl.id}>{tl.name}</option>
+                ))}
+              </select>
+
+              {selectedTimeline && selectedTimeline.swimLanes.length > 0 && (
+                <select value={swimLaneId} onChange={e => setSwimLaneId(e.target.value)}
+                  className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
+                  {selectedTimeline.swimLanes.map(l => (
+                    <option key={l.id} value={l.id}>{l.label}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
 
           {/* Notes */}
           <div className="flex flex-col gap-1.5">
