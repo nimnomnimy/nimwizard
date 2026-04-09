@@ -267,10 +267,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
             newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
             newEnd   = addDays(newStart, Math.max(1, Math.round((drag.origEnd.getTime()-drag.origStart.getTime())/86400000)))
           } else if (drag.kind === 'resize-left') {
-            newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
+            newStart = addDays(drag.origStart, daysDelta)
             if (newStart >= drag.origEnd) newStart = addDays(drag.origEnd,-1)
           } else {
-            newEnd = snapDate(addDays(drag.origEnd, daysDelta), timeline.timescale)
+            newEnd = addDays(drag.origEnd, daysDelta)
             if (newEnd <= drag.origStart) newEnd = addDays(drag.origStart,1)
           }
           return { ...s, startDate: formatDate(newStart), endDate: formatDate(newEnd) }
@@ -287,10 +287,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
         newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
         newEnd   = addDays(newStart, Math.max(1, Math.round((drag.origEnd.getTime()-drag.origStart.getTime())/86400000)))
       } else if (drag.kind === 'resize-left') {
-        newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
+        newStart = addDays(drag.origStart, daysDelta)
         if (newStart >= drag.origEnd) newStart = addDays(drag.origEnd,-1)
       } else {
-        newEnd = snapDate(addDays(drag.origEnd, daysDelta), timeline.timescale)
+        newEnd = addDays(drag.origEnd, daysDelta)
         if (newEnd <= drag.origStart) newEnd = addDays(drag.origStart,1)
       }
       return { ...it, startDate: formatDate(newStart), endDate: formatDate(newEnd) }
