@@ -155,7 +155,7 @@ function writeTask(userUid: string, bucketId: string, task: Task) {
 
 
 function writeTimeline(userUid: string, timeline: Timeline) {
-  setDoc(docRef(userUid, 'timelines', timeline.id), timeline).catch(e =>
+  setDoc(docRef(userUid, 'timelines', timeline.id), stripUndefined(timeline)).catch(e =>
     console.error('[writeTimeline]', e))
 }
 
