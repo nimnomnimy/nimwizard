@@ -112,6 +112,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // ── Bar drag ──────────────────────────────────────────────────────────────
   function startBarDrag(e: React.PointerEvent, item: TimelineItem, kind: BarDrag['kind']) {
     e.stopPropagation()
+    e.preventDefault()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     dragRef.current = {
       kind, itemId: item.id,
@@ -123,9 +124,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // ── Draw drag (lane canvas) ───────────────────────────────────────────────
   function startDraw(e: React.PointerEvent, laneId: string) {
-    // Only left-button, and only if no item drag is active
     if (e.button !== 0) return
     e.stopPropagation()
+    e.preventDefault()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     const canvasX   = clientXToCanvasX(e.clientX)
     const anchorDate = snapDate(canvasXToDate(canvasX), timeline.timescale)
@@ -417,7 +418,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   </div>
 
                   {/* Lane canvas — draw here */}
-                  <div style={{ flex: 1, position: 'relative', cursor: 'crosshair' }}
+                  <div style={{ flex: 1, position: 'relative', cursor: 'crosshair', touchAction: 'none' }}
                     className="border-b border-slate-100 bg-white"
                     onPointerDown={e => startDraw(e, lane.id)}>
 
@@ -451,12 +452,13 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                           backgroundColor: item.color, opacity: 0.9,
                           cursor: 'grab', display: 'flex', alignItems: 'center',
                           overflow: 'hidden', zIndex: 2, boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+                          touchAction: 'none',
                         }}
                         onPointerDown={e => startBarDrag(e, item, 'move')}
                         onClick={e => { e.stopPropagation(); setEditingItem(item); setEditingMilestone(null); setAddingForLane(lane.id); setDrawerOpen(true) }}>
 
                         {/* Resize left */}
-                        <div style={{ width: 8, height: '100%', cursor: 'ew-resize', flexShrink: 0 }}
+                        <div style={{ width: 8, height: '100%', cursor: 'ew-resize', flexShrink: 0, touchAction: 'none' }}
                           className="hover:bg-black/10 transition-colors"
                           onPointerDown={e => { e.stopPropagation(); startBarDrag(e, item, 'resize-left') }} />
 
@@ -471,7 +473,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                         </span>
 
                         {/* Resize right */}
-                        <div style={{ width: 8, height: '100%', cursor: 'ew-resize', flexShrink: 0 }}
+                        <div style={{ width: 8, height: '100%', cursor: 'ew-resize', flexShrink: 0, touchAction: 'none' }}
                           className="hover:bg-black/10 transition-colors"
                           onPointerDown={e => { e.stopPropagation(); startBarDrag(e, item, 'resize-right') }} />
                       </div>
