@@ -34,6 +34,7 @@ function fmtDate(d: string) {
 export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, buckets }: Props) {
   const overdue = task.due && isOverdue(task.due) && bucketId !== 'done'
   const otherBuckets = buckets.filter(b => b.id !== bucketId)
+  const progress = task.progress ?? 0
 
   return (
     <div className={`bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm ${bucketId === 'done' ? 'opacity-60' : ''}`}>
@@ -49,6 +50,25 @@ export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, buc
         {/* Notes preview */}
         {task.notes && (
           <p className="text-xs text-slate-400 mb-2 line-clamp-2">{task.notes}</p>
+        )}
+
+        {/* Progress bar */}
+        {progress > 0 && (
+          <div className="mb-2">
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-[10px] text-slate-400 font-medium">Progress</span>
+              <span className="text-[10px] text-slate-500 font-semibold">{progress}%</span>
+            </div>
+            <div className="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all"
+                style={{
+                  width: `${progress}%`,
+                  backgroundColor: progress === 100 ? '#10b981' : progress >= 50 ? '#3b82f6' : '#f59e0b',
+                }}
+              />
+            </div>
+          </div>
         )}
 
         {/* Footer */}
@@ -68,7 +88,6 @@ export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, buc
 
           {/* Actions */}
           <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
-            {/* Move to bucket */}
             {otherBuckets.length > 0 && (
               <select
                 value=""

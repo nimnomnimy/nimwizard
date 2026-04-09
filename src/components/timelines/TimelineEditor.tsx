@@ -93,6 +93,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const [ghost,    setGhost]    = useState<Ghost | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  // Tap popover (bar vs milestone choice)
+  interface TapPopover { x: number; y: number; laneId: string; date: Date }
+  const [tapPopover, setTapPopover] = useState<TapPopover | null>(null)
+
   const todayDate = new Date()
   const todayPx   = dateToPx(todayDate, viewStart, timeline.timescale)
   const periodBounds = currentPeriodBounds(timeline.timescale)
@@ -222,15 +226,49 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       setGhost(null)
       const drawPx = Math.abs(e.clientX - drag.anchorClientX)
       const lane = timeline.swimLanes.find(l => l.id === drag.laneId)
-      const startDate = ghost.startDate
-      const endDate   = drawPx < MIN_DRAW_PX ? addDays(startDate, 7) : ghost.endDate
-      setEditingItem({ id: uid(), swimLaneId: drag.laneId, label: '', type: 'bar',
-        startDate: formatDate(startDate), endDate: formatDate(endDate),
-        color: lane?.color ?? '#6366f1', progress: 0 })
-      setEditingMilestone(null); setAddingForLane(drag.laneId); setDrawerOpen(true)
+
+      if (drawPx < MIN_DRAW_PX) {
+        // Short tap — show bar vs milestone popover
+        const rect = scrollRef.current?.getBoundingClientRect()
+        const scrollTop = scrollRef.current?.scrollTop ?? 0
+        setTapPopover({
+          x: e.clientX - (rect?.left ?? 0),
+          y: e.clientY - (rect?.top ?? 0) + scrollTop,
+          laneId: drag.laneId,
+          date: drag.anchorDate,
+        })
+      } else {
+        // Drawn a real range — open bar drawer directly
+        const startDate = ghost.startDate
+        const endDate   = ghost.endDate
+        setEditingItem({ id: uid(), swimLaneId: drag.laneId, label: '', type: 'bar',
+          startDate: formatDate(startDate), endDate: formatDate(endDate),
+          color: lane?.color ?? '#6366f1', progress: 0 })
+        setEditingMilestone(null); setAddingForLane(drag.laneId); setDrawerOpen(true)
+      }
     } else {
       setGhost(null)
     }
+  }
+
+  // ── Tap popover handlers ──────────────────────────────────────────────────
+  function tapChooseBar() {
+    if (!tapPopover) return
+    const lane = timeline.swimLanes.find(l => l.id === tapPopover.laneId)
+    const startDate = tapPopover.date
+    const endDate   = addDays(startDate, 7)
+    setEditingItem({ id: uid(), swimLaneId: tapPopover.laneId, label: '', type: 'bar',
+      startDate: formatDate(startDate), endDate: formatDate(endDate),
+      color: lane?.color ?? '#6366f1', progress: 0 })
+    setEditingMilestone(null); setAddingForLane(tapPopover.laneId)
+    setTapPopover(null); setDrawerOpen(true)
+  }
+
+  function tapChooseMilestone() {
+    if (!tapPopover) return
+    setEditingMilestone({ id: uid(), label: 'Milestone', date: formatDate(tapPopover.date), color: '#ef4444' })
+    setEditingItem(null); setAddingForLane(tapPopover.laneId)
+    setTapPopover(null); setDrawerOpen(true)
   }
 
   // ── Lane management ───────────────────────────────────────────────────────
@@ -283,7 +321,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col h-full overflow-hidden relative">
 
       {/* ── Toolbar ───────────────────────────────────────────────────────── */}
       <div className="flex items-center gap-2 px-4 py-2 bg-white border-b border-slate-200 flex-shrink-0 flex-wrap gap-y-1">
@@ -592,6 +630,37 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ── Tap popover: Bar vs Milestone ────────────────────────────────── */}
+      {tapPopover && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setTapPopover(null)} />
+          <div
+            className="absolute z-50 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden"
+            style={{ left: Math.min(tapPopover.x, (scrollRef.current?.clientWidth ?? 300) - 160), top: tapPopover.y + 8, width: 152 }}
+          >
+            <div className="px-3 py-2 border-b border-slate-100">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Add to timeline</p>
+            </div>
+            <button
+              onClick={tapChooseBar}
+              className="w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-slate-50 transition-colors"
+            >
+              <div className="w-7 h-4 rounded bg-indigo-500 flex-shrink-0" />
+              <span className="text-sm font-semibold text-slate-700">Bar</span>
+            </button>
+            <button
+              onClick={tapChooseMilestone}
+              className="w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-slate-50 transition-colors border-t border-slate-50"
+            >
+              <svg width="16" height="16" viewBox="0 0 14 14" className="flex-shrink-0 text-amber-500" fill="currentColor">
+                <path d="M7 0 L14 7 L7 14 L0 7 Z"/>
+              </svg>
+              <span className="text-sm font-semibold text-slate-700">Milestone</span>
+            </button>
+          </div>
+        </>
+      )}
 
       {/* ── Drawer ────────────────────────────────────────────────────────── */}
       <ItemDrawer

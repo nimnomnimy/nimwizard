@@ -50,6 +50,7 @@ interface StoreState extends AppState {
 
   // Tasks
   setTaskBuckets: (buckets: TaskBucket[]) => void
+  updateTask: (bucketId: string, task: import('../types').Task) => void
 
   // Settings
   setEmailSettings: (settings: EmailSettings) => void
@@ -170,6 +171,26 @@ export const useAppStore = create<StoreState>()(
     deleteMeeting: (id) => { set(s => { s.meetings = s.meetings.filter(m => m.id !== id) }); get().saveUserData() },
 
     setTaskBuckets: (buckets) => { set(s => { s.taskBuckets = buckets }); get().saveUserData() },
+
+    updateTask: (bucketId, task) => {
+      set(s => {
+        // Update task in bucket
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) {
+          const idx = bucket.tasks.findIndex(t => t.id === task.id)
+          if (idx >= 0) bucket.tasks[idx] = task
+        }
+        // Sync progress to linked timeline items
+        if (task.progress !== undefined) {
+          s.timelines.forEach(tl => {
+            tl.items.forEach(item => {
+              if (item.taskId === task.id) item.progress = task.progress ?? 0
+            })
+          })
+        }
+      })
+      get().saveUserData()
+    },
     setEmailSettings: (settings) => { set(s => { s.emailSettings = settings }); get().saveUserData() },
 
     addTimeline: (t) => { set(s => { s.timelines.push(t) }); get().saveUserData() },

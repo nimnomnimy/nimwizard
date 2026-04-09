@@ -3,6 +3,7 @@ import type { TimelineItem, TimelineMilestone, SwimLane, Timescale, TimelineSubI
 import type { Task } from '../../types'
 import { formatDate, addDays } from './utils/dateLayout'
 import { uid } from '../../lib/utils'
+import { useAppStore } from '../../store/useAppStore'
 
 const BAR_COLORS = [
   '#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444',
@@ -35,6 +36,8 @@ export default function ItemDrawer({
   open, item, milestone, laneId, swimLanes, allTasks = [],
   onSaveItem, onDeleteItem, onSaveMilestone, onDeleteMilestone, onClose,
 }: Props) {
+  const taskBuckets = useAppStore(s => s.taskBuckets)
+  const updateTask  = useAppStore(s => s.updateTask)
   // ── Item form state ────────────────────────────────────────────────────────
   const [label,     setLabel]     = useState('')
   const [startDate, setStartDate] = useState('')
@@ -88,9 +91,16 @@ export default function ItemDrawer({
     }
   }, [open, item, milestone])
 
+  // When task is selected, auto-fill label from task name
+  useEffect(() => {
+    if (!taskId) return
+    const linkedTask = allTasks.find(t => t.id === taskId)
+    if (linkedTask && !label.trim()) setLabel(linkedTask.text)
+  }, [taskId])
+
   function handleSaveItem() {
     if (!label.trim()) return
-    onSaveItem({
+    const savedItem: TimelineItem = {
       id: item?.id ?? '',
       label: label.trim(),
       type: itemType,
@@ -102,7 +112,16 @@ export default function ItemDrawer({
       notes: notes.trim() || undefined,
       taskId: taskId || undefined,
       subItems: subItems.length > 0 ? subItems : undefined,
-    })
+    }
+    onSaveItem(savedItem)
+
+    // Sync progress back to linked task
+    if (taskId) {
+      const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id }))).find(x => x.task.id === taskId)
+      if (bucketEntry) {
+        updateTask(bucketEntry.bucketId, { ...bucketEntry.task, progress })
+      }
+    }
   }
 
   function handleSaveMilestone() {

@@ -66,6 +66,7 @@ export interface Task {
   priority?: 'low' | 'medium' | 'high'
   due?: string
   notes?: string
+  progress?: number   // 0–100
   createdAt: number
 }
 

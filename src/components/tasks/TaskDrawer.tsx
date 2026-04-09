@@ -4,8 +4,6 @@ import { uid } from '../../lib/utils'
 import { showToast } from '../ui/Toast'
 import type { Task, TaskBucket } from '../../types'
 
-interface ActionItem { id: string; text: string; done: boolean }
-
 interface Props {
   open: boolean
   bucketId: string
@@ -20,14 +18,15 @@ const PRIORITIES = [
 ]
 
 export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
-  const taskBuckets = useAppStore(s => s.taskBuckets)
+  const taskBuckets  = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const updateTask   = useAppStore(s => s.updateTask)
 
-  const [text, setText] = useState('')
-  const [notes, setNotes] = useState('')
+  const [text,     setText]     = useState('')
+  const [notes,    setNotes]    = useState('')
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
-  const [due, setDue] = useState('')
-  const [_actions, _setActions] = useState<ActionItem[]>([])
+  const [due,      setDue]      = useState('')
+  const [progress, setProgress] = useState(0)
   const [targetBucket, setTargetBucket] = useState(bucketId)
   const titleRef = useRef<HTMLInputElement>(null)
 
@@ -37,7 +36,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       setNotes(task?.notes ?? '')
       setPriority(task?.priority ?? 'medium')
       setDue(task?.due ?? '')
-      _setActions([])
+      setProgress(task?.progress ?? 0)
       setTargetBucket(bucketId)
       setTimeout(() => titleRef.current?.focus(), 100)
     }
@@ -53,24 +52,30 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       notes: notes.trim() || undefined,
       priority,
       due: due || undefined,
+      progress: progress > 0 ? progress : undefined,
       createdAt: task?.createdAt ?? Date.now(),
     }
 
-    const newBuckets = taskBuckets.map((b: TaskBucket) => {
-      // Remove from old bucket if moving
-      if (task && b.id !== targetBucket) {
-        return { ...b, tasks: b.tasks.filter(t => t.id !== task.id) }
-      }
-      if (b.id === targetBucket) {
-        if (task) {
-          return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) }
+    if (task && targetBucket === bucketId) {
+      // Simple update — use updateTask to also sync timeline items
+      updateTask(bucketId, updated)
+    } else {
+      // Move between buckets or new task — use setTaskBuckets
+      const newBuckets = taskBuckets.map((b: TaskBucket) => {
+        if (task && b.id !== targetBucket) {
+          return { ...b, tasks: b.tasks.filter(t => t.id !== task.id) }
         }
-        return { ...b, tasks: [...b.tasks, updated] }
-      }
-      return b
-    })
+        if (b.id === targetBucket) {
+          if (task) {
+            return { ...b, tasks: b.tasks.map(t => t.id === task.id ? updated : t) }
+          }
+          return { ...b, tasks: [...b.tasks, updated] }
+        }
+        return b
+      })
+      setTaskBuckets(newBuckets)
+    }
 
-    setTaskBuckets(newBuckets)
     showToast(task ? 'Task updated' : 'Task added', 'success')
     onClose()
   }
@@ -145,6 +150,25 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
             <input type="date" value={due} onChange={e => setDue(e.target.value)}
               className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+          </div>
+
+          {/* Progress */}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress — {progress}%</label>
+            <input type="range" min={0} max={100} value={progress}
+              onChange={e => setProgress(Number(e.target.value))}
+              className="w-full accent-blue-500" />
+            {/* Quick presets */}
+            <div className="flex gap-1.5 flex-wrap">
+              {[0, 25, 50, 75, 100].map(v => (
+                <button key={v} type="button" onClick={() => setProgress(v)}
+                  className={`text-[10px] font-semibold px-2 py-1 rounded-full border transition-colors ${
+                    progress === v ? 'bg-blue-500 text-white border-blue-500' : 'border-slate-200 text-slate-400 hover:border-slate-300'
+                  }`}>
+                  {v}%
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Notes */}
