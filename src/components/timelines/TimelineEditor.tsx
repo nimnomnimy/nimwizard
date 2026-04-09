@@ -1,9 +1,9 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
-import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale, YearMode, TimelineSubItem } from '../../types'
+import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale, YearMode, TimelineSubItem, FreezePeriod } from '../../types'
 import { uid } from '../../lib/utils'
 import {
   parseDate, formatDate, dateToPx, pxToDate, snapDate, getColumns,
-  PX_PER_DAY, addDays,
+  PX_PER_DAY, addDays, fyYear,
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
 import SubTaskDrawer from '../tasks/SubTaskDrawer'
@@ -21,6 +21,8 @@ const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
 const RULER_H        = 36
 const SUB_RULER_H    = 24
+const DBL_MAJOR_H    = 22   // major row height when headerMode='double'
+const DBL_MINOR_H    = 24   // minor row height when headerMode='double'
 const MILESTONE_R    = 7
 const MIN_BAR_W      = 4
 const MIN_DRAW_PX    = 4
@@ -83,6 +85,43 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const { major, minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
   const totalWidthPx = major.reduce((s,c) => s + c.widthPx, 0)
 
+  // ── Double-header: group major columns under a parent label ───────────────
+  // weeks → group by "Month Year"; months → group by "Year"; quarters → group by "Year"
+  // days → group by "Month Year"; years → no grouping (show nothing above)
+  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  interface HeaderGroup { label: string; widthPx: number }
+  const dblGroups: HeaderGroup[] = (() => {
+    if (!major.length) return []
+    const getGroupKey = (col: { startDate: Date }): string => {
+      const d = col.startDate
+      switch (timeline.timescale) {
+        case 'days':
+        case 'weeks':
+          return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`
+        case 'months':
+          return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
+        case 'quarters':
+          return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
+        case 'years':
+          return ''  // no grouping for years
+      }
+    }
+    const groups: HeaderGroup[] = []
+    let curKey = ''
+    let curLabel = ''
+    let curWidth = 0
+    for (const col of major) {
+      const key = getGroupKey(col)
+      if (key !== curKey) {
+        if (curWidth > 0) groups.push({ label: curLabel, widthPx: curWidth })
+        curKey = key; curLabel = key; curWidth = 0
+      }
+      curWidth += col.widthPx
+    }
+    if (curWidth > 0) groups.push({ label: curLabel, widthPx: curWidth })
+    return groups
+  })()
+
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const addTaskAndUpdateTimeline = useAppStore(s => s.addTaskAndUpdateTimeline)
@@ -91,6 +130,34 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const syncBarSubItemsToTask = useAppStore(s => s.syncBarSubItemsToTask)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
   const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
+
+  // Freeze period drawer
+  const [freezeDrawer, setFreezeDrawer] = useState<FreezePeriod | null>(null)
+
+  const freezePeriods = timeline.freezePeriods ?? []
+
+  function saveFreezeperiod(fp: FreezePeriod) {
+    const exists = freezePeriods.some(f => f.id === fp.id)
+    update({ freezePeriods: exists ? freezePeriods.map(f => f.id === fp.id ? fp : f) : [...freezePeriods, fp] })
+    setFreezeDrawer(null)
+  }
+  function deleteFreezeperiod(id: string) {
+    update({ freezePeriods: freezePeriods.filter(f => f.id !== id) })
+    setFreezeDrawer(null)
+  }
+  function addFreezeperiod() {
+    const today = new Date()
+    setFreezeDrawer({
+      id: uid(),
+      label: 'Freeze',
+      startDate: formatDate(today),
+      endDate: formatDate(addDays(today, 14)),
+      color: '#f59e0b',
+    })
+  }
+
+  // Header mode
+  const headerMode = timeline.headerMode ?? 'single'
 
   // Drawer
   const [drawerOpen,       setDrawerOpen]       = useState(false)
@@ -504,6 +571,27 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
         <div className="flex-1" />
 
+        {/* Header mode toggle */}
+        <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5" title="Toggle date header rows">
+          {(['single','double'] as const).map(m => (
+            <button key={m} type="button"
+              onClick={() => update({ headerMode: m })}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                headerMode===m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              {m==='single' ? '—' : '≡'}
+            </button>
+          ))}
+        </div>
+
+        {/* Freeze period */}
+        <button
+          onClick={addFreezeperiod}
+          className="flex items-center gap-1.5 text-xs font-semibold text-sky-600 bg-sky-50 hover:bg-sky-100 px-3 py-1.5 rounded-lg min-h-[32px] transition-colors">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 0v10M0 5h10M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+          Freeze
+        </button>
+
         <button
           onClick={() => { setEditingMilestone({id:uid(),label:'Milestone',date:formatDate(new Date()),color:'#ef4444'}); setEditingItem(null); setAddingForLane(null); setDrawerOpen(true) }}
           className="flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded-lg min-h-[32px] transition-colors">
@@ -521,20 +609,57 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
           {/* ── Ruler ───────────────────────────────────────────────────── */}
           <div className="sticky top-0 z-20 bg-white border-b border-slate-200">
-            <div className="flex">
-              {/* Label column header with resize handle */}
-              <div style={{ width: labelWidth, height: RULER_H, flexShrink: 0 }}
-                className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
-                <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Lanes</span>
-                {/* Resize handle */}
-                <div
-                  style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
-                  className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
-                  onPointerDown={startLabelResize}
-                />
+
+            {/* Double-header: top row groups major columns by parent period */}
+            {headerMode === 'double' && dblGroups.length > 0 && (
+              <div className="flex border-b border-slate-200">
+                <div style={{ width: labelWidth, height: DBL_MAJOR_H, flexShrink: 0 }}
+                  className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
+                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Lanes</span>
+                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
+                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
+                    onPointerDown={startLabelResize} />
+                </div>
+                <div className="flex relative overflow-hidden" style={{ height: DBL_MAJOR_H }}>
+                  {periodX1 < totalWidthPx && periodX2 > 0 && (
+                    <div style={{ position:'absolute', left: Math.max(0,periodX1), top:0, bottom:0,
+                      width: Math.min(totalWidthPx,periodX2)-Math.max(0,periodX1),
+                      backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
+                  )}
+                  {dblGroups.map((g,i) => (
+                    <div key={i} style={{ width: g.widthPx, minWidth: g.widthPx }}
+                      className="flex-shrink-0 border-r border-slate-200 flex items-center px-2 overflow-hidden bg-slate-50">
+                      <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">{g.label}</span>
+                    </div>
+                  ))}
+                  {todayPx>=0 && todayPx<=totalWidthPx && (
+                    <div style={{ position:'absolute', left:todayPx, top:0, bottom:0, width:2, backgroundColor:'#6366f1', pointerEvents:'none', zIndex:5 }} />
+                  )}
+                </div>
               </div>
+            )}
+
+            {/* Major ticks row (single-header: also has Lanes label; double-header: just the tick labels) */}
+            <div className="flex">
+              {headerMode === 'single' && (
+                <div style={{ width: labelWidth, height: RULER_H, flexShrink: 0 }}
+                  className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Lanes</span>
+                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
+                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
+                    onPointerDown={startLabelResize} />
+                </div>
+              )}
+              {headerMode === 'double' && (
+                <div style={{ width: labelWidth, height: DBL_MINOR_H, flexShrink: 0 }}
+                  className="border-r border-slate-200 bg-slate-50 relative">
+                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
+                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
+                    onPointerDown={startLabelResize} />
+                </div>
+              )}
               {/* Major ticks */}
-              <div className="flex relative" style={{ height: RULER_H }}>
+              <div className="flex relative" style={{ height: headerMode === 'double' ? DBL_MINOR_H : RULER_H }}>
                 {/* Current period highlight */}
                 {periodX1 < totalWidthPx && periodX2 > 0 && (
                   <div style={{ position:'absolute', left: Math.max(0,periodX1), top:0, bottom:0,
@@ -544,7 +669,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                 {major.map((col,i) => (
                   <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx, position:'relative' }}
                     className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
-                    <span className="text-[11px] font-semibold text-slate-500 whitespace-nowrap relative z-10">{col.label}</span>
+                    <span className={`whitespace-nowrap relative z-10 ${headerMode==='double' ? 'text-[10px] text-slate-400' : 'text-[11px] font-semibold text-slate-500'}`}>{col.label}</span>
                   </div>
                 ))}
                 {/* Today line on ruler */}
@@ -554,8 +679,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
               </div>
             </div>
 
-            {/* Minor ticks */}
-            {minor && (
+            {/* Minor ticks (only in single-header mode; double-header uses major as the minor row) */}
+            {minor && headerMode === 'single' && (
               <div className="flex border-t border-slate-100">
                 <div style={{ width:labelWidth, height:SUB_RULER_H, flexShrink:0 }} className="border-r border-slate-200 bg-slate-50" />
                 <div className="flex">
@@ -615,6 +740,32 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                 width: Math.min(totalWidthPx,periodX2)-Math.max(0,periodX1),
                 backgroundColor:'rgba(99,102,241,0.05)', pointerEvents:'none', zIndex:0 }} />
             )}
+
+            {/* Freeze periods */}
+            {freezePeriods.map(fp => {
+              const fx1 = labelWidth + dateToPx(parseDate(fp.startDate), viewStart, timeline.timescale)
+              const fx2 = labelWidth + dateToPx(parseDate(fp.endDate),   viewStart, timeline.timescale)
+              if (fx2 <= labelWidth || fx1 >= labelWidth + totalWidthPx) return null
+              const left  = Math.max(labelWidth, fx1)
+              const right = Math.min(labelWidth + totalWidthPx, fx2)
+              const width = right - left
+              return (
+                <div key={fp.id} style={{ position:'absolute', left, top:0, bottom:0, width, zIndex:3, pointerEvents:'none' }}>
+                  {/* Colored semi-transparent band */}
+                  <div style={{ position:'absolute', inset:0, backgroundColor: fp.color, opacity:0.12 }} />
+                  {/* Left border */}
+                  <div style={{ position:'absolute', left:0, top:0, bottom:0, width:2, backgroundColor:fp.color, opacity:0.5 }} />
+                  {/* Right border */}
+                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:2, backgroundColor:fp.color, opacity:0.5 }} />
+                  {/* Label + click to edit */}
+                  <button
+                    style={{ position:'absolute', left:4, top:4, pointerEvents:'all', cursor:'pointer', background:'none', border:'none', padding:0 }}
+                    onClick={() => setFreezeDrawer(fp)}>
+                    <span style={{ fontSize:10, fontWeight:700, color:fp.color, whiteSpace:'nowrap', textShadow:'0 1px 2px rgba(255,255,255,0.9)' }}>{fp.label}</span>
+                  </button>
+                </div>
+              )
+            })}
 
             {/* Milestones */}
             {timeline.milestones.map(m => {
@@ -919,6 +1070,76 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
         onDelete={deleteSubItemFromDrawer}
         onClose={() => setSubDrawer(null)}
       />
+
+      {/* ── Freeze Period Drawer ─────────────────────────────────────────── */}
+      {freezeDrawer && (
+        <>
+          <div className="fixed inset-0 z-40 bg-black/20" onClick={() => setFreezeDrawer(null)} />
+          <div className="absolute right-4 top-16 z-50 bg-white rounded-2xl shadow-2xl border border-slate-100 w-72 overflow-hidden">
+            <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
+              <p className="text-sm font-bold text-slate-700">Freeze Period</p>
+              <button onClick={() => setFreezeDrawer(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>
+              </button>
+            </div>
+            <div className="px-4 py-4 flex flex-col gap-3">
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Label</label>
+                <input type="text" value={freezeDrawer.label}
+                  onChange={e => setFreezeDrawer(p => p ? { ...p, label: e.target.value } : p)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="e.g. Code Freeze" />
+              </div>
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Start</label>
+                  <input type="date" value={freezeDrawer.startDate}
+                    onChange={e => setFreezeDrawer(p => p ? { ...p, startDate: e.target.value } : p)}
+                    className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                </div>
+                <div className="flex-1">
+                  <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">End</label>
+                  <input type="date" value={freezeDrawer.endDate}
+                    onChange={e => setFreezeDrawer(p => p ? { ...p, endDate: e.target.value } : p)}
+                    className="w-full px-2 py-2 text-sm border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-400" />
+                </div>
+              </div>
+              <div>
+                <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-1">Color</label>
+                <div className="flex items-center gap-2">
+                  {['#f59e0b','#ef4444','#8b5cf6','#3b82f6','#10b981','#ec4899'].map(c => (
+                    <button key={c} type="button"
+                      onClick={() => setFreezeDrawer(p => p ? { ...p, color: c } : p)}
+                      style={{ backgroundColor: c }}
+                      className={`w-6 h-6 rounded-full border-2 transition-all ${freezeDrawer.color===c ? 'border-slate-800 scale-110' : 'border-transparent'}`} />
+                  ))}
+                  <input type="color" value={freezeDrawer.color}
+                    onChange={e => setFreezeDrawer(p => p ? { ...p, color: e.target.value } : p)}
+                    className="w-6 h-6 rounded cursor-pointer border border-slate-200" />
+                </div>
+              </div>
+              {/* Preview swatch */}
+              <div style={{ backgroundColor: freezeDrawer.color, opacity: 0.15, borderLeft:`3px solid ${freezeDrawer.color}` }}
+                className="rounded-lg px-3 py-2">
+                <span style={{ color: freezeDrawer.color }} className="text-xs font-bold">{freezeDrawer.label || 'Freeze Period'}</span>
+              </div>
+            </div>
+            <div className="px-4 pb-4 flex gap-2">
+              <button onClick={() => saveFreezeperiod(freezeDrawer)}
+                className="flex-1 py-2 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-semibold transition-colors">
+                Save
+              </button>
+              {freezePeriods.some(f => f.id === freezeDrawer.id) && (
+                <button onClick={() => { if (confirm('Delete this freeze period?')) deleteFreezeperiod(freezeDrawer.id) }}
+                  className="px-3 py-2 rounded-xl border border-red-200 text-red-500 hover:bg-red-50 text-sm transition-colors">
+                  <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 4h10M5 4V2h4v2M3 4l1 8h6l1-8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

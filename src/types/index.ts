@@ -153,6 +153,14 @@ export interface TimelineItem {
   predecessorIds?: string[]  // other TimelineItem ids
 }
 
+export interface FreezePeriod {
+  id: string
+  label: string
+  startDate: string
+  endDate: string
+  color: string
+}
+
 export interface Timeline {
   id: string
   name: string
@@ -161,11 +169,13 @@ export interface Timeline {
   subTimescale: SubTimescale
   yearMode?: YearMode
   labelWidth?: number   // resizable, default 140
+  headerMode?: 'single' | 'double'   // double shows major period above minor ticks
   startDate: string
   endDate: string
   swimLanes: SwimLane[]
   items: TimelineItem[]
   milestones: TimelineMilestone[]
+  freezePeriods?: FreezePeriod[]
 }
 
 // ─── App State ────────────────────────────────────────────────────────────────
