@@ -25,6 +25,7 @@ interface Props {
   swimLanes: SwimLane[]
   timescale?: Timescale
   allTasks?: TaskWithBucket[]
+  allItems?: TimelineItem[]   // for predecessor selection
   onSaveItem: (item: TimelineItem) => void
   onDeleteItem: (id: string) => void
   onSaveMilestone: (m: TimelineMilestone) => void
@@ -33,7 +34,7 @@ interface Props {
 }
 
 export default function ItemDrawer({
-  open, item, milestone, laneId, swimLanes, allTasks = [],
+  open, item, milestone, laneId, swimLanes, allTasks = [], allItems = [],
   onSaveItem, onDeleteItem, onSaveMilestone, onDeleteMilestone, onClose,
 }: Props) {
   const taskBuckets = useAppStore(s => s.taskBuckets)
@@ -49,6 +50,7 @@ export default function ItemDrawer({
   const [itemType,  setItemType]  = useState<'bar' | 'milestone'>('bar')
   const [taskId,    setTaskId]    = useState<string>('')
   const [subItems,  setSubItems]  = useState<TimelineSubItem[]>([])
+  const [predIds,   setPredIds]   = useState<string[]>([])
 
   // ── Milestone form state ───────────────────────────────────────────────────
   const [msLabel, setMsLabel] = useState('')
@@ -74,6 +76,7 @@ export default function ItemDrawer({
       setItemType(item.type)
       setTaskId(item.taskId ?? '')
       setSubItems(item.subItems ? [...item.subItems] : [])
+      setPredIds(item.predecessorIds ?? [])
     } else {
       // New item defaults
       const today = new Date()
@@ -88,6 +91,7 @@ export default function ItemDrawer({
       setItemType('bar')
       setTaskId('')
       setSubItems([])
+      setPredIds([])
     }
   }, [open, item, milestone])
 
@@ -112,6 +116,7 @@ export default function ItemDrawer({
       notes: notes.trim() || undefined,
       taskId: taskId || undefined,
       subItems: subItems.length > 0 ? subItems : undefined,
+      predecessorIds: predIds.length > 0 ? predIds : undefined,
     }
     onSaveItem(savedItem)
 
@@ -285,6 +290,32 @@ export default function ItemDrawer({
                   rows={3} placeholder="Optional notes…"
                   className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
               </div>
+
+              {/* ── Predecessors ──────────────────────────────────────── */}
+              {allItems.filter(i => i.id !== item?.id && i.type === 'bar').length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Predecessors</label>
+                  <p className="text-[11px] text-slate-400">Tasks that must finish before this one starts</p>
+                  <div className="flex flex-col max-h-36 overflow-y-auto border border-slate-100 rounded-xl">
+                    {allItems.filter(i => i.id !== item?.id && i.type === 'bar').map(i => (
+                      <label key={i.id} className="flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 cursor-pointer min-h-[40px]">
+                        <span className={`w-4 h-4 rounded border-2 flex-shrink-0 flex items-center justify-center transition-colors ${predIds.includes(i.id) ? 'bg-blue-500 border-blue-500' : 'border-slate-300'}`}>
+                          {predIds.includes(i.id) && <svg width="8" height="8" viewBox="0 0 8 8" fill="none"><path d="M1 4l2 2 4-3.5" stroke="white" strokeWidth="1.3" strokeLinecap="round"/></svg>}
+                        </span>
+                        <input type="checkbox" className="sr-only" checked={predIds.includes(i.id)}
+                          onChange={() => setPredIds(prev => prev.includes(i.id) ? prev.filter(x=>x!==i.id) : [...prev,i.id])} />
+                        <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                          <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: i.color }} />
+                          <span className="text-xs text-slate-700 truncate">{i.label || '(untitled)'}</span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 flex-shrink-0">
+                          {swimLanes.find(l=>l.id===i.swimLaneId)?.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {/* ── Sub-items ─────────────────────────────────────────── */}
               <div className="flex flex-col gap-2">

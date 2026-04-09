@@ -4,7 +4,8 @@ import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import TaskCard from '../components/tasks/TaskCard'
 import TaskDrawer from '../components/tasks/TaskDrawer'
-import type { Task, TaskBucket } from '../types'
+import SubTaskDrawer from '../components/tasks/SubTaskDrawer'
+import type { Task, TaskBucket, SubTask } from '../types'
 
 const BUCKET_COLORS = [
   '#a78bfa','#94a3b8','#f59e0b','#10b981',
@@ -31,6 +32,7 @@ function isThisWeek(due: string) {
 }
 
 interface DrawerState { bucketId: string; task: Task | null }
+interface SubDrawerState { bucketId: string; task: Task; sub: SubTask | null }
 
 export default function TasksPage() {
   const taskBuckets = useAppStore(s => s.taskBuckets)
@@ -40,6 +42,7 @@ export default function TasksPage() {
   const [priorities, setPriorities] = useState<Set<Priority>>(new Set())
   const [dueFilters, setDueFilters] = useState<Set<DueFilter>>(new Set())
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
+  const [subDrawer, setSubDrawer] = useState<SubDrawerState | null>(null)
   const [activeBucket, setActiveBucket] = useState(taskBuckets[0]?.id ?? '')
 
   // Bucket management state
@@ -138,6 +141,33 @@ export default function TasksPage() {
   }
 
 
+  const saveSubTask = (sub: SubTask) => {
+    if (!subDrawer) return
+    const { bucketId, task } = subDrawer
+    const existing = (task.subTasks ?? []).some(s => s.id === sub.id)
+    const newSubTasks = existing
+      ? (task.subTasks ?? []).map(s => s.id === sub.id ? sub : s)
+      : [...(task.subTasks ?? []), sub]
+    const updatedTask = { ...task, subTasks: newSubTasks }
+    setTaskBuckets(taskBuckets.map(b =>
+      b.id === bucketId ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? updatedTask : t) } : b
+    ))
+    setSubDrawer(null)
+    showToast(existing ? 'Sub-task updated' : 'Sub-task added', 'success')
+  }
+
+  const deleteSubTask = (subId: string) => {
+    if (!subDrawer) return
+    const { bucketId, task } = subDrawer
+    const updatedTask = { ...task, subTasks: (task.subTasks ?? []).filter(s => s.id !== subId) }
+    setTaskBuckets(taskBuckets.map(b =>
+      b.id === bucketId ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? updatedTask : t) } : b
+    ))
+    setSubDrawer(null)
+    showToast('Sub-task deleted')
+  }
+
+  const allTasks = taskBuckets.flatMap(b => b.tasks)
   const hasFilters = search || priorities.size > 0 || dueFilters.size > 0
 
   return (
@@ -311,11 +341,20 @@ export default function TasksPage() {
                     <div className="text-center py-8 text-slate-300 text-sm">No tasks</div>
                   )}
                   {tasks.map(t => (
-                    <TaskCard key={t.id} task={t} bucketId={b.id}
-                      buckets={taskBuckets}
-                      onEdit={() => setDrawer({ bucketId: b.id, task: t })}
-                      onDelete={() => deleteTask(t.id, b.id)}
-                      onMove={toBucketId => moveTask(t.id, b.id, toBucketId)} />
+                    <div key={t.id}>
+                      <TaskCard task={t} bucketId={b.id}
+                        buckets={taskBuckets}
+                        onEdit={() => setDrawer({ bucketId: b.id, task: t })}
+                        onDelete={() => deleteTask(t.id, b.id)}
+                        onMove={toBucketId => moveTask(t.id, b.id, toBucketId)}
+                        onEditSubTask={sub => setSubDrawer({ bucketId: b.id, task: t, sub })} />
+                      <button
+                        onClick={() => setSubDrawer({ bucketId: b.id, task: t, sub: null })}
+                        className="w-full text-left text-[11px] text-slate-400 hover:text-blue-500 px-3 py-1.5 hover:bg-blue-50 transition-colors flex items-center gap-1.5 rounded-b-xl">
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                        Add sub-task
+                      </button>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -342,11 +381,20 @@ export default function TasksPage() {
                 </button>
               </div>
             ) : tasks.map(t => (
-              <TaskCard key={t.id} task={t} bucketId={bucket.id}
-                buckets={taskBuckets}
-                onEdit={() => setDrawer({ bucketId: bucket.id, task: t })}
-                onDelete={() => deleteTask(t.id, bucket.id)}
-                onMove={toBucketId => moveTask(t.id, bucket.id, toBucketId)} />
+              <div key={t.id}>
+                <TaskCard task={t} bucketId={bucket.id}
+                  buckets={taskBuckets}
+                  onEdit={() => setDrawer({ bucketId: bucket.id, task: t })}
+                  onDelete={() => deleteTask(t.id, bucket.id)}
+                  onMove={toBucketId => moveTask(t.id, bucket.id, toBucketId)}
+                  onEditSubTask={sub => setSubDrawer({ bucketId: bucket.id, task: t, sub })} />
+                <button
+                  onClick={() => setSubDrawer({ bucketId: bucket.id, task: t, sub: null })}
+                  className="w-full text-left text-[11px] text-slate-400 hover:text-blue-500 px-3 py-1.5 hover:bg-blue-50 transition-colors flex items-center gap-1.5 rounded-b-xl mb-1">
+                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                  Add sub-task
+                </button>
+              </div>
             ))
           })()}
           <div className="h-4" />
@@ -358,6 +406,15 @@ export default function TasksPage() {
         bucketId={drawer?.bucketId ?? taskBuckets[0]?.id ?? ''}
         task={drawer?.task ?? null}
         onClose={() => setDrawer(null)} />
+
+      <SubTaskDrawer
+        open={!!subDrawer}
+        subTask={subDrawer?.sub ?? null}
+        parentTask={subDrawer?.task ?? null}
+        allTasks={allTasks}
+        onSave={saveSubTask}
+        onDelete={deleteSubTask}
+        onClose={() => setSubDrawer(null)} />
     </div>
   )
 }

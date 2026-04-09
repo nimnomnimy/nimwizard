@@ -60,14 +60,28 @@ export interface Meeting {
   createdAt: number
 }
 
+export interface SubTask {
+  id: string
+  text: string
+  priority?: 'low' | 'medium' | 'high'
+  due?: string
+  notes?: string
+  progress?: number       // 0–100
+  done?: boolean
+  predecessorIds?: string[]  // ids of SubTask or Task that must precede this
+}
+
 export interface Task {
   id: string
   text: string
   priority?: 'low' | 'medium' | 'high'
   due?: string
   notes?: string
-  progress?: number   // 0–100
+  progress?: number       // 0–100
   createdAt: number
+  subTasks?: SubTask[]
+  collapsed?: boolean
+  predecessorIds?: string[]  // ids of other Tasks
 }
 
 export interface TaskBucket {
@@ -113,8 +127,10 @@ export interface TimelineSubItem {
   startDate: string
   endDate: string
   progress: number
-  taskId?: string   // linked Task id
+  taskId?: string        // linked Task id
+  subTaskId?: string     // linked SubTask id
   done?: boolean
+  predecessorIds?: string[]  // other TimelineSubItem ids
 }
 
 export interface TimelineItem {
@@ -130,6 +146,7 @@ export interface TimelineItem {
   taskId?: string    // linked Task id
   subItems?: TimelineSubItem[]
   collapsed?: boolean
+  predecessorIds?: string[]  // other TimelineItem ids
 }
 
 export interface Timeline {

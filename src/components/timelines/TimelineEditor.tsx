@@ -6,6 +6,7 @@ import {
   PX_PER_DAY, addDays,
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
+import SubTaskDrawer from '../tasks/SubTaskDrawer'
 import { useAppStore } from '../../store/useAppStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -81,13 +82,19 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
+  const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
+  const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
 
   // Drawer
   const [drawerOpen,       setDrawerOpen]       = useState(false)
   const [editingItem,      setEditingItem]       = useState<TimelineItem | null>(null)
   const [editingMilestone, setEditingMilestone]  = useState<TimelineMilestone | null>(null)
   const [addingForLane,    setAddingForLane]     = useState<string | null>(null)
+
+  // Sub-task drawer (for clicking a sub-item bar)
+  interface SubDrawerState { item: TimelineItem; subItem: TimelineSubItem | null }
+  const [subDrawer, setSubDrawer] = useState<SubDrawerState | null>(null)
 
   // Ghost + drag lock
   const [ghost,    setGhost]    = useState<Ghost | null>(null)
@@ -290,6 +297,63 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     update({ items: exists ? timeline.items.map(i=>i.id===item.id?item:i) : [...timeline.items, item] })
     setDrawerOpen(false); setEditingItem(null)
   }
+
+  // ── Add task button in lane header ────────────────────────────────────────
+  function addTaskForLane(laneId: string) {
+    const lane = timeline.swimLanes.find(l => l.id === laneId)
+    const today = new Date()
+    const newItem: TimelineItem = {
+      id: uid(), swimLaneId: laneId, label: '', type: 'bar',
+      startDate: formatDate(today), endDate: formatDate(addDays(today, 7)),
+      color: lane?.color ?? '#6366f1', progress: 0,
+    }
+    setEditingItem(newItem); setEditingMilestone(null); setAddingForLane(laneId); setDrawerOpen(true)
+  }
+
+  // ── Sub-item save from sub-drawer ─────────────────────────────────────────
+  function saveSubItemFromDrawer(sub: import('../../types').SubTask) {
+    if (!subDrawer) return
+    const { item, subItem } = subDrawer
+    const asTimelineSub: TimelineSubItem = {
+      id: subItem?.id ?? sub.id,
+      label: sub.text,
+      startDate: subItem?.startDate ?? formatDate(new Date()),
+      endDate: subItem?.endDate ?? formatDate(addDays(new Date(), 7)),
+      progress: sub.progress ?? 0,
+      done: sub.done,
+      taskId: subItem?.taskId,
+      subTaskId: sub.id,
+    }
+    const existing = (item.subItems ?? []).some(s => s.id === asTimelineSub.id)
+    const newSubs = existing
+      ? (item.subItems ?? []).map(s => s.id === asTimelineSub.id ? asTimelineSub : s)
+      : [...(item.subItems ?? []), asTimelineSub]
+    update({ items: timeline.items.map(i => i.id === item.id ? { ...i, subItems: newSubs } : i) })
+
+    // Also sync to linked task's sub-tasks if applicable
+    if (sub.id && item.taskId) {
+      const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id }))).find(x => x.task.id === item.taskId)
+      if (bucketEntry) {
+        const existingSub = (bucketEntry.task.subTasks ?? []).some(s => s.id === sub.id)
+        const newSubTasks = existingSub
+          ? (bucketEntry.task.subTasks ?? []).map(s => s.id === sub.id ? sub : s)
+          : [...(bucketEntry.task.subTasks ?? []), sub]
+        setTaskBuckets(taskBuckets.map(b =>
+          b.id === bucketEntry.bucketId
+            ? { ...b, tasks: b.tasks.map(t => t.id === item.taskId ? { ...t, subTasks: newSubTasks } : t) }
+            : b
+        ))
+      }
+    }
+    setSubDrawer(null)
+  }
+
+  function deleteSubItemFromDrawer(subId: string) {
+    if (!subDrawer) return
+    const { item } = subDrawer
+    update({ items: timeline.items.map(i => i.id === item.id ? { ...i, subItems: (i.subItems ?? []).filter(s => s.id !== subId) } : i) })
+    setSubDrawer(null)
+  }
   function deleteItem(id: string) { update({ items: timeline.items.filter(i=>i.id!==id) }); setDrawerOpen(false); setEditingItem(null) }
   function saveMilestone(m: TimelineMilestone) {
     const exists = timeline.milestones.some(x=>x.id===m.id)
@@ -435,6 +499,36 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           {/* ── Swim lanes ──────────────────────────────────────────────── */}
           <div style={{ position:'relative', height: totalCanvasH }}>
 
+            {/* ── Predecessor lines SVG ────────────────────────────────── */}
+            <svg style={{ position:'absolute', left:0, top:0, width:'100%', height:totalCanvasH, pointerEvents:'none', zIndex:8, overflow:'visible' }}>
+              {timeline.items.filter(item => item.predecessorIds?.length).flatMap(item =>
+                (item.predecessorIds ?? []).map(predId => {
+                  const pred = timeline.items.find(i => i.id === predId)
+                  if (!pred) return null
+                  const predLaneIdx = timeline.swimLanes.findIndex(l => l.id === pred.swimLaneId)
+                  const itemLaneIdx = timeline.swimLanes.findIndex(l => l.id === item.swimLaneId)
+                  if (predLaneIdx < 0 || itemLaneIdx < 0) return null
+                  const predY = laneYOffset(predLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
+                  const itemY = laneYOffset(itemLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
+                  const x1 = labelWidth + dateToPx(parseDate(pred.endDate), viewStart, timeline.timescale)
+                  const x2 = labelWidth + dateToPx(parseDate(item.startDate), viewStart, timeline.timescale)
+                  const mx = x1 + Math.max(8, (x2 - x1) * 0.5)
+                  return (
+                    <g key={`${predId}->${item.id}`}>
+                      <path d={`M ${x1} ${predY} C ${mx} ${predY} ${mx} ${itemY} ${x2} ${itemY}`}
+                        stroke="#f59e0b" strokeWidth="1.5" fill="none" strokeDasharray="5,3"
+                        markerEnd="url(#arrowhead)" />
+                    </g>
+                  )
+                }).filter(Boolean)
+              )}
+              <defs>
+                <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b" />
+                </marker>
+              </defs>
+            </svg>
+
             {/* Today line */}
             {todayPx>=0 && todayPx<=totalWidthPx && (
               <div style={{ position:'absolute', left:labelWidth+todayPx, top:0, bottom:0, width:2,
@@ -479,7 +573,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   <div style={{ width:labelWidth, flexShrink:0, height:laneHeight }}
                     className="sticky left-0 z-10 bg-white border-r border-b border-slate-200 flex flex-col relative group">
                     {/* Main row */}
-                    <div className="flex items-center px-2 gap-1.5 flex-1" style={{ minHeight: LANE_HEIGHT }}>
+                    <div className="flex items-center px-2 gap-1.5" style={{ minHeight: LANE_HEIGHT }}>
                       {/* Collapse toggle */}
                       <button onClick={() => toggleLane(lane.id)}
                         className="text-slate-300 hover:text-slate-500 flex-shrink-0 transition-colors p-0.5">
@@ -497,6 +591,12 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       {/* Name */}
                       <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
                         className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 truncate" />
+                      {/* Add task */}
+                      <button onClick={()=>addTaskForLane(lane.id)}
+                        title="Add task"
+                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-blue-500 transition-all flex-shrink-0">
+                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                      </button>
                       {/* Delete */}
                       {timeline.swimLanes.length > 1 && (
                         <button onClick={()=>deleteLane(lane.id)}
@@ -585,7 +685,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                     borderRadius:4, backgroundColor: item.color, opacity:0.6,
                                     cursor:'grab', display:'flex', alignItems:'center', overflow:'hidden', zIndex:2,
                                     boxShadow:'0 1px 2px rgba(0,0,0,0.1)', touchAction:'none' }}
-                                    onPointerDown={e=>startBarDrag(e,sub,'move',item.id)}>
+                                    onPointerDown={e=>startBarDrag(e,sub,'move',item.id)}
+                                    onClick={e=>{ e.stopPropagation(); setSubDrawer({ item, subItem: sub }) }}>
                                     <div style={{ width:6, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                       onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,sub,'resize-left',item.id) }} />
                                     {sub.progress>0 && (
@@ -670,11 +771,25 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
         laneId={addingForLane}
         swimLanes={timeline.swimLanes}
         allTasks={allTasks}
+        allItems={timeline.items}
         onSaveItem={saveItem}
         onDeleteItem={deleteItem}
         onSaveMilestone={saveMilestone}
         onDeleteMilestone={deleteMilestone}
         onClose={() => { setDrawerOpen(false); setEditingItem(null); setEditingMilestone(null); setAddingForLane(null) }}
+      />
+
+      {/* ── Sub-task drawer (click on sub-item bar) ───────────────────────── */}
+      <SubTaskDrawer
+        open={!!subDrawer}
+        subTask={subDrawer?.subItem
+          ? { id: subDrawer.subItem.id, text: subDrawer.subItem.label, progress: subDrawer.subItem.progress, done: subDrawer.subItem.done }
+          : null}
+        parentTask={subDrawer?.item.taskId ? (allTasksFlat.find(t => t.id === subDrawer?.item.taskId) ?? null) : null}
+        allTasks={allTasksFlat}
+        onSave={saveSubItemFromDrawer}
+        onDelete={deleteSubItemFromDrawer}
+        onClose={() => setSubDrawer(null)}
       />
     </div>
   )
