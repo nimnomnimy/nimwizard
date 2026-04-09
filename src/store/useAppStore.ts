@@ -143,8 +143,13 @@ function removeMeeting(userUid: string, id: string) {
     console.error('[removeMeeting]', e))
 }
 
+// Firestore rejects undefined values — strip them before writing
+function stripUndefined<T extends object>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj)) as T
+}
+
 function writeTask(userUid: string, bucketId: string, task: Task) {
-  setDoc(docRef(userUid, 'tasks', task.id), { ...task, bucketId }).catch(e =>
+  setDoc(docRef(userUid, 'tasks', task.id), stripUndefined({ ...task, bucketId })).catch(e =>
     console.error('[writeTask]', e))
 }
 
@@ -167,8 +172,8 @@ function writeSettings(userUid: string, settings: SettingsDoc) {
 // ─── Batch write helpers for cross-feature atomicity ─────────────────────────
 async function batchWriteTaskAndTimeline(userUid: string, bucketId: string, task: Task, timeline: Timeline) {
   const batch = writeBatch(db)
-  batch.set(docRef(userUid, 'tasks', task.id), { ...task, bucketId })
-  batch.set(docRef(userUid, 'timelines', timeline.id), timeline)
+  batch.set(docRef(userUid, 'tasks', task.id), stripUndefined({ ...task, bucketId }))
+  batch.set(docRef(userUid, 'timelines', timeline.id), stripUndefined(timeline))
   await batch.commit()
 }
 
@@ -533,7 +538,7 @@ export const useAppStore = create<StoreState>()(
         const batch = writeBatch(db)
         batch.set(docRef(u, 'meetings', result.id), result)
         for (const { bucketId, task } of tasksToWrite) {
-          batch.set(docRef(u, 'tasks', task.id), { ...task, bucketId })
+          batch.set(docRef(u, 'tasks', task.id), stripUndefined({ ...task, bucketId }))
         }
         batch.commit().catch(e => console.error('[saveMeetingWithTasks batch]', e))
       }
@@ -552,7 +557,7 @@ export const useAppStore = create<StoreState>()(
       const batch = writeBatch(db)
       for (const b of buckets) {
         for (const task of b.tasks) {
-          batch.set(docRef(u, 'tasks', task.id), { ...task, bucketId: b.id })
+          batch.set(docRef(u, 'tasks', task.id), stripUndefined({ ...task, bucketId: b.id }))
         }
       }
       batch.commit().catch(e => console.error('[setTaskBuckets batch]', e))
@@ -928,7 +933,7 @@ export const useAppStore = create<StoreState>()(
       for (const c of demoContacts) batch.set(docRef(u, 'contacts', c.id), c)
       for (const m of demoMeetings) batch.set(docRef(u, 'meetings', m.id), m)
       for (const [bucketId, tasks] of Object.entries(demoTasks)) {
-        for (const task of tasks) batch.set(docRef(u, 'tasks', task.id), { ...task, bucketId })
+        for (const task of tasks) batch.set(docRef(u, 'tasks', task.id), stripUndefined({ ...task, bucketId }))
       }
       batch.set(docRef(u, 'timelines', demoTimeline.id), demoTimeline)
       batch.commit().catch(e => console.error('[loadDemoData batch]', e))

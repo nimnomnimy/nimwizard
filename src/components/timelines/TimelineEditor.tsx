@@ -679,8 +679,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       return (
                         <div key={item.id} className="flex flex-col flex-shrink-0 border-b border-slate-50">
                           {/* Task label row */}
-                          <div className="flex items-center gap-1.5 px-2" style={{ height: BAR_ROW_H }}>
-                            {subItems.length > 0 && (
+                          <div className="group flex items-center gap-1.5 px-2" style={{ height: BAR_ROW_H }}>
+                            {subItems.length > 0 ? (
                               <button onClick={e=>{ e.stopPropagation(); update({ items: timeline.items.map(i=>i.id===item.id?{...i,collapsed:!i.collapsed}:i) }) }}
                                 className="text-slate-300 hover:text-slate-500 flex-shrink-0 transition-colors p-0.5">
                                 <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor"
@@ -688,10 +688,18 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                   <path d="M1.5 3l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none"/>
                                 </svg>
                               </button>
+                            ) : (
+                              <div className="w-[13px] flex-shrink-0" />
                             )}
                             <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: item.color }} />
                             <span className="flex-1 text-xs font-medium text-slate-700 truncate leading-tight"
                               title={item.label}>{item.label || <span className="text-slate-300 italic">Untitled</span>}</span>
+                            <button
+                              onClick={e=>{ e.stopPropagation(); setSubDrawer({ item, subItem: null }) }}
+                              title="Add subtask"
+                              className="opacity-0 group-hover:opacity-100 flex-shrink-0 w-5 h-5 flex items-center justify-center rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-all">
+                              <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                            </button>
                           </div>
                           {/* Sub-item label rows */}
                           {!itemCollapsed && subItems.map(sub => (
