@@ -11,6 +11,7 @@ import { useAppStore } from '../../store/useAppStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const LANE_HEIGHT    = 52
+const ADD_TASK_ROW_H = 26   // "Add task" button row below lane header
 const SUB_ITEM_H     = 28
 const SUB_ITEM_PAD   = 4
 const DEFAULT_LABEL_W = 180
@@ -401,10 +402,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // ── Lane height (includes sub-items if expanded) ──────────────────────────
   function laneH(laneId: string) {
-    if (timeline.swimLanes.find(l=>l.id===laneId)?.collapsed) return LANE_HEIGHT
+    if (timeline.swimLanes.find(l=>l.id===laneId)?.collapsed) return LANE_HEIGHT + ADD_TASK_ROW_H
     const items = timeline.items.filter(i=>i.swimLaneId===laneId && i.type==='bar')
     const maxSubs = Math.max(0, ...items.map(i => i.collapsed ? 0 : (i.subItems?.length ?? 0)))
-    return LANE_HEIGHT + maxSubs * (SUB_ITEM_H + SUB_ITEM_PAD)
+    return LANE_HEIGHT + ADD_TASK_ROW_H + maxSubs * (SUB_ITEM_H + SUB_ITEM_PAD)
   }
 
   const totalCanvasH = timeline.swimLanes.reduce((s, l) => s + laneH(l.id), 0)
@@ -621,20 +622,21 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       {/* Name */}
                       <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
                         className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 truncate" />
-                      {/* Add task */}
-                      <button onClick={()=>addTaskForLane(lane.id)}
-                        title="Add task"
-                        className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-blue-500 transition-all flex-shrink-0">
-                        <svg width="11" height="11" viewBox="0 0 11 11" fill="none"><path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                      </button>
-                      {/* Delete */}
+                      {/* Delete lane */}
                       {timeline.swimLanes.length > 1 && (
                         <button onClick={()=>deleteLane(lane.id)}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 text-slate-300 hover:text-red-400 transition-all flex-shrink-0">
-                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                          title="Delete lane"
+                          className="lg:opacity-0 lg:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 active:text-red-500 transition-all flex-shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center">
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M4.5 3V2h3v1M2.5 3l.8 7h5.4l.8-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </button>
                       )}
                     </div>
+                    {/* Add task row */}
+                    <button onClick={()=>addTaskForLane(lane.id)}
+                      className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors w-full border-t border-slate-100 min-h-[26px]">
+                      <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                      Add task
+                    </button>
                     {/* Resize handle */}
                     <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
                       className="hover:bg-blue-300/40 transition-colors"
