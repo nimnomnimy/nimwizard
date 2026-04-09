@@ -1,15 +1,16 @@
 import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
-import { LEVEL_LABELS, LEVEL_ORDER, downloadCSV } from '../lib/utils'
+import { LEVEL_LABELS, LEVEL_ORDER, downloadCSV, downloadJSON, pickFile, readFileText, parseCSV, uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import ContactCard from '../components/contacts/ContactCard'
 import ContactDrawer from '../components/contacts/ContactDrawer'
-import type { Level } from '../types'
+import type { Contact, Level } from '../types'
 
 type SortKey = 'alpha' | 'level'
 
 export default function ContactsPage() {
   const contacts = useAppStore(s => s.contacts)
+  const addContact = useAppStore(s => s.addContact)
   const deleteContact = useAppStore(s => s.deleteContact)
 
   const [search, setSearch] = useState('')
@@ -71,7 +72,7 @@ export default function ContactsPage() {
     showToast(`${name} deleted`)
   }
 
-  const handleExport = () => {
+  const handleExportCSV = () => {
     const rows = [['Name', 'Title', 'Organisation', 'Level', 'Email', 'Phone']]
     contacts.forEach(c => rows.push([
       c.name, c.title ?? '', c.org ?? '',
@@ -79,7 +80,56 @@ export default function ContactsPage() {
       c.email ?? '', c.phone ?? '',
     ]))
     downloadCSV(rows, 'contacts.csv')
-    showToast('Contacts exported', 'success')
+    showToast('Contacts exported as CSV', 'success')
+  }
+
+  const handleExportJSON = () => {
+    downloadJSON(contacts, 'contacts.json')
+    showToast('Contacts exported as JSON', 'success')
+  }
+
+  const handleImport = async () => {
+    const file = await pickFile('.csv,.json')
+    if (!file) return
+    const text = await readFileText(file)
+    const existing = new Set(contacts.map(c => c.name.toLowerCase().trim()))
+    let added = 0
+
+    if (file.name.endsWith('.json')) {
+      let parsed: unknown
+      try { parsed = JSON.parse(text) } catch { showToast('Invalid JSON file'); return }
+      const arr = Array.isArray(parsed) ? parsed : [parsed]
+      for (const item of arr) {
+        if (typeof item !== 'object' || !item || !('name' in item)) continue
+        const c = item as Partial<Contact>
+        if (!c.name?.trim()) continue
+        if (existing.has(c.name.toLowerCase().trim())) continue
+        addContact({ id: uid(), name: c.name.trim(), org: c.org ?? '', title: c.title ?? '', level: c.level ?? 'individual', email: c.email ?? '', phone: c.phone ?? '', parentId: c.parentId ?? '', createdAt: Date.now() })
+        existing.add(c.name.toLowerCase().trim())
+        added++
+      }
+    } else {
+      // CSV: header row Name, Title, Organisation, Level, Email, Phone
+      const rows = parseCSV(text)
+      if (rows.length < 2) { showToast('CSV appears empty'); return }
+      const header = rows[0].map(h => h.toLowerCase().trim())
+      const col = (names: string[]) => names.map(n => header.indexOf(n)).find(i => i >= 0) ?? -1
+      const iName  = col(['name'])
+      const iTitle = col(['title', 'job title'])
+      const iOrg   = col(['organisation', 'organization', 'company', 'org'])
+      const iEmail = col(['email'])
+      const iPhone = col(['phone', 'mobile'])
+      if (iName < 0) { showToast('CSV must have a Name column'); return }
+      for (const row of rows.slice(1)) {
+        const name = row[iName]?.trim()
+        if (!name) continue
+        if (existing.has(name.toLowerCase())) continue
+        addContact({ id: uid(), name, org: iOrg >= 0 ? (row[iOrg] ?? '') : '', title: iTitle >= 0 ? (row[iTitle] ?? '') : '', level: 'individual', email: iEmail >= 0 ? (row[iEmail] ?? '') : '', phone: iPhone >= 0 ? (row[iPhone] ?? '') : '', parentId: '', createdAt: Date.now() })
+        existing.add(name.toLowerCase())
+        added++
+      }
+    }
+    showToast(`${added} contact${added !== 1 ? 's' : ''} imported`, 'success')
   }
 
   const sortLabel = (key: SortKey) => {
@@ -99,10 +149,20 @@ export default function ContactsPage() {
             <span className="ml-2 text-sm font-normal text-slate-400">{contacts.length}</span>
           </h1>
           <div className="flex items-center gap-2">
-            <button onClick={handleExport}
+            <button onClick={handleImport}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 5L2.5 9.5M7 5l4.5 4.5M7 5v8M1 1h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span className="hidden sm:inline">Import</span>
+            </button>
+            <button onClick={handleExportCSV}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              <span className="hidden sm:inline">Export</span>
+              <span className="hidden sm:inline">CSV</span>
+            </button>
+            <button onClick={handleExportJSON}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              <span className="hidden sm:inline">JSON</span>
             </button>
             <button onClick={() => setDrawerContact(null)}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 min-h-[44px] transition-colors">

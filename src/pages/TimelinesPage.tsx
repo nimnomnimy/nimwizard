@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAppStore } from '../store/useAppStore'
-import { uid } from '../lib/utils'
+import { uid, downloadJSON, pickFile, readFileText } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import { defaultViewRange } from '../components/timelines/utils/dateLayout'
 import type { Timeline, Timescale } from '../types'
@@ -42,6 +42,37 @@ export default function TimelinesPage() {
     navigate(`/timelines/${t.id}`)
   }
 
+  const handleExport = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    const t = timelines.find(x => x.id === id)
+    if (!t) return
+    downloadJSON(t, `timeline-${t.name.replace(/\s+/g, '-').toLowerCase()}.json`)
+    showToast(`"${t.name}" exported`, 'success')
+  }
+
+  const handleExportAll = () => {
+    downloadJSON(timelines, 'timelines.json')
+    showToast('All timelines exported', 'success')
+  }
+
+  const handleImport = async () => {
+    const file = await pickFile('.json')
+    if (!file) return
+    try {
+      const data = JSON.parse(await readFileText(file))
+      const arr = Array.isArray(data) ? data : [data]
+      let added = 0
+      for (const t of arr) {
+        if (typeof t !== 'object' || !t?.name) continue
+        addTimeline({ ...t, id: uid(), createdAt: Date.now() })
+        added++
+      }
+      showToast(`${added} timeline${added !== 1 ? 's' : ''} imported`, 'success')
+    } catch {
+      showToast('Invalid JSON file')
+    }
+  }
+
   const handleDelete = (e: React.MouseEvent, id: string, name: string) => {
     e.stopPropagation()
     if (!confirm(`Delete "${name}"?`)) return
@@ -63,6 +94,18 @@ export default function TimelinesPage() {
             <path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
           </svg>
           New Timeline
+        </button>
+        {timelines.length > 0 && (
+          <button onClick={handleExportAll}
+            className="flex items-center gap-1.5 border border-slate-200 text-slate-600 text-sm font-medium px-3 py-2 rounded-xl min-h-[40px] hover:bg-slate-50 transition-colors">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            <span className="hidden sm:inline">Export all</span>
+          </button>
+        )}
+        <button onClick={handleImport}
+          className="flex items-center gap-1.5 border border-slate-200 text-slate-600 text-sm font-medium px-3 py-2 rounded-xl min-h-[40px] hover:bg-slate-50 transition-colors">
+          <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 5L2.5 9.5M7 5l4.5 4.5M7 5v8M1 1h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          <span className="hidden sm:inline">Import</span>
         </button>
       </div>
 
@@ -169,6 +212,12 @@ export default function TimelinesPage() {
                   </div>
 
                   <div className="flex items-center gap-2 flex-shrink-0">
+                    <button
+                      onClick={e => handleExport(e, t.id)}
+                      className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-all"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                    </button>
                     <button
                       onClick={e => handleDelete(e, t.id, t.name)}
                       className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"

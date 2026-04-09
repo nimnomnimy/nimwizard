@@ -34,6 +34,35 @@ export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7)
 }
 
+export function downloadJSON(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(a.href)
+}
+
+export function pickFile(accept: string): Promise<File | null> {
+  return new Promise(resolve => {
+    const input = document.createElement('input')
+    input.type = 'file'
+    input.accept = accept
+    input.onchange = () => resolve(input.files?.[0] ?? null)
+    input.oncancel = () => resolve(null)
+    input.click()
+  })
+}
+
+export function readFileText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = e => resolve(e.target?.result as string)
+    reader.onerror = reject
+    reader.readAsText(file)
+  })
+}
+
 export function downloadCSV(rows: string[][], filename: string) {
   const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\r\n')
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })

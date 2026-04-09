@@ -101,7 +101,7 @@ export default function AppShell() {
           <Outlet />
         </main>
 
-        {/* Mobile bottom nav — main items only */}
+        {/* Mobile bottom nav — 5 main items only */}
         <nav className="lg:hidden flex bg-slate-900 border-t border-white/5 flex-shrink-0"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
           {NAV.map(({ to, label, icon: Icon }) => (
@@ -115,15 +115,6 @@ export default function AppShell() {
               {label}
             </NavLink>
           ))}
-          {/* Hamburger slot in bottom nav */}
-          <button
-            onClick={() => setSidebarOpen(true)}
-            className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 text-white/40 min-h-[52px]">
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd"/>
-            </svg>
-            More
-          </button>
         </nav>
       </div>
     </div>

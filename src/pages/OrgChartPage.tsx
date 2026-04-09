@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
-import { avatarColor, initials, uid, LEVEL_LABELS } from '../lib/utils'
+import { avatarColor, initials, uid, LEVEL_LABELS, downloadJSON, pickFile, readFileText } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import ContactDrawer from '../components/contacts/ContactDrawer'
 import type { Contact, Position } from '../types'
@@ -325,6 +325,40 @@ export default function OrgChartPage() {
     setShowSavedMenu(false)
   }
 
+  // ─── Export / import charts ────────────────────────────────────────────────
+  const doExportChart = (id: string) => {
+    const ch = savedCharts.find(c => c.id === id)
+    if (!ch) return
+    downloadJSON(ch, `orgchart-${ch.name.replace(/\s+/g, '-').toLowerCase()}.json`)
+    showToast(`Chart "${ch.name}" exported`, 'success')
+    setShowSavedMenu(false)
+  }
+
+  const doExportAllCharts = () => {
+    downloadJSON(savedCharts, 'orgcharts.json')
+    showToast('All charts exported', 'success')
+    setShowSavedMenu(false)
+  }
+
+  const doImportChart = async () => {
+    const file = await pickFile('.json')
+    if (!file) return
+    try {
+      const data = JSON.parse(await readFileText(file))
+      const charts = Array.isArray(data) ? data : [data]
+      let added = 0
+      for (const ch of charts) {
+        if (typeof ch !== 'object' || !ch?.name) continue
+        saveChart({ ...ch, id: uid(), savedAt: new Date().toISOString() })
+        added++
+      }
+      showToast(`${added} chart${added !== 1 ? 's' : ''} imported`, 'success')
+    } catch {
+      showToast('Invalid JSON file')
+    }
+    setShowSavedMenu(false)
+  }
+
   // ─── Node drag handlers ─────────────────────────────────────────────────────
   const onNodePointerDown = (e: React.PointerEvent, c: Contact) => {
     if (e.button !== 0) return
@@ -513,9 +547,17 @@ export default function OrgChartPage() {
                       className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 border-b border-slate-100 font-medium">
                       Save current chart
                     </button>
+                    <button onClick={doImportChart}
+                      className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                      <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M7 5L2.5 9.5M7 5l4.5 4.5M7 5v8M1 1h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      Import chart…
+                    </button>
                     {savedCharts.length > 0 && (
                       <>
-                        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Saved</div>
+                        <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide border-t border-slate-100 flex items-center justify-between">
+                          <span>Saved</span>
+                          <button onClick={doExportAllCharts} className="text-blue-400 hover:text-blue-600 font-semibold normal-case text-[10px]">Export all</button>
+                        </div>
                         {savedCharts.map(ch => (
                           <div key={ch.id} className="flex items-center gap-1 px-2 py-1.5 hover:bg-slate-50">
                             <button className="flex-1 text-left text-sm text-slate-700 px-2 py-1 truncate"
@@ -534,6 +576,10 @@ export default function OrgChartPage() {
                                 showToast(`Chart "${ch.name}" loaded`, 'success')
                               }}>
                               {ch.name}
+                            </button>
+                            <button onClick={() => doExportChart(ch.id)}
+                              className="text-slate-300 hover:text-blue-400 p-1" title="Export">
+                              <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                             </button>
                             <button onClick={() => { if (confirm(`Delete "${ch.name}"?`)) deleteChart(ch.id) }}
                               className="text-slate-300 hover:text-red-400 p-1 text-lg leading-none">×</button>
