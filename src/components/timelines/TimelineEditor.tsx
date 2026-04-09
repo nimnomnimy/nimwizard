@@ -83,6 +83,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const addTask = useAppStore(s => s.addTask)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
   const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
 
@@ -293,8 +294,25 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // ── Item save/delete ──────────────────────────────────────────────────────
   function saveItem(item: TimelineItem) {
-    const exists = timeline.items.some(i => i.id===item.id)
-    update({ items: exists ? timeline.items.map(i=>i.id===item.id?item:i) : [...timeline.items, item] })
+    const exists = timeline.items.some(i => i.id === item.id)
+    let savedItem = item
+
+    // Auto-create a Task when a new bar item with a label has no linked task yet
+    if (!exists && item.type === 'bar' && item.label.trim() && !item.taskId) {
+      const newTaskId = uid()
+      const newTask: import('../../types').Task = {
+        id: newTaskId,
+        text: item.label.trim(),
+        progress: item.progress || undefined,
+        due: item.endDate || undefined,
+        createdAt: Date.now(),
+        timelineId: timeline.id,
+      }
+      addTask('unsorted', newTask)
+      savedItem = { ...item, taskId: newTaskId }
+    }
+
+    update({ items: exists ? timeline.items.map(i => i.id === savedItem.id ? savedItem : i) : [...timeline.items, savedItem] })
     setDrawerOpen(false); setEditingItem(null)
   }
 

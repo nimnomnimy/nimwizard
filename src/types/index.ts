@@ -82,6 +82,7 @@ export interface Task {
   subTasks?: SubTask[]
   collapsed?: boolean
   predecessorIds?: string[]  // ids of other Tasks
+  timelineId?: string        // set when created from a timeline
 }
 
 export interface TaskBucket {

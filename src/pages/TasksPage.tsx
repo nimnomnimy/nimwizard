@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
@@ -37,13 +37,24 @@ interface SubDrawerState { bucketId: string; task: Task; sub: SubTask | null }
 export default function TasksPage() {
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const timelines = useAppStore(s => s.timelines)
 
   const [search, setSearch] = useState('')
   const [priorities, setPriorities] = useState<Set<Priority>>(new Set())
   const [dueFilters, setDueFilters] = useState<Set<DueFilter>>(new Set())
+  const [timelineFilter, setTimelineFilter] = useState<string | null>(null) // null = all
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const [subDrawer, setSubDrawer] = useState<SubDrawerState | null>(null)
   const [activeBucket, setActiveBucket] = useState(taskBuckets[0]?.id ?? '')
+
+  // Timelines that have at least one linked task
+  const timelinesWithTasks = useMemo(() => {
+    const allTaskIds = new Set(taskBuckets.flatMap(b => b.tasks.map(t => t.id)))
+    return timelines.filter(tl =>
+      tl.items.some(i => i.taskId && allTaskIds.has(i.taskId)) ||
+      taskBuckets.flatMap(b => b.tasks).some(t => t.timelineId === tl.id)
+    )
+  }, [timelines, taskBuckets])
 
   // Bucket management state
   const [showManage, setShowManage] = useState(false)
@@ -115,6 +126,9 @@ export default function TasksPage() {
       })
       if (!matches) return false
     }
+    if (timelineFilter !== null) {
+      if (task.timelineId !== timelineFilter) return false
+    }
     return true
   }
 
@@ -168,7 +182,7 @@ export default function TasksPage() {
   }
 
   const allTasks = taskBuckets.flatMap(b => b.tasks)
-  const hasFilters = search || priorities.size > 0 || dueFilters.size > 0
+  const hasFilters = search || priorities.size > 0 || dueFilters.size > 0 || timelineFilter !== null
 
   return (
     <div className="h-full flex flex-col overflow-hidden bg-slate-50">
@@ -293,12 +307,34 @@ export default function TasksPage() {
             </button>
           ))}
           {hasFilters && (
-            <button onClick={() => { setSearch(''); setPriorities(new Set()); setDueFilters(new Set()) }}
+            <button onClick={() => { setSearch(''); setPriorities(new Set()); setDueFilters(new Set()); setTimelineFilter(null) }}
               className="px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border border-slate-200 bg-white text-slate-400 min-h-[32px] flex-shrink-0">
               Clear
             </button>
           )}
         </div>
+
+        {/* Timeline filter pills */}
+        {timelinesWithTasks.length > 0 && (
+          <div className="flex gap-1.5 overflow-x-auto pb-0.5 mt-2 scrollbar-hide">
+            <button
+              onClick={() => setTimelineFilter(null)}
+              className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors min-h-[32px] flex-shrink-0 ${
+                timelineFilter === null ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white text-slate-500 border-slate-200'
+              }`}>
+              All
+            </button>
+            {timelinesWithTasks.map(tl => (
+              <button key={tl.id}
+                onClick={() => setTimelineFilter(tl.id === timelineFilter ? null : tl.id)}
+                className={`px-2.5 py-1 rounded-full text-xs font-semibold whitespace-nowrap border transition-colors min-h-[32px] flex-shrink-0 ${
+                  timelineFilter === tl.id ? 'bg-indigo-500 text-white border-indigo-500' : 'bg-white text-slate-500 border-slate-200'
+                }`}>
+                {tl.name}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Mobile: bucket tabs */}

@@ -50,6 +50,7 @@ interface StoreState extends AppState {
 
   // Tasks
   setTaskBuckets: (buckets: TaskBucket[]) => void
+  addTask: (bucketId: string, task: import('../types').Task) => void
   updateTask: (bucketId: string, task: import('../types').Task) => void
 
   // Settings
@@ -171,6 +172,14 @@ export const useAppStore = create<StoreState>()(
     deleteMeeting: (id) => { set(s => { s.meetings = s.meetings.filter(m => m.id !== id) }); get().saveUserData() },
 
     setTaskBuckets: (buckets) => { set(s => { s.taskBuckets = buckets }); get().saveUserData() },
+
+    addTask: (bucketId, task) => {
+      set(s => {
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) bucket.tasks.push(task)
+      })
+      get().saveUserData()
+    },
 
     updateTask: (bucketId, task) => {
       set(s => {
