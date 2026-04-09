@@ -1,9 +1,16 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import TaskCard from '../components/tasks/TaskCard'
 import TaskDrawer from '../components/tasks/TaskDrawer'
 import type { Task, TaskBucket } from '../types'
+
+const BUCKET_COLORS = [
+  '#a78bfa','#94a3b8','#f59e0b','#10b981',
+  '#3b82f6','#ef4444','#ec4899','#06b6d4','#84cc16','#f97316',
+]
+const DEFAULT_BUCKET_IDS = ['unsorted','backlog','inprogress','done']
 
 type Priority = 'low' | 'medium' | 'high'
 type DueFilter = 'none' | 'today' | 'this-week' | 'overdue'
@@ -33,8 +40,53 @@ export default function TasksPage() {
   const [priorities, setPriorities] = useState<Set<Priority>>(new Set())
   const [dueFilters, setDueFilters] = useState<Set<DueFilter>>(new Set())
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
-  // Mobile: which bucket tab is active
   const [activeBucket, setActiveBucket] = useState(taskBuckets[0]?.id ?? '')
+
+  // Bucket management state
+  const [showManage, setShowManage] = useState(false)
+  const [editingBucket, setEditingBucket] = useState<string | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editColor, setEditColor] = useState(BUCKET_COLORS[0])
+  const [newBucketName, setNewBucketName] = useState('')
+  const [showAddBucket, setShowAddBucket] = useState(false)
+
+  const startEdit = (b: TaskBucket) => { setEditingBucket(b.id); setEditName(b.name); setEditColor(b.color) }
+  const saveEdit = () => {
+    if (!editName.trim() || !editingBucket) return
+    setTaskBuckets(taskBuckets.map(b => b.id === editingBucket ? { ...b, name: editName.trim(), color: editColor } : b))
+    setEditingBucket(null)
+    showToast('Column updated', 'success')
+  }
+  const deleteBucket = (id: string) => {
+    const b = taskBuckets.find(x => x.id === id)
+    if (!b) return
+    if (DEFAULT_BUCKET_IDS.includes(id)) { showToast('Cannot delete default columns'); return }
+    if (!confirm(`Delete "${b.name}"?${b.tasks.length ? ` ${b.tasks.length} task(s) will move to Unsorted.` : ''}`)) return
+    const newBuckets = taskBuckets.filter(x => x.id !== id).map(x =>
+      x.id === 'unsorted' ? { ...x, tasks: [...x.tasks, ...b.tasks] } : x
+    )
+    setTaskBuckets(newBuckets)
+    setEditingBucket(null)
+    if (activeBucket === id) setActiveBucket('unsorted')
+    showToast(`"${b.name}" deleted`)
+  }
+  const addBucket = () => {
+    if (!newBucketName.trim()) return
+    const color = BUCKET_COLORS[taskBuckets.length % BUCKET_COLORS.length]
+    setTaskBuckets([...taskBuckets, { id: uid(), name: newBucketName.trim(), color, tasks: [] }])
+    setNewBucketName('')
+    setShowAddBucket(false)
+    showToast('Column added', 'success')
+  }
+  const moveBucket = (id: string, dir: -1 | 1) => {
+    const idx = taskBuckets.findIndex(b => b.id === id)
+    if (idx < 0) return
+    const next = idx + dir
+    if (next < 0 || next >= taskBuckets.length) return
+    const copy = [...taskBuckets];
+    [copy[idx], copy[next]] = [copy[next], copy[idx]]
+    setTaskBuckets(copy)
+  }
 
   const togglePriority = (p: Priority) => {
     setPriorities(prev => { const n = new Set(prev); n.has(p) ? n.delete(p) : n.add(p); return n })
@@ -95,12 +147,90 @@ export default function TasksPage() {
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 py-3">
         <div className="flex items-center justify-between mb-3">
           <h1 className="text-xl font-bold text-slate-900">Tasks</h1>
-          <button onClick={() => setDrawer({ bucketId: activeBucket || taskBuckets[0]?.id, task: null })}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 min-h-[44px] transition-colors">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-            Add
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => { setShowManage(m => !m); setEditingBucket(null); setShowAddBucket(false) }}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold min-h-[44px] transition-colors ${showManage ? 'bg-slate-100 border-slate-300 text-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+                <rect x="1" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                <rect x="7" y="1" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                <rect x="1" y="7" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+                <rect x="7" y="7" width="5" height="5" rx="1" stroke="currentColor" strokeWidth="1.3"/>
+              </svg>
+              Columns
+            </button>
+            <button onClick={() => setDrawer({ bucketId: activeBucket || taskBuckets[0]?.id, task: null })}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 min-h-[44px] transition-colors">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+              Add
+            </button>
+          </div>
         </div>
+
+        {/* Manage columns panel */}
+        {showManage && (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl mb-3 overflow-hidden">
+            {taskBuckets.map((b, i) => {
+              const isEditing = editingBucket === b.id
+              const isDefault = DEFAULT_BUCKET_IDS.includes(b.id)
+              return (
+                <div key={b.id} className="border-b border-slate-200 last:border-0 bg-white">
+                  {isEditing ? (
+                    <div className="px-3 py-3 flex flex-col gap-2">
+                      <input autoFocus type="text" value={editName} onChange={e => setEditName(e.target.value)}
+                        onKeyDown={e => { if (e.key === 'Enter') saveEdit(); if (e.key === 'Escape') setEditingBucket(null) }}
+                        className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[40px]" />
+                      <div className="flex gap-1.5 flex-wrap">
+                        {BUCKET_COLORS.map(c => (
+                          <button key={c} type="button" onClick={() => setEditColor(c)}
+                            className={`w-5 h-5 rounded-full border-2 transition-transform ${editColor === c ? 'scale-125 border-slate-500' : 'border-transparent hover:scale-110'}`}
+                            style={{ background: c }} />
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <button onClick={saveEdit} className="flex-1 py-2 rounded-lg bg-blue-500 text-white text-xs font-semibold min-h-[36px]">Save</button>
+                        {!isDefault && <button onClick={() => deleteBucket(b.id)} className="px-3 py-2 rounded-lg border border-red-200 text-red-500 text-xs font-medium min-h-[36px]">Delete</button>}
+                        <button onClick={() => setEditingBucket(null)} className="px-3 py-2 rounded-lg border border-slate-200 text-slate-500 text-xs min-h-[36px]">Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 px-3 py-2.5 min-h-[44px]">
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: b.color }} />
+                      <span className="flex-1 text-sm font-medium text-slate-700">{b.name}</span>
+                      <span className="text-xs text-slate-400">{b.tasks.length}</span>
+                      <div className="flex flex-col">
+                        <button onClick={() => moveBucket(b.id, -1)} disabled={i === 0} className="h-4 text-slate-300 hover:text-slate-500 disabled:opacity-20 flex items-center justify-center">
+                          <svg width="9" height="6" viewBox="0 0 9 6" fill="none"><path d="M1 5l3.5-3.5L8 5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+                        </button>
+                        <button onClick={() => moveBucket(b.id, 1)} disabled={i === taskBuckets.length - 1} className="h-4 text-slate-300 hover:text-slate-500 disabled:opacity-20 flex items-center justify-center">
+                          <svg width="9" height="6" viewBox="0 0 9 6" fill="none"><path d="M1 1l3.5 3.5L8 1" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></svg>
+                        </button>
+                      </div>
+                      <button onClick={() => startEdit(b)} className="w-7 h-7 flex items-center justify-center rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8.5 1.5l2 2-6 6H2.5v-2l6-6z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+            {/* Add new */}
+            {showAddBucket ? (
+              <div className="flex gap-2 px-3 py-2.5 border-t border-slate-200 bg-white">
+                <input autoFocus type="text" value={newBucketName} onChange={e => setNewBucketName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addBucket(); if (e.key === 'Escape') setShowAddBucket(false) }}
+                  placeholder="Column name…"
+                  className="flex-1 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[40px]" />
+                <button onClick={addBucket} className="px-3 py-2 rounded-lg bg-blue-500 text-white text-xs font-semibold min-h-[40px]">Add</button>
+                <button onClick={() => setShowAddBucket(false)} className="px-2 py-2 rounded-lg border border-slate-200 text-slate-400 text-sm min-h-[40px]">✕</button>
+              </div>
+            ) : (
+              <button onClick={() => setShowAddBucket(true)}
+                className="w-full text-left px-3 py-2.5 text-xs font-semibold text-blue-500 hover:bg-blue-50 border-t border-slate-200 min-h-[40px] transition-colors">
+                + Add column
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Search */}
         <div className="relative mb-2.5">
