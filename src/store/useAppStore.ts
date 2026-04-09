@@ -5,7 +5,19 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline, TimelineItem } from '../types'
+import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask } from '../types'
+
+/** Recalculate a task's startDate/due from its subtasks' date spans. */
+function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: string } {
+  const starts = subTasks.map(s => s.startDate).filter(Boolean) as string[]
+  const ends   = subTasks.map(s => s.due).filter(Boolean) as string[]
+  if (starts.length === 0 && ends.length === 0) return {}
+  const allDates = [...starts, ...ends]
+  return {
+    startDate: starts.length > 0 ? starts.reduce((a, b) => a < b ? a : b) : allDates.reduce((a, b) => a < b ? a : b),
+    due:       ends.length   > 0 ? ends.reduce((a, b) => a > b ? a : b)   : allDates.reduce((a, b) => a > b ? a : b),
+  }
+}
 
 const DEFAULT_BUCKETS: TaskBucket[] = [
   { id: 'unsorted',   name: 'Unsorted',   color: '#a78bfa', tasks: [] },
@@ -338,35 +350,44 @@ export const useAppStore = create<StoreState>()(
       set(s => {
         // 1. Update the SubTask on the parent Task
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
-        if (bucket) {
-          const task = bucket.tasks.find(t => t.id === parentTaskId)
-          if (task) {
-            if (!task.subTasks) task.subTasks = []
-            const idx = task.subTasks.findIndex(st => st.id === sub.id)
-            if (idx >= 0) task.subTasks[idx] = sub
-            else task.subTasks.push(sub)
-          }
+        const task = bucket?.tasks.find(t => t.id === parentTaskId)
+        if (task) {
+          if (!task.subTasks) task.subTasks = []
+          const idx = task.subTasks.findIndex(st => st.id === sub.id)
+          if (idx >= 0) task.subTasks[idx] = sub
+          else task.subTasks.push(sub)
+
+          // 2. Recalculate task's own date span from all subtasks
+          const span = subtaskDateSpan(task.subTasks)
+          if (span.startDate) task.startDate = span.startDate
+          if (span.due)       task.due        = span.due
         }
 
-        // 2. Find timeline bar linked to this task and sync the sub-item
+        // 3. Find timeline bar linked to this task — sync sub-item AND bar dates
         for (const tl of s.timelines) {
           const item = tl.items.find(i => i.taskId === parentTaskId)
           if (item) {
             if (!item.subItems) item.subItems = []
             const siIdx = item.subItems.findIndex(si => si.id === subItemId)
-            const today = new Date().toISOString().split('T')[0]
-            const sevenDaysLater = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
-            const updated = {
+            const subStart = sub.startDate ?? item.subItems[siIdx]?.startDate ?? item.startDate
+            const subEnd   = sub.due       ?? item.subItems[siIdx]?.endDate   ?? item.endDate
+            const newSubItem = {
               id: subItemId,
               label: sub.text,
-              startDate: item.subItems[siIdx]?.startDate ?? item.startDate ?? today,
-              endDate: item.subItems[siIdx]?.endDate ?? item.endDate ?? sevenDaysLater,
+              startDate: subStart,
+              endDate: subEnd,
               progress: sub.progress ?? 0,
               done: sub.done,
               subTaskId: sub.id,
             }
-            if (siIdx >= 0) item.subItems[siIdx] = updated
-            else item.subItems.push(updated)
+            if (siIdx >= 0) item.subItems[siIdx] = newSubItem
+            else item.subItems.push(newSubItem)
+
+            // Expand bar to cover all sub-items
+            const allStarts = item.subItems.map(si => si.startDate).filter(Boolean) as string[]
+            const allEnds   = item.subItems.map(si => si.endDate).filter(Boolean) as string[]
+            if (allStarts.length) item.startDate = allStarts.reduce((a, b) => a < b ? a : b)
+            if (allEnds.length)   item.endDate   = allEnds.reduce((a, b) => a > b ? a : b)
             break
           }
         }
@@ -376,17 +397,26 @@ export const useAppStore = create<StoreState>()(
 
     deleteSubTaskWithTimelineSync: (bucketId, parentTaskId, subId) => {
       set(s => {
-        // Remove from task
+        // 1. Remove SubTask from task, then recalculate date span
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
-        if (bucket) {
-          const task = bucket.tasks.find(t => t.id === parentTaskId)
-          if (task) task.subTasks = (task.subTasks ?? []).filter(st => st.id !== subId)
+        const task = bucket?.tasks.find(t => t.id === parentTaskId)
+        if (task) {
+          task.subTasks = (task.subTasks ?? []).filter(st => st.id !== subId)
+          const span = subtaskDateSpan(task.subTasks ?? [])
+          if (span.startDate) task.startDate = span.startDate
+          if (span.due)       task.due        = span.due
+          // If no subtasks left, leave dates as-is (don't clear them)
         }
-        // Remove from timeline bar
+
+        // 2. Remove sub-item from timeline bar and contract bar dates
         for (const tl of s.timelines) {
           const item = tl.items.find(i => i.taskId === parentTaskId)
           if (item) {
             item.subItems = (item.subItems ?? []).filter(si => si.id !== subId && si.subTaskId !== subId)
+            const allStarts = (item.subItems ?? []).map(si => si.startDate).filter(Boolean) as string[]
+            const allEnds   = (item.subItems ?? []).map(si => si.endDate).filter(Boolean) as string[]
+            if (allStarts.length) item.startDate = allStarts.reduce((a, b) => a < b ? a : b)
+            if (allEnds.length)   item.endDate   = allEnds.reduce((a, b) => a > b ? a : b)
             break
           }
         }

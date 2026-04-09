@@ -19,18 +19,20 @@ const PRIORITIES = [
 ]
 
 export default function SubTaskDrawer({ open, subTask, parentTask, allTasks = [], onSave, onDelete, onClose }: Props) {
-  const [text,     setText]     = useState('')
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
-  const [due,      setDue]      = useState('')
-  const [notes,    setNotes]    = useState('')
-  const [progress, setProgress] = useState(0)
-  const [done,     setDone]     = useState(false)
-  const [predIds,  setPredIds]  = useState<string[]>([])
+  const [text,      setText]      = useState('')
+  const [priority,  setPriority]  = useState<'low' | 'medium' | 'high'>('medium')
+  const [startDate, setStartDate] = useState('')
+  const [due,       setDue]       = useState('')
+  const [notes,     setNotes]     = useState('')
+  const [progress,  setProgress]  = useState(0)
+  const [done,      setDone]      = useState(false)
+  const [predIds,   setPredIds]   = useState<string[]>([])
 
   useEffect(() => {
     if (!open) return
     setText(subTask?.text ?? '')
     setPriority(subTask?.priority ?? 'medium')
+    setStartDate(subTask?.startDate ?? '')
     setDue(subTask?.due ?? '')
     setNotes(subTask?.notes ?? '')
     setProgress(subTask?.progress ?? 0)
@@ -44,6 +46,7 @@ export default function SubTaskDrawer({ open, subTask, parentTask, allTasks = []
       id: subTask?.id ?? uid(),
       text: text.trim(),
       priority,
+      startDate: startDate || undefined,
       due: due || undefined,
       notes: notes.trim() || undefined,
       progress: progress > 0 ? progress : undefined,
@@ -114,10 +117,18 @@ export default function SubTaskDrawer({ open, subTask, parentTask, allTasks = []
             </div>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
-            <input type="date" value={due} onChange={e => setDue(e.target.value)}
-              className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+          <div className="flex gap-3">
+            <div className="flex-1 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Start Date</label>
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+            </div>
+            <div className="flex-1 flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Due Date</label>
+              <input type="date" value={due} onChange={e => setDue(e.target.value)}
+                min={startDate}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white" />
+            </div>
           </div>
 
           <div className="flex flex-col gap-1.5">

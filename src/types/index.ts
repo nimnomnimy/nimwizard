@@ -64,7 +64,8 @@ export interface SubTask {
   id: string
   text: string
   priority?: 'low' | 'medium' | 'high'
-  due?: string
+  startDate?: string       // YYYY-MM-DD
+  due?: string             // YYYY-MM-DD end / due date
   notes?: string
   progress?: number       // 0–100
   done?: boolean
