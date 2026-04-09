@@ -120,7 +120,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // ── Coordinate helpers ────────────────────────────────────────────────────
   function clientXToCanvasX(clientX: number) {
-    return clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0) + (scrollRef.current?.scrollLeft ?? 0)
+    // getBoundingClientRect().left already reflects current scroll position (visual coords),
+    // so do NOT add scrollLeft — that would double-count horizontal scroll offset
+    return clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0)
   }
   function canvasXToDate(canvasX: number) { return pxToDate(canvasX - labelWidth, viewStart, timeline.timescale) }
   function itemX(item: TimelineItem | TimelineSubItem) { return dateToPx(parseDate(item.startDate), viewStart, timeline.timescale) }
@@ -720,9 +722,13 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   </div>
 
                   {/* ── Canvas area ─────────────────────────────────────── */}
-                  <div style={{ flex:1, position:'relative', cursor: collapsed ? 'default' : 'crosshair', touchAction:'none' }}
+                  <div style={{ flex:1, position:'relative', cursor:'crosshair', touchAction:'none' }}
                     className="border-b border-slate-100 bg-white"
-                    onPointerDown={collapsed ? undefined : e=>startDraw(e,lane.id)}>
+                    onPointerDown={e => {
+                      // Auto-expand collapsed lane when user starts drawing
+                      if (collapsed) toggleLane(lane.id)
+                      startDraw(e, lane.id)
+                    }}>
 
                     {/* Grid lines */}
                     {major.map((_,i) => {
