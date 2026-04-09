@@ -5,7 +5,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline } from '../types'
+import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline, TimelineItem } from '../types'
 
 const DEFAULT_BUCKETS: TaskBucket[] = [
   { id: 'unsorted',   name: 'Unsorted',   color: '#a78bfa', tasks: [] },
@@ -52,6 +52,7 @@ interface StoreState extends AppState {
   setTaskBuckets: (buckets: TaskBucket[]) => void
   addTask: (bucketId: string, task: import('../types').Task) => void
   updateTask: (bucketId: string, task: import('../types').Task) => void
+  moveTask: (taskId: string, fromBucketId: string, toBucketId: string) => void
 
   // Settings
   setEmailSettings: (settings: EmailSettings) => void
@@ -60,6 +61,21 @@ interface StoreState extends AppState {
   addTimeline: (t: Timeline) => void
   updateTimeline: (t: Timeline) => void
   deleteTimeline: (id: string) => void
+  // Atomic: add a new Task to a bucket AND update a timeline item in one write
+  addTaskAndUpdateTimeline: (
+    bucketId: string,
+    task: import('../types').Task,
+    timelineId: string,
+    updatedItem: TimelineItem,
+  ) => void
+  // Atomic: sync a sub-task change to the task bucket AND update timeline sub-items
+  updateSubTaskAndTimeline: (
+    bucketId: string,
+    parentTaskId: string,
+    sub: import('../types').SubTask,
+    timelineId: string,
+    updatedItem: TimelineItem,
+  ) => void
 }
 
 export const useAppStore = create<StoreState>()(
@@ -200,6 +216,20 @@ export const useAppStore = create<StoreState>()(
       })
       get().saveUserData()
     },
+
+    moveTask: (taskId, fromBucketId, toBucketId) => {
+      set(s => {
+        const fromBucket = s.taskBuckets.find(b => b.id === fromBucketId)
+        const toBucket   = s.taskBuckets.find(b => b.id === toBucketId)
+        if (!fromBucket || !toBucket) return
+        const taskIdx = fromBucket.tasks.findIndex(t => t.id === taskId)
+        if (taskIdx < 0) return
+        const [task] = fromBucket.tasks.splice(taskIdx, 1)
+        toBucket.tasks.push(task)
+      })
+      get().saveUserData()
+    },
+
     setEmailSettings: (settings) => { set(s => { s.emailSettings = settings }); get().saveUserData() },
 
     addTimeline: (t) => { set(s => { s.timelines.push(t) }); get().saveUserData() },
@@ -208,5 +238,44 @@ export const useAppStore = create<StoreState>()(
       get().saveUserData()
     },
     deleteTimeline: (id) => { set(s => { s.timelines = s.timelines.filter(t => t.id !== id) }); get().saveUserData() },
+
+    addTaskAndUpdateTimeline: (bucketId, task, timelineId, updatedItem) => {
+      set(s => {
+        // Add the new task to the bucket
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) bucket.tasks.push(task)
+        // Update the timeline item (with taskId linked back)
+        const tl = s.timelines.find(x => x.id === timelineId)
+        if (tl) {
+          const idx = tl.items.findIndex(i => i.id === updatedItem.id)
+          if (idx >= 0) tl.items[idx] = updatedItem
+          else tl.items.push(updatedItem)
+        }
+      })
+      get().saveUserData()
+    },
+
+    updateSubTaskAndTimeline: (bucketId, parentTaskId, sub, timelineId, updatedItem) => {
+      set(s => {
+        // Sync sub-task into the parent task in the bucket
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) {
+          const task = bucket.tasks.find(t => t.id === parentTaskId)
+          if (task) {
+            if (!task.subTasks) task.subTasks = []
+            const idx = task.subTasks.findIndex(st => st.id === sub.id)
+            if (idx >= 0) task.subTasks[idx] = sub
+            else task.subTasks.push(sub)
+          }
+        }
+        // Update the timeline item (with updated subItems)
+        const tl = s.timelines.find(x => x.id === timelineId)
+        if (tl) {
+          const idx = tl.items.findIndex(i => i.id === updatedItem.id)
+          if (idx >= 0) tl.items[idx] = updatedItem
+        }
+      })
+      get().saveUserData()
+    },
   }))
 )

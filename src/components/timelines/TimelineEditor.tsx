@@ -82,8 +82,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
-  const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
-  const addTask = useAppStore(s => s.addTask)
+  const addTaskAndUpdateTimeline = useAppStore(s => s.addTaskAndUpdateTimeline)
+  const updateSubTaskAndTimeline = useAppStore(s => s.updateSubTaskAndTimeline)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
   const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
 
@@ -308,8 +308,11 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
         createdAt: Date.now(),
         timelineId: timeline.id,
       }
-      addTask('unsorted', newTask)
       savedItem = { ...item, taskId: newTaskId }
+      // Atomic: add task + update timeline in one store write to avoid race
+      addTaskAndUpdateTimeline('unsorted', newTask, timeline.id, savedItem)
+      setDrawerOpen(false); setEditingItem(null)
+      return
     }
 
     update({ items: exists ? timeline.items.map(i => i.id === savedItem.id ? savedItem : i) : [...timeline.items, savedItem] })
@@ -342,27 +345,24 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       taskId: subItem?.taskId,
       subTaskId: sub.id,
     }
-    const existing = (item.subItems ?? []).some(s => s.id === asTimelineSub.id)
-    const newSubs = existing
+    const existingSub = (item.subItems ?? []).some(s => s.id === asTimelineSub.id)
+    const newSubs = existingSub
       ? (item.subItems ?? []).map(s => s.id === asTimelineSub.id ? asTimelineSub : s)
       : [...(item.subItems ?? []), asTimelineSub]
-    update({ items: timeline.items.map(i => i.id === item.id ? { ...i, subItems: newSubs } : i) })
+    const updatedItem = { ...item, subItems: newSubs }
 
-    // Also sync to linked task's sub-tasks if applicable
-    if (sub.id && item.taskId) {
+    if (item.taskId) {
+      // Atomic: sync sub-task to bucket task AND update timeline item in one write
       const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id }))).find(x => x.task.id === item.taskId)
       if (bucketEntry) {
-        const existingSub = (bucketEntry.task.subTasks ?? []).some(s => s.id === sub.id)
-        const newSubTasks = existingSub
-          ? (bucketEntry.task.subTasks ?? []).map(s => s.id === sub.id ? sub : s)
-          : [...(bucketEntry.task.subTasks ?? []), sub]
-        setTaskBuckets(taskBuckets.map(b =>
-          b.id === bucketEntry.bucketId
-            ? { ...b, tasks: b.tasks.map(t => t.id === item.taskId ? { ...t, subTasks: newSubTasks } : t) }
-            : b
-        ))
+        updateSubTaskAndTimeline(bucketEntry.bucketId, item.taskId, sub, timeline.id, updatedItem)
+        setSubDrawer(null)
+        return
       }
     }
+
+    // No linked task — just update the timeline
+    update({ items: timeline.items.map(i => i.id === item.id ? updatedItem : i) })
     setSubDrawer(null)
   }
 

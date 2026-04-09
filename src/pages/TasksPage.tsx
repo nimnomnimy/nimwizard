@@ -37,6 +37,7 @@ interface SubDrawerState { bucketId: string; task: Task; sub: SubTask | null }
 export default function TasksPage() {
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const moveTaskStore = useAppStore(s => s.moveTask)
   const timelines = useAppStore(s => s.timelines)
 
   const [search, setSearch] = useState('')
@@ -133,15 +134,7 @@ export default function TasksPage() {
   }
 
   const moveTask = (taskId: string, fromBucketId: string, toBucketId: string) => {
-    const newBuckets = taskBuckets.map((b: TaskBucket) => {
-      if (b.id === fromBucketId) return { ...b, tasks: b.tasks.filter(t => t.id !== taskId) }
-      if (b.id === toBucketId) {
-        const task = taskBuckets.find((b: TaskBucket) => b.id === fromBucketId)?.tasks.find(t => t.id === taskId)
-        if (task) return { ...b, tasks: [...b.tasks, task] }
-      }
-      return b
-    })
-    setTaskBuckets(newBuckets)
+    moveTaskStore(taskId, fromBucketId, toBucketId)
     showToast('Task moved', 'success')
   }
 
