@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { collection, getDocs, doc, deleteDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, deleteDoc, writeBatch } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useNavigate } from 'react-router-dom'
-import type { AppState, Contact, Meeting, TaskBucket } from '../types'
+import type { Contact, Meeting, Task } from '../types'
 
 const ADMIN_UID = 'gyFefF4RgEZbfFXyHRhW0qWlP1h2'
 
@@ -11,7 +11,7 @@ interface UserRecord {
   uid: string
   contacts: Contact[]
   meetings: Meeting[]
-  taskBuckets: TaskBucket[]
+  tasks: Task[]
   savedCharts: { id: string; name: string }[]
   loadedAt: number
 }
@@ -42,37 +42,55 @@ export default function AdminPage() {
     if (!loading && !uid) navigate('/contacts', { replace: true })
   }, [uid, loading, navigate])
 
-  // Load all user docs
+  // Load all user data from subcollections
+  const loadUsers = async () => {
+    setFetching(true)
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'))
+      const records: UserRecord[] = []
+      for (const userDoc of usersSnap.docs) {
+        const userUid = userDoc.id
+        const [contactsSnap, meetingsSnap, tasksSnap, settingsSnap] = await Promise.all([
+          getDocs(collection(db, 'users', userUid, 'contacts')),
+          getDocs(collection(db, 'users', userUid, 'meetings')),
+          getDocs(collection(db, 'users', userUid, 'tasks')),
+          getDocs(collection(db, 'users', userUid, 'settings')),
+        ])
+        const savedCharts = settingsSnap.docs.flatMap(d => (d.data().savedCharts ?? []) as { id: string; name: string }[])
+        records.push({
+          uid: userUid,
+          contacts: contactsSnap.docs.map(d => d.data() as Contact),
+          meetings: meetingsSnap.docs.map(d => d.data() as Meeting),
+          tasks: tasksSnap.docs.map(d => d.data() as Task),
+          savedCharts,
+          loadedAt: Date.now(),
+        })
+      }
+      records.sort((a, b) => b.contacts.length - a.contacts.length)
+      setUsers(records)
+    } catch (e: any) {
+      setError(e.message ?? 'Failed to load users')
+    }
+    setFetching(false)
+  }
+
   useEffect(() => {
     if (!uid || uid !== ADMIN_UID) return
-    setFetching(true)
-    getDocs(collection(db, 'users'))
-      .then(snap => {
-        const records: UserRecord[] = snap.docs.map(d => {
-          const data = d.data() as Partial<AppState>
-          return {
-            uid: d.id,
-            contacts: data.contacts ?? [],
-            meetings: data.meetings ?? [],
-            taskBuckets: data.taskBuckets ?? [],
-            savedCharts: data.savedCharts ?? [],
-            loadedAt: Date.now(),
-          }
-        })
-        records.sort((a, b) => b.contacts.length - a.contacts.length)
-        setUsers(records)
-        setFetching(false)
-      })
-      .catch(e => {
-        setError(e.message ?? 'Failed to load users')
-        setFetching(false)
-      })
+    loadUsers()
   }, [uid])
 
   const handleDelete = async (targetUid: string) => {
     if (!confirm(`Delete ALL data for user ${targetUid}?\n\nThis cannot be undone.`)) return
     setDeleting(targetUid)
     try {
+      // Delete all subcollection docs then the parent doc
+      const subcollections = ['contacts', 'meetings', 'tasks', 'timelines', 'settings']
+      for (const sub of subcollections) {
+        const snap = await getDocs(collection(db, 'users', targetUid, sub))
+        const batch = writeBatch(db)
+        snap.docs.forEach(d => batch.delete(d.ref))
+        if (snap.docs.length > 0) await batch.commit()
+      }
       await deleteDoc(doc(db, 'users', targetUid))
       setUsers(prev => prev.filter(u => u.uid !== targetUid))
       setExpandedUid(null)
@@ -84,25 +102,7 @@ export default function AdminPage() {
 
   const refresh = () => {
     if (!uid || uid !== ADMIN_UID) return
-    setFetching(true)
-    getDocs(collection(db, 'users'))
-      .then(snap => {
-        const records: UserRecord[] = snap.docs.map(d => {
-          const data = d.data() as Partial<AppState>
-          return {
-            uid: d.id,
-            contacts: data.contacts ?? [],
-            meetings: data.meetings ?? [],
-            taskBuckets: data.taskBuckets ?? [],
-            savedCharts: data.savedCharts ?? [],
-            loadedAt: Date.now(),
-          }
-        })
-        records.sort((a, b) => b.contacts.length - a.contacts.length)
-        setUsers(records)
-        setFetching(false)
-      })
-      .catch(e => { setError(e.message); setFetching(false) })
+    loadUsers()
   }
 
   const filtered = users.filter(u =>
@@ -112,7 +112,7 @@ export default function AdminPage() {
 
   const totalContacts = users.reduce((s, u) => s + u.contacts.length, 0)
   const totalMeetings = users.reduce((s, u) => s + u.meetings.length, 0)
-  const totalTasks    = users.reduce((s, u) => s + u.taskBuckets.reduce((a, b) => a + b.tasks.length, 0), 0)
+  const totalTasks    = users.reduce((s, u) => s + u.tasks.length, 0)
 
   if (loading || (!uid && !error)) {
     return (
@@ -193,7 +193,7 @@ export default function AdminPage() {
         )}
 
         {filtered.map(u => {
-          const taskCount = u.taskBuckets.reduce((s, b) => s + b.tasks.length, 0)
+          const taskCount = u.tasks.length
           const isMe = u.uid === ADMIN_UID
 
           return (
@@ -256,18 +256,11 @@ export default function AdminPage() {
                     </div>
                   )}
 
-                  {/* Task buckets summary */}
-                  {u.taskBuckets.length > 0 && taskCount > 0 && (
+                  {/* Tasks summary */}
+                  {taskCount > 0 && (
                     <div>
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">Task Buckets</p>
-                      <div className="flex flex-wrap gap-2">
-                        {u.taskBuckets.filter(b => b.tasks.length > 0).map(b => (
-                          <span key={b.id} className="text-xs px-2 py-1 rounded-full"
-                            style={{ background: b.color + '22', color: b.color, border: `1px solid ${b.color}44` }}>
-                            {b.name} · {b.tasks.length}
-                          </span>
-                        ))}
-                      </div>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wide mb-2">Tasks</p>
+                      <p className="text-sm text-slate-300">{taskCount} task{taskCount !== 1 ? 's' : ''}</p>
                     </div>
                   )}
 
