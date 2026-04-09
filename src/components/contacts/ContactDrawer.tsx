@@ -43,6 +43,9 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
   const [parentSearch, setParentSearch] = useState('')
   const [showParentDrop, setShowParentDrop] = useState(false)
 
+  // Track whether the user has manually edited the email field
+  const emailManuallyEdited = useRef(false)
+
   const nameRef = useRef<HTMLInputElement>(null)
 
   // Reset form when drawer opens
@@ -50,6 +53,7 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
     if (open) {
       const f = existing ? { ...existing } : empty()
       setForm(f)
+      emailManuallyEdited.current = !!existing?.email // existing contacts keep their email
       // Set parent search display name
       if (f.parentId) {
         const parent = contacts.find(c => c.id === f.parentId)
@@ -74,7 +78,19 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
     .filter(c => c.id !== existing?.id)
     .filter(c => !parentSearch || c.name.toLowerCase().includes(parentSearch.toLowerCase()) || (c.org ?? '').toLowerCase().includes(parentSearch.toLowerCase()))
 
-  const set = (field: keyof Contact, value: string) => setForm(f => ({ ...f, [field]: value }))
+  const set = (field: keyof Contact, value: string) => {
+    setForm(f => {
+      const updated = { ...f, [field]: value }
+      // Auto-derive email from name+org unless user has typed their own
+      if ((field === 'name' || field === 'org') && !emailManuallyEdited.current) {
+        updated.email = emailPlaceholder(
+          field === 'name' ? value : (f.name ?? ''),
+          field === 'org'  ? value : (f.org  ?? '')
+        )
+      }
+      return updated
+    })
+  }
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -107,8 +123,6 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
     showToast(`${existing.name} deleted`)
     onClose()
   }
-
-  const emailPh = emailPlaceholder(form.name ?? '', form.org ?? '')
 
   return (
     <>
@@ -264,8 +278,10 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
             <input
               type="email"
               value={form.email ?? ''}
-              onChange={e => set('email', e.target.value)}
-              placeholder={emailPh}
+              onChange={e => {
+                emailManuallyEdited.current = true
+                set('email', e.target.value)
+              }}
               autoComplete="off"
               className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent min-h-[48px]"
             />
