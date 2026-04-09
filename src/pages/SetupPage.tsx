@@ -5,10 +5,21 @@ import { useAppStore } from '../store/useAppStore'
 import { showToast } from '../components/ui/Toast'
 import { useRegisterSW } from 'virtual:pwa-register/react'
 
+function BinIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+      <path d="M2 4h10M5 4V2.5a.5.5 0 0 1 .5-.5h3a.5.5 0 0 1 .5.5V4M3 4l.7 7.5a.5.5 0 0 0 .5.5h5.6a.5.5 0 0 0 .5-.5L11 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  )
+}
+
 declare const __APP_VERSION__: string
 
 export default function SetupPage() {
-  const uid_user = useAppStore(s => s.uid)
+  const uid_user     = useAppStore(s => s.uid)
+  const loadDemoData = useAppStore(s => s.loadDemoData)
+  const clearDemoData = useAppStore(s => s.clearDemoData)
+  const [demoLoading, setDemoLoading] = useState(false)
 
   const user = auth.currentUser
   const providers = user?.providerData.map(p => p.providerId) ?? []
@@ -219,6 +230,45 @@ export default function SetupPage() {
               </div>
               <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-full">Live</span>
             </div>
+          </div>
+        </section>
+
+        {/* ── Demo data ────────────────────────────────────────────────────── */}
+        <section>
+          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wide mb-3">Demo Data</h2>
+          <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <div className="px-4 py-3.5 border-b border-slate-100">
+              <p className="text-sm font-medium text-slate-800 mb-0.5">Load demo data</p>
+              <p className="text-xs text-slate-400 mb-3">
+                Adds sample contacts, org chart, meetings, tasks, and a Q2 roadmap timeline so you can explore all features.
+                Your existing data is not affected.
+              </p>
+              <button
+                onClick={async () => {
+                  setDemoLoading(true)
+                  try { loadDemoData(); showToast('Demo data loaded', 'success') }
+                  finally { setDemoLoading(false) }
+                }}
+                disabled={demoLoading}
+                className="w-full py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 min-h-[44px] transition-colors disabled:opacity-50">
+                {demoLoading ? 'Loading…' : 'Load demo data'}
+              </button>
+            </div>
+            <button
+              onClick={() => {
+                if (!confirm('Remove all demo data? This cannot be undone.')) return
+                clearDemoData()
+                showToast('Demo data removed')
+              }}
+              className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-red-50 transition-colors min-h-[52px]">
+              <div className="w-8 h-8 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0 text-red-400">
+                <BinIcon />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-red-500">Remove demo data</p>
+                <p className="text-xs text-slate-400">Deletes all contacts, meetings, tasks, and timelines added by demo</p>
+              </div>
+            </button>
           </div>
         </section>
 

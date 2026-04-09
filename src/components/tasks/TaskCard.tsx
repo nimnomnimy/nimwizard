@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import type { Task, SubTask } from '../../types'
 import { useAppStore } from '../../store/useAppStore'
 
@@ -42,9 +42,11 @@ export default function TaskCard({ task, bucketId, onEdit, onDelete, onMove, onE
   const [collapsed, setCollapsed] = useState(task.collapsed ?? false)
   const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
 
-  // When subtasks are added externally, auto-expand
+  // Sync collapsed state when subtasks are added externally (e.g. from timeline)
+  const prevSubCountRef = useRef(subTasks.length)
   useEffect(() => {
-    if (subTasks.length > 0) setCollapsed(false)
+    if (subTasks.length > prevSubCountRef.current) setCollapsed(false)
+    prevSubCountRef.current = subTasks.length
   }, [subTasks.length])
 
   function toggleSubTaskDone(sub: SubTask) {

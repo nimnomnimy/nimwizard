@@ -112,7 +112,16 @@ interface StoreState extends AppState {
     parentTaskId: string,
     subId: string,
   ) => void
+
+  /** Load demo data into the account (merges on top of existing data). */
+  loadDemoData: () => void
+
+  /** Remove all demo data (contacts/meetings/tasks/timelines tagged as demo). */
+  clearDemoData: () => void
 }
+
+// Tracks in-flight local writes so the onSnapshot doesn't overwrite fresh local state
+let pendingWrites = 0
 
 export const useAppStore = create<StoreState>()(
   immer((set, get) => ({
@@ -139,6 +148,9 @@ export const useAppStore = create<StoreState>()(
       set(s => { s.loading = true })
       const userRef = doc(db, 'users', uid)
       const unsub = onSnapshot(userRef, (snap) => {
+        // Suppress snapshots triggered by our own writes — they would overwrite
+        // fresh local state with a slightly older Firestore copy
+        if (pendingWrites > 0) return
         if (snap.exists()) {
           const d = snap.data() as Partial<AppState>
           set(s => {
@@ -156,11 +168,8 @@ export const useAppStore = create<StoreState>()(
             s.loading = false
           })
         } else {
-          setDoc(userRef, {
-            contacts: [], meetings: [], dottedLines: [], peerLines: [],
-            chartContacts: [], positions: {}, activeChartOrg: null,
-            taskBuckets: DEFAULT_BUCKETS, savedCharts: [], emailSettings: {}, timelines: [],
-          })
+          // New user — initialise with empty defaults locally; don't write yet
+          // (writing here caused data wipes on hot-reload / reconnect race conditions)
           set(s => { s.loading = false })
         }
       })
@@ -170,14 +179,19 @@ export const useAppStore = create<StoreState>()(
     saveUserData: async () => {
       const { uid } = get()
       if (!uid) return
+      pendingWrites++
       set(s => { s.syncing = true })
       const { contacts, meetings, dottedLines, peerLines, chartContacts,
               positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines } = get()
-      await setDoc(doc(db, 'users', uid), {
-        contacts, meetings, dottedLines, peerLines, chartContacts,
-        positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines,
-      })
-      set(s => { s.syncing = false })
+      try {
+        await setDoc(doc(db, 'users', uid), {
+          contacts, meetings, dottedLines, peerLines, chartContacts,
+          positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines,
+        })
+      } finally {
+        pendingWrites = Math.max(0, pendingWrites - 1)
+        set(s => { s.syncing = false })
+      }
     },
 
     addContact: (contact) => { set(s => { s.contacts.push(contact) }); get().saveUserData() },
@@ -420,6 +434,246 @@ export const useAppStore = create<StoreState>()(
             break
           }
         }
+      })
+      get().saveUserData()
+    },
+
+    loadDemoData: () => {
+      set(s => {
+        // ── Contacts ──────────────────────────────────────────────────────────
+        const c1 = 'demo-c1', c2 = 'demo-c2', c3 = 'demo-c3', c4 = 'demo-c4',
+              c5 = 'demo-c5', c6 = 'demo-c6', c7 = 'demo-c7', c8 = 'demo-c8'
+        const demoContacts: import('../types').Contact[] = [
+          { id: c1, name: 'Sarah Chen',     title: 'Chief Executive Officer',       org: 'Acme Corp',   level: 'c-level',    email: 'sarah@acme.com',   createdAt: 1700000001000 },
+          { id: c2, name: 'Marcus Webb',    title: 'VP Engineering',                org: 'Acme Corp',   level: 'gm',         email: 'marcus@acme.com',  createdAt: 1700000002000, parentId: c1 },
+          { id: c3, name: 'Priya Nair',     title: 'VP Product',                    org: 'Acme Corp',   level: 'gm',         email: 'priya@acme.com',   createdAt: 1700000003000, parentId: c1 },
+          { id: c4, name: 'Tom Okafor',     title: 'Engineering Manager',            org: 'Acme Corp',   level: 'manager',    email: 'tom@acme.com',     createdAt: 1700000004000, parentId: c2 },
+          { id: c5, name: 'Lena Fischer',   title: 'Senior Software Engineer',       org: 'Acme Corp',   level: 'individual', email: 'lena@acme.com',    createdAt: 1700000005000, parentId: c4 },
+          { id: c6, name: 'James Park',     title: 'Software Engineer',              org: 'Acme Corp',   level: 'individual', email: 'james@acme.com',   createdAt: 1700000006000, parentId: c4 },
+          { id: c7, name: 'Aisha Mensah',   title: 'Head of Design',                org: 'Acme Corp',   level: 'head-of',    email: 'aisha@acme.com',   createdAt: 1700000007000, parentId: c3 },
+          { id: c8, name: 'David Ruiz',     title: 'Product Manager',               org: 'Acme Corp',   level: 'manager',    email: 'david@acme.com',   createdAt: 1700000008000, parentId: c3 },
+        ]
+        for (const c of demoContacts) {
+          if (!s.contacts.find(x => x.id === c.id)) s.contacts.push(c)
+        }
+
+        // ── Org chart ─────────────────────────────────────────────────────────
+        for (const id of [c1, c2, c3, c4, c5, c6, c7, c8]) {
+          if (!s.chartContacts.includes(id)) s.chartContacts.push(id)
+        }
+        const pos: Record<string, import('../types').Position> = {
+          [c1]: { x: 400, y: 60 },  [c2]: { x: 200, y: 180 }, [c3]: { x: 600, y: 180 },
+          [c4]: { x: 100, y: 300 }, [c5]: { x: 0,   y: 420 }, [c6]: { x: 200, y: 420 },
+          [c7]: { x: 500, y: 300 }, [c8]: { x: 700, y: 300 },
+        }
+        for (const [id, p] of Object.entries(pos)) {
+          if (!s.positions[id]) s.positions[id] = p
+        }
+
+        // ── Meetings ──────────────────────────────────────────────────────────
+        const demoMeetings: import('../types').Meeting[] = [
+          {
+            id: 'demo-m1',
+            title: 'Q2 Engineering Planning',
+            date: '2026-04-14',
+            attendees: [c1, c2, c4],
+            discussion: 'Reviewed roadmap for Q2. Agreed to prioritise the new API gateway before mobile app work. Security audit to be scheduled.',
+            actionItems: [
+              { id: 'demo-ai1', text: 'Draft API gateway spec', done: false, assignee: c2, priority: 'high', due: '2026-04-18' },
+              { id: 'demo-ai2', text: 'Schedule security audit', done: false, assignee: c4, priority: 'medium', due: '2026-04-21' },
+              { id: 'demo-ai3', text: 'Update sprint board', done: true, assignee: c4, priority: 'low' },
+            ],
+            createdAt: 1700000010000,
+          },
+          {
+            id: 'demo-m2',
+            title: 'Product Design Review',
+            date: '2026-04-16',
+            attendees: [c3, c7, c8],
+            discussion: 'Walked through new onboarding flow designs. Feedback: simplify step 3, add progress indicator, use existing component library colours.',
+            actionItems: [
+              { id: 'demo-ai4', text: 'Simplify onboarding step 3 designs', done: false, assignee: c7, priority: 'high', due: '2026-04-20' },
+              { id: 'demo-ai5', text: 'Write acceptance criteria for onboarding', done: false, assignee: c8, priority: 'medium', due: '2026-04-22' },
+            ],
+            createdAt: 1700000020000,
+          },
+          {
+            id: 'demo-m3',
+            title: 'Weekly Standup',
+            date: '2026-04-10',
+            attendees: [c2, c4, c5, c6],
+            discussion: 'Status: auth service refactor is 80% done. Lena blocked on test environment. James finishing PR review.',
+            actionItems: [
+              { id: 'demo-ai6', text: 'Unblock test environment for Lena', done: false, assignee: c4, priority: 'high', due: '2026-04-11' },
+              { id: 'demo-ai7', text: 'Merge auth refactor PR', done: false, assignee: c5, priority: 'high', due: '2026-04-12' },
+            ],
+            createdAt: 1700000030000,
+          },
+        ]
+        for (const m of demoMeetings) {
+          if (!s.meetings.find(x => x.id === m.id)) s.meetings.push(m)
+        }
+
+        // ── Task buckets ──────────────────────────────────────────────────────
+        const demoTasks: Record<string, import('../types').Task[]> = {
+          backlog: [
+            {
+              id: 'demo-t1', text: 'Implement API gateway', priority: 'high',
+              startDate: '2026-04-21', due: '2026-05-09',
+              notes: 'Design-first approach. Covers auth, rate limiting, and routing.',
+              progress: 0, createdAt: 1700000040000,
+              subTasks: [
+                { id: 'demo-st1', text: 'Write API spec', priority: 'high', startDate: '2026-04-21', due: '2026-04-25', progress: 0 },
+                { id: 'demo-st2', text: 'Set up gateway infra', priority: 'medium', startDate: '2026-04-28', due: '2026-05-02', progress: 0 },
+                { id: 'demo-st3', text: 'Implement auth middleware', priority: 'high', startDate: '2026-05-05', due: '2026-05-09', progress: 0 },
+              ],
+            },
+            {
+              id: 'demo-t2', text: 'Mobile app push notifications', priority: 'medium',
+              startDate: '2026-05-12', due: '2026-05-23',
+              progress: 0, createdAt: 1700000041000,
+            },
+          ],
+          inprogress: [
+            {
+              id: 'demo-t3', text: 'Auth service refactor', priority: 'high',
+              startDate: '2026-04-01', due: '2026-04-12',
+              progress: 80, createdAt: 1700000042000,
+              subTasks: [
+                { id: 'demo-st4', text: 'Migrate to JWT tokens', priority: 'high', startDate: '2026-04-01', due: '2026-04-05', done: true, progress: 100 },
+                { id: 'demo-st5', text: 'Update session handling', priority: 'medium', startDate: '2026-04-07', due: '2026-04-10', done: true, progress: 100 },
+                { id: 'demo-st6', text: 'Write integration tests', priority: 'medium', startDate: '2026-04-11', due: '2026-04-12', progress: 40 },
+              ],
+            },
+            {
+              id: 'demo-t4', text: 'Onboarding flow redesign', priority: 'high',
+              startDate: '2026-04-14', due: '2026-04-25',
+              progress: 20, createdAt: 1700000043000,
+              subTasks: [
+                { id: 'demo-st7', text: 'Simplify step 3 UI', priority: 'high', startDate: '2026-04-14', due: '2026-04-18', progress: 30 },
+                { id: 'demo-st8', text: 'Add progress indicator', priority: 'medium', startDate: '2026-04-21', due: '2026-04-25', progress: 0 },
+              ],
+            },
+            {
+              id: 'demo-t5', text: 'Analytics dashboard v2', priority: 'medium',
+              startDate: '2026-04-07', due: '2026-04-18',
+              progress: 50, createdAt: 1700000044000,
+            },
+          ],
+          done: [
+            {
+              id: 'demo-t6', text: 'Set up CI/CD pipeline', priority: 'medium',
+              startDate: '2026-03-17', due: '2026-03-28',
+              progress: 100, createdAt: 1700000045000,
+            },
+            {
+              id: 'demo-t7', text: 'Database schema migration', priority: 'high',
+              startDate: '2026-03-24', due: '2026-04-04',
+              progress: 100, createdAt: 1700000046000,
+            },
+          ],
+        }
+        for (const [bucketId, tasks] of Object.entries(demoTasks)) {
+          const bucket = s.taskBuckets.find(b => b.id === bucketId)
+          if (bucket) {
+            for (const t of tasks) {
+              if (!bucket.tasks.find(x => x.id === t.id)) bucket.tasks.push(t)
+            }
+          }
+        }
+
+        // ── Timeline ──────────────────────────────────────────────────────────
+        if (!s.timelines.find(tl => tl.id === 'demo-tl1')) {
+          const lane1 = 'demo-lane1', lane2 = 'demo-lane2', lane3 = 'demo-lane3'
+          s.timelines.push({
+            id: 'demo-tl1',
+            name: 'Q2 2026 Roadmap',
+            createdAt: 1700000050000,
+            timescale: 'months',
+            subTimescale: 'weeks',
+            yearMode: 'calendar',
+            startDate: '2026-04-01',
+            endDate: '2026-06-30',
+            labelWidth: 180,
+            swimLanes: [
+              { id: lane1, label: 'Engineering', color: '#6366f1' },
+              { id: lane2, label: 'Product & Design', color: '#3b82f6' },
+              { id: lane3, label: 'Infrastructure', color: '#10b981' },
+            ],
+            milestones: [
+              { id: 'demo-ms1', label: 'API Gateway Launch', date: '2026-05-09', color: '#ef4444' },
+              { id: 'demo-ms2', label: 'Q2 Review',          date: '2026-06-27', color: '#f59e0b' },
+            ],
+            items: [
+              {
+                id: 'demo-t3_bar',  swimLaneId: lane1, label: 'Auth service refactor',
+                type: 'bar', startDate: '2026-04-01', endDate: '2026-04-12',
+                color: '#6366f1', progress: 80, taskId: 'demo-t3',
+                subItems: [
+                  { id: 'demo-st4', label: 'Migrate to JWT tokens',  startDate: '2026-04-01', endDate: '2026-04-05', progress: 100, done: true,  subTaskId: 'demo-st4' },
+                  { id: 'demo-st5', label: 'Update session handling', startDate: '2026-04-07', endDate: '2026-04-10', progress: 100, done: true,  subTaskId: 'demo-st5' },
+                  { id: 'demo-st6', label: 'Write integration tests', startDate: '2026-04-11', endDate: '2026-04-12', progress: 40,  done: false, subTaskId: 'demo-st6' },
+                ],
+              },
+              {
+                id: 'demo-t1_bar', swimLaneId: lane1, label: 'API gateway implementation',
+                type: 'bar', startDate: '2026-04-21', endDate: '2026-05-09',
+                color: '#6366f1', progress: 0, taskId: 'demo-t1',
+                subItems: [
+                  { id: 'demo-st1', label: 'Write API spec',             startDate: '2026-04-21', endDate: '2026-04-25', progress: 0, subTaskId: 'demo-st1' },
+                  { id: 'demo-st2', label: 'Set up gateway infra',       startDate: '2026-04-28', endDate: '2026-05-02', progress: 0, subTaskId: 'demo-st2' },
+                  { id: 'demo-st3', label: 'Implement auth middleware',  startDate: '2026-05-05', endDate: '2026-05-09', progress: 0, subTaskId: 'demo-st3' },
+                ],
+              },
+              {
+                id: 'demo-t2_bar', swimLaneId: lane1, label: 'Push notifications',
+                type: 'bar', startDate: '2026-05-12', endDate: '2026-05-23',
+                color: '#8b5cf6', progress: 0, taskId: 'demo-t2',
+              },
+              {
+                id: 'demo-t4_bar', swimLaneId: lane2, label: 'Onboarding redesign',
+                type: 'bar', startDate: '2026-04-14', endDate: '2026-04-25',
+                color: '#3b82f6', progress: 20, taskId: 'demo-t4',
+                subItems: [
+                  { id: 'demo-st7', label: 'Simplify step 3 UI',    startDate: '2026-04-14', endDate: '2026-04-18', progress: 30, subTaskId: 'demo-st7' },
+                  { id: 'demo-st8', label: 'Add progress indicator', startDate: '2026-04-21', endDate: '2026-04-25', progress: 0,  subTaskId: 'demo-st8' },
+                ],
+              },
+              {
+                id: 'demo-t5_bar', swimLaneId: lane2, label: 'Analytics dashboard v2',
+                type: 'bar', startDate: '2026-04-07', endDate: '2026-04-18',
+                color: '#ec4899', progress: 50, taskId: 'demo-t5',
+              },
+              {
+                id: 'demo-infra1', swimLaneId: lane3, label: 'Security audit',
+                type: 'bar', startDate: '2026-04-22', endDate: '2026-05-06',
+                color: '#10b981', progress: 0,
+              },
+              {
+                id: 'demo-infra2', swimLaneId: lane3, label: 'Cloud cost review',
+                type: 'bar', startDate: '2026-05-12', endDate: '2026-05-16',
+                color: '#10b981', progress: 0,
+              },
+            ],
+          })
+        }
+      })
+      get().saveUserData()
+    },
+
+    clearDemoData: () => {
+      set(s => {
+        const demoContactIds = ['demo-c1','demo-c2','demo-c3','demo-c4','demo-c5','demo-c6','demo-c7','demo-c8']
+        s.contacts    = s.contacts.filter(c => !c.id.startsWith('demo-'))
+        s.dottedLines = s.dottedLines.filter(d => !demoContactIds.includes(d.fromId) && !demoContactIds.includes(d.toId))
+        s.peerLines   = s.peerLines.filter(d => !demoContactIds.includes(d.fromId) && !demoContactIds.includes(d.toId))
+        s.chartContacts = s.chartContacts.filter(id => !id.startsWith('demo-'))
+        for (const id of demoContactIds) delete s.positions[id]
+        s.meetings = s.meetings.filter(m => !m.id.startsWith('demo-'))
+        for (const bucket of s.taskBuckets) {
+          bucket.tasks = bucket.tasks.filter(t => !t.id.startsWith('demo-'))
+        }
+        s.timelines = s.timelines.filter(tl => !tl.id.startsWith('demo-'))
       })
       get().saveUserData()
     },
