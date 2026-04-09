@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
-import type { TimelineItem, TimelineMilestone, SwimLane, Timescale } from '../../types'
+import type { TimelineItem, TimelineMilestone, SwimLane, Timescale, TimelineSubItem } from '../../types'
+import type { Task } from '../../types'
 import { formatDate, addDays } from './utils/dateLayout'
+import { uid } from '../../lib/utils'
 
 const BAR_COLORS = [
   '#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444',
@@ -12,6 +14,8 @@ const MILESTONE_COLORS = [
   '#3b82f6','#10b981','#14b8a6','#f97316',
 ]
 
+interface TaskWithBucket extends Task { bucketName: string }
+
 interface Props {
   open: boolean
   item: TimelineItem | null
@@ -19,6 +23,7 @@ interface Props {
   laneId: string | null
   swimLanes: SwimLane[]
   timescale?: Timescale
+  allTasks?: TaskWithBucket[]
   onSaveItem: (item: TimelineItem) => void
   onDeleteItem: (id: string) => void
   onSaveMilestone: (m: TimelineMilestone) => void
@@ -27,7 +32,7 @@ interface Props {
 }
 
 export default function ItemDrawer({
-  open, item, milestone, laneId, swimLanes,
+  open, item, milestone, laneId, swimLanes, allTasks = [],
   onSaveItem, onDeleteItem, onSaveMilestone, onDeleteMilestone, onClose,
 }: Props) {
   // ── Item form state ────────────────────────────────────────────────────────
@@ -39,6 +44,8 @@ export default function ItemDrawer({
   const [notes,     setNotes]     = useState('')
   const [laneIdSt,  setLaneIdSt]  = useState(laneId ?? swimLanes[0]?.id ?? '')
   const [itemType,  setItemType]  = useState<'bar' | 'milestone'>('bar')
+  const [taskId,    setTaskId]    = useState<string>('')
+  const [subItems,  setSubItems]  = useState<TimelineSubItem[]>([])
 
   // ── Milestone form state ───────────────────────────────────────────────────
   const [msLabel, setMsLabel] = useState('')
@@ -62,6 +69,8 @@ export default function ItemDrawer({
       setNotes(item.notes ?? '')
       setLaneIdSt(item.swimLaneId)
       setItemType(item.type)
+      setTaskId(item.taskId ?? '')
+      setSubItems(item.subItems ? [...item.subItems] : [])
     } else {
       // New item defaults
       const today = new Date()
@@ -74,6 +83,8 @@ export default function ItemDrawer({
       setNotes('')
       setLaneIdSt(laneId ?? swimLanes[0]?.id ?? '')
       setItemType('bar')
+      setTaskId('')
+      setSubItems([])
     }
   }, [open, item, milestone])
 
@@ -89,12 +100,34 @@ export default function ItemDrawer({
       color,
       progress,
       notes: notes.trim() || undefined,
+      taskId: taskId || undefined,
+      subItems: subItems.length > 0 ? subItems : undefined,
     })
   }
 
   function handleSaveMilestone() {
     if (!msLabel.trim() || !milestone) return
     onSaveMilestone({ id: milestone.id, label: msLabel.trim(), date: msDate, color: msColor })
+  }
+
+  // ── Sub-item helpers ───────────────────────────────────────────────────────
+  function addSubItem() {
+    const today = new Date()
+    setSubItems(prev => [...prev, {
+      id: uid(),
+      label: '',
+      startDate: startDate || formatDate(today),
+      endDate: endDate || formatDate(addDays(today, 7)),
+      progress: 0,
+    }])
+  }
+
+  function updateSubItem(id: string, patch: Partial<TimelineSubItem>) {
+    setSubItems(prev => prev.map(s => s.id === id ? { ...s, ...patch } : s))
+  }
+
+  function removeSubItem(id: string) {
+    setSubItems(prev => prev.filter(s => s.id !== id))
   }
 
   const isExisting = isMilestone ? !!(milestone && milestone.label !== 'Milestone') : !!(item && item.label !== 'New Item')
@@ -108,7 +141,7 @@ export default function ItemDrawer({
         inset-x-0 bottom-0 rounded-t-2xl max-h-[90dvh]
         lg:inset-y-0 lg:right-0 lg:left-auto lg:w-88 lg:rounded-none lg:max-h-full
         ${open ? 'translate-y-0 lg:translate-x-0' : 'translate-y-full lg:translate-x-full'}
-      `} style={{ '--tw-w': '22rem' } as any}>
+      `} style={{ '--tw-w': '22rem' } as React.CSSProperties}>
 
         {/* Drag handle */}
         <div className="lg:hidden flex justify-center pt-3 pb-1 flex-shrink-0">
@@ -120,7 +153,7 @@ export default function ItemDrawer({
           <h2 className="text-base font-bold text-slate-900">
             {isMilestone
               ? (milestone?.label === 'Milestone' ? 'New Milestone' : 'Edit Milestone')
-              : (item?.label === 'New Item' ? 'New Item' : 'Edit Item')
+              : (item?.label === 'New Item' ? 'New Item' : (item ? 'Edit Item' : 'New Item'))
             }
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-2 rounded-lg">
@@ -213,11 +246,95 @@ export default function ItemDrawer({
                   className="w-full accent-blue-500" />
               </div>
 
+              {/* ── Link to Task ──────────────────────────────────────── */}
+              {allTasks.length > 0 && (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Link to Task</label>
+                  <select value={taskId} onChange={e => setTaskId(e.target.value)}
+                    className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
+                    <option value="">— None —</option>
+                    {allTasks.map(t => (
+                      <option key={t.id} value={t.id}>{t.bucketName}: {t.text}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
               <div className="flex flex-col gap-1.5">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Notes</label>
                 <textarea value={notes} onChange={e => setNotes(e.target.value)}
                   rows={3} placeholder="Optional notes…"
                   className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none" />
+              </div>
+
+              {/* ── Sub-items ─────────────────────────────────────────── */}
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Sub-items</label>
+                  <button type="button" onClick={addSubItem}
+                    className="flex items-center gap-1 text-xs font-semibold text-blue-500 hover:text-blue-700 transition-colors">
+                    <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                      <path d="M5.5 1v9M1 5.5h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                    </svg>
+                    Add
+                  </button>
+                </div>
+                {subItems.length === 0 && (
+                  <p className="text-xs text-slate-400 italic">No sub-items yet. Click Add to create one.</p>
+                )}
+                {subItems.map((sub, idx) => (
+                  <div key={sub.id} className="flex flex-col gap-2 bg-slate-50 rounded-xl p-3 relative">
+                    <button type="button" onClick={() => removeSubItem(sub.id)}
+                      className="absolute top-2 right-2 text-slate-300 hover:text-red-400 transition-colors p-1">
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                      </svg>
+                    </button>
+                    <div className="flex items-center gap-1.5 pr-6">
+                      <span className="text-[10px] font-bold text-slate-400 flex-shrink-0">{idx + 1}.</span>
+                      <input type="text" value={sub.label}
+                        onChange={e => updateSubItem(sub.id, { label: e.target.value })}
+                        placeholder="Sub-item label"
+                        className="flex-1 px-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-h-[40px]" />
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-1 flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase">Start</span>
+                        <input type="date" value={sub.startDate}
+                          onChange={e => updateSubItem(sub.id, { startDate: e.target.value })}
+                          className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-h-[40px]" />
+                      </div>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <span className="text-[10px] font-semibold text-slate-400 uppercase">End</span>
+                        <input type="date" value={sub.endDate} min={sub.startDate}
+                          onChange={e => updateSubItem(sub.id, { endDate: e.target.value })}
+                          className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-h-[40px]" />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase flex-shrink-0">Progress {sub.progress}%</span>
+                      <input type="range" min={0} max={100} value={sub.progress}
+                        onChange={e => updateSubItem(sub.id, { progress: Number(e.target.value) })}
+                        className="flex-1 accent-blue-500" />
+                      <label className="flex items-center gap-1 text-[10px] text-slate-500 flex-shrink-0 cursor-pointer">
+                        <input type="checkbox" checked={!!sub.done}
+                          onChange={e => updateSubItem(sub.id, { done: e.target.checked })}
+                          className="accent-blue-500" />
+                        Done
+                      </label>
+                    </div>
+                    {/* Optional task link for sub-item */}
+                    {allTasks.length > 0 && (
+                      <select value={sub.taskId ?? ''} onChange={e => updateSubItem(sub.id, { taskId: e.target.value || undefined })}
+                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-h-[40px]">
+                        <option value="">Link task (optional)</option>
+                        {allTasks.map(t => (
+                          <option key={t.id} value={t.id}>{t.bucketName}: {t.text}</option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                ))}
               </div>
             </>
           )}

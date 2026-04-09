@@ -89,6 +89,7 @@ export interface EmailSettings {
 
 export type Timescale = 'days' | 'weeks' | 'months' | 'quarters' | 'years'
 export type SubTimescale = 'days' | 'weeks' | 'months' | 'quarters' | null
+export type YearMode = 'calendar' | 'financial'  // financial = Jul–Jun (AU)
 
 export interface TimelineMilestone {
   id: string
@@ -101,7 +102,18 @@ export interface SwimLane {
   id: string
   label: string
   color: string
+  collapsed?: boolean
   category?: string
+}
+
+export interface TimelineSubItem {
+  id: string
+  label: string
+  startDate: string
+  endDate: string
+  progress: number
+  taskId?: string   // linked Task id
+  done?: boolean
 }
 
 export interface TimelineItem {
@@ -114,6 +126,9 @@ export interface TimelineItem {
   color: string
   progress: number   // 0–100
   notes?: string
+  taskId?: string    // linked Task id
+  subItems?: TimelineSubItem[]
+  collapsed?: boolean
 }
 
 export interface Timeline {
@@ -122,6 +137,8 @@ export interface Timeline {
   createdAt: number
   timescale: Timescale
   subTimescale: SubTimescale
+  yearMode?: YearMode
+  labelWidth?: number   // resizable, default 140
   startDate: string
   endDate: string
   swimLanes: SwimLane[]

@@ -1,4 +1,4 @@
-import type { Timescale, SubTimescale } from '../../../types'
+import type { Timescale, SubTimescale, YearMode } from '../../../types'
 
 // ─── Date arithmetic helpers ──────────────────────────────────────────────────
 
@@ -72,11 +72,12 @@ export function getColumns(
   viewEnd: Date,
   timescale: Timescale,
   subTimescale: SubTimescale,
+  yearMode: YearMode = 'calendar',
 ): { major: DateColumn[]; minor: DateColumn[] | null } {
   const pxPerDay = PX_PER_DAY[timescale]
 
-  const major = buildColumns(viewStart, viewEnd, timescale, pxPerDay)
-  const minor = subTimescale ? buildColumns(viewStart, viewEnd, subTimescale, pxPerDay) : null
+  const major = buildColumns(viewStart, viewEnd, timescale, pxPerDay, yearMode)
+  const minor = subTimescale ? buildColumns(viewStart, viewEnd, subTimescale, pxPerDay, yearMode) : null
 
   return { major, minor }
 }
@@ -86,6 +87,7 @@ function buildColumns(
   viewEnd: Date,
   scale: Timescale | NonNullable<SubTimescale>,
   pxPerDay: number,
+  yearMode: YearMode = 'calendar',
 ): DateColumn[] {
   const cols: DateColumn[] = []
   let cur = bucketStart(viewStart, scale)
@@ -96,7 +98,7 @@ function buildColumns(
     const clampedEnd   = next > viewEnd   ? viewEnd   : next
     const days = diffDays(clampedStart, clampedEnd)
     cols.push({
-      label: formatLabel(cur, scale),
+      label: formatLabel(cur, scale, yearMode),
       startDate: clampedStart,
       endDate: clampedEnd,
       widthPx: days * pxPerDay,
@@ -141,13 +143,30 @@ function bucketNext(d: Date, scale: Timescale | NonNullable<SubTimescale>): Date
 const MONTH_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
 const MONTH_LONG  = ['January','February','March','April','May','June','July','August','September','October','November','December']
 
-function formatLabel(d: Date, scale: Timescale | NonNullable<SubTimescale>): string {
+// Financial year starts July 1 (AU). FY2025 = Jul 2024 – Jun 2025.
+export function fyYear(d: Date): number {
+  return d.getMonth() >= 6 ? d.getFullYear() + 1 : d.getFullYear()
+}
+export function fyQuarter(d: Date): number {
+  // FY quarters: Q1=Jul-Sep, Q2=Oct-Dec, Q3=Jan-Mar, Q4=Apr-Jun
+  const m = d.getMonth()
+  if (m >= 6 && m <= 8)  return 1
+  if (m >= 9 && m <= 11) return 2
+  if (m >= 0 && m <= 2)  return 3
+  return 4
+}
+
+function formatLabel(d: Date, scale: Timescale | NonNullable<SubTimescale>, yearMode: YearMode = 'calendar'): string {
   switch (scale) {
     case 'days':     return String(d.getDate())
     case 'weeks':    return `W${isoWeek(d)}`
     case 'months':   return MONTH_SHORT[d.getMonth()]
-    case 'quarters': return `Q${Math.floor(d.getMonth() / 3) + 1}`
-    case 'years':    return String(d.getFullYear())
+    case 'quarters':
+      if (yearMode === 'financial') return `FYQ${fyQuarter(d)}`
+      return `Q${Math.floor(d.getMonth() / 3) + 1}`
+    case 'years':
+      if (yearMode === 'financial') return `FY${fyYear(d)}`
+      return String(d.getFullYear())
   }
 }
 
