@@ -214,13 +214,13 @@ export default function TimelinesPage() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     <button
                       onClick={e => handleExport(e, t.id)}
-                      className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 transition-all"
+                      className="lg:opacity-0 lg:group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-all"
                     >
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
                     </button>
                     <button
                       onClick={e => handleDelete(e, t.id, t.name)}
-                      className="opacity-0 group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 transition-all"
+                      className="lg:opacity-0 lg:group-hover:opacity-100 p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:bg-red-100 transition-all"
                     >
                       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
                         <path d="M1 3h12M5 3V2h4v1M3 3l1 9h6l1-9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
