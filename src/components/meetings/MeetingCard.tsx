@@ -26,7 +26,9 @@ export default function MeetingCard({ meeting, contacts, onEdit, onDelete }: Pro
   const attendeeContacts = meeting.attendees.map(id => contacts.find(c => c.id === id)).filter(Boolean) as Contact[]
 
   return (
-    <div className={`bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden ${past ? 'opacity-80' : ''}`}>
+    <div
+      className={`bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden cursor-pointer hover:border-blue-300 hover:shadow-md active:bg-slate-50 transition-all ${past ? 'opacity-80' : ''}`}
+      onClick={onEdit}>
       <div className="flex gap-3 p-3">
         {/* Date block */}
         <div className={`flex-shrink-0 w-12 rounded-lg flex flex-col items-center justify-center py-2 ${past ? 'bg-slate-100' : 'bg-blue-50'}`}>

@@ -24,11 +24,8 @@ function todayStr() {
 export default function MeetingDrawer({ open, meeting, onClose }: Props) {
   const contacts = useAppStore(s => s.contacts)
   const meetings = useAppStore(s => s.meetings)
-  const taskBuckets = useAppStore(s => s.taskBuckets)
-  const addMeeting = useAppStore(s => s.addMeeting)
-  const updateMeeting = useAppStore(s => s.updateMeeting)
   const deleteMeeting = useAppStore(s => s.deleteMeeting)
-  const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
+  const saveMeetingWithTasks = useAppStore(s => s.saveMeetingWithTasks)
 
   const [title, setTitle] = useState('')
   const [date, setDate] = useState(todayStr())
@@ -100,40 +97,11 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
     setActiveTab('current')
   }
 
-  const syncToTasks = (savedMeeting: Meeting) => {
-    if (savedMeeting.actionItems.length === 0) return
-    const bucket = taskBuckets.find(b => b.id === 'unsorted') ?? taskBuckets[0]
-    if (!bucket) return
-    const newBuckets = taskBuckets.map(b => {
-      if (b.id !== bucket.id) return b
-      const toAdd = savedMeeting.actionItems.filter(a => !a.taskId && !a.done)
-      const newTasks = toAdd.map(a => ({
-        id: uid(),
-        text: a.text,
-        priority: a.priority,
-        due: a.due,
-        notes: `From meeting: ${savedMeeting.title}`,
-        createdAt: Date.now(),
-      }))
-      // Tag action items with task IDs
-      savedMeeting.actionItems = savedMeeting.actionItems.map(a => {
-        const newTask = toAdd.find(x => x.id === a.id)
-        if (newTask) {
-          const task = newTasks[toAdd.indexOf(newTask)]
-          return { ...a, taskId: task.id }
-        }
-        return a
-      })
-      return { ...b, tasks: [...b.tasks, ...newTasks] }
-    })
-    setTaskBuckets(newBuckets)
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault()
     if (!title.trim()) return
 
-    const saved: Meeting = {
+    const toSave: Meeting = {
       id: meeting?.id ?? uid(),
       title: title.trim(),
       date,
@@ -143,13 +111,8 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
       createdAt: meeting?.createdAt ?? Date.now(),
     }
 
-    if (meeting) {
-      updateMeeting(saved)
-    } else {
-      addMeeting(saved)
-    }
-
-    syncToTasks(saved)
+    // Atomically saves the meeting and syncs action items ↔ tasks in one write
+    saveMeetingWithTasks(toSave)
     showToast(meeting ? 'Meeting updated' : 'Meeting saved', 'success')
     onClose()
   }

@@ -6,6 +6,7 @@ import {
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
 import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask } from '../types'
+import { uid } from '../lib/utils'
 
 // ─── Write queue ──────────────────────────────────────────────────────────────
 // All saves go through a single debounced queue so that:
@@ -78,6 +79,14 @@ interface StoreState extends AppState {
   addMeeting: (meeting: Meeting) => void
   updateMeeting: (meeting: Meeting) => void
   deleteMeeting: (id: string) => void
+
+  /**
+   * Save a meeting (add or update) AND atomically sync its action items to
+   * task buckets — creating tasks for new undone items, updating text/priority/
+   * due/done for already-linked tasks. Returns the saved meeting (with taskIds
+   * filled in) so the caller can update local state if needed.
+   */
+  saveMeetingWithTasks: (meeting: Meeting) => Meeting
 
   // Tasks
   setTaskBuckets: (buckets: TaskBucket[]) => void
@@ -287,6 +296,68 @@ export const useAppStore = create<StoreState>()(
       get().saveUserData()
     },
     deleteMeeting: (id) => { set(s => { s.meetings = s.meetings.filter(m => m.id !== id) }); get().saveUserData() },
+
+    saveMeetingWithTasks: (meeting) => {
+      // We build a mutable copy so we can stamp taskIds onto action items
+      // before writing — all in one atomic set() call.
+      let result: Meeting = meeting
+      set(s => {
+        const bucketId = 'unsorted'
+        const bucket = s.taskBuckets.find(b => b.id === bucketId) ?? s.taskBuckets[0]
+        if (!bucket) return
+
+        const updatedItems = meeting.actionItems.map(item => {
+          if (item.done) {
+            // Done items: if linked task exists, mark it done too
+            if (item.taskId) {
+              for (const b of s.taskBuckets) {
+                const t = b.tasks.find(t => t.id === item.taskId)
+                if (t) { t.progress = 100; break }
+              }
+            }
+            return item
+          }
+
+          if (item.taskId) {
+            // Already linked — update the task to match the action item
+            for (const b of s.taskBuckets) {
+              const idx = b.tasks.findIndex(t => t.id === item.taskId)
+              if (idx >= 0) {
+                b.tasks[idx] = {
+                  ...b.tasks[idx],
+                  text: item.text,
+                  priority: item.priority,
+                  due: item.due,
+                  notes: `From meeting: ${meeting.title}`,
+                }
+                break
+              }
+            }
+            return item
+          }
+
+          // New undone item with no task yet — create one
+          const newId = uid()
+          bucket.tasks.push({
+            id: newId,
+            text: item.text,
+            priority: item.priority,
+            due: item.due,
+            notes: `From meeting: ${meeting.title}`,
+            createdAt: Date.now(),
+          })
+          return { ...item, taskId: newId }
+        })
+
+        // Save meeting with updated action items (taskIds stamped in)
+        result = { ...meeting, actionItems: updatedItems }
+        const existingIdx = s.meetings.findIndex(m => m.id === meeting.id)
+        if (existingIdx >= 0) s.meetings[existingIdx] = result
+        else s.meetings.push(result)
+      })
+      get().saveUserData()
+      return result
+    },
 
     setTaskBuckets: (buckets) => { set(s => { s.taskBuckets = buckets }); get().saveUserData() },
 
