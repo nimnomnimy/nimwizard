@@ -354,13 +354,30 @@ export const useAppStore = create<StoreState>()(
 
     addTaskAndUpdateTimeline: (bucketId, task, timelineId, updatedItem) => {
       set(s => {
+        // Convert any sub-items on the bar into the task's subTasks
+        const subTasks: import('../types').SubTask[] = (updatedItem.subItems ?? []).map(si => ({
+          id: si.subTaskId ?? si.id,
+          text: si.label || 'Untitled',
+          startDate: si.startDate || undefined,
+          due: si.endDate || undefined,
+          progress: si.progress,
+          done: si.done,
+        }))
+        // Tag each sub-item with its stable subTaskId
+        const taggedSubItems = (updatedItem.subItems ?? []).map(si => ({
+          ...si,
+          subTaskId: si.subTaskId ?? si.id,
+        }))
+        const taskWithSubs = { ...task, subTasks: subTasks.length > 0 ? subTasks : undefined }
+        const itemWithTagged = { ...updatedItem, subItems: taggedSubItems.length > 0 ? taggedSubItems : undefined }
+
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
-        if (bucket) bucket.tasks.push(task)
+        if (bucket) bucket.tasks.push(taskWithSubs)
         const tl = s.timelines.find(x => x.id === timelineId)
         if (tl) {
-          const idx = tl.items.findIndex(i => i.id === updatedItem.id)
-          if (idx >= 0) tl.items[idx] = updatedItem
-          else tl.items.push(updatedItem)
+          const idx = tl.items.findIndex(i => i.id === itemWithTagged.id)
+          if (idx >= 0) tl.items[idx] = itemWithTagged
+          else tl.items.push(itemWithTagged)
         }
       })
       get().saveUserData()
