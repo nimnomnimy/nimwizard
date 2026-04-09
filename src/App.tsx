@@ -17,7 +17,7 @@ function AppRoutes() {
   const uid = useAppStore(s => s.uid)
   const loading = useAppStore(s => s.loading)
 
-  if (loading && !uid) {
+  if (loading) {
     return (
       <div className="min-h-dvh bg-slate-900 flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />

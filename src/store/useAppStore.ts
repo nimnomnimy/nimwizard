@@ -18,6 +18,11 @@ let writeTimer: ReturnType<typeof setTimeout> | null = null
 let lastWriteAt = 0          // ms timestamp of the most recent write we sent
 const WRITE_DEBOUNCE_MS = 600  // coalesce writes within this window
 
+// Set to true after the first successful Firestore snapshot is applied.
+// Prevents an empty-state write from overwriting real data before the
+// first snapshot has arrived (the primary cause of version-update wipes).
+let snapshotReceived = false
+
 function scheduleWrite(fn: () => Promise<void>) {
   if (writeTimer) clearTimeout(writeTimer)
   writeTimer = setTimeout(async () => {
@@ -179,7 +184,10 @@ export const useAppStore = create<StoreState>()(
     emailSettings: {},
     timelines: [],
 
-    setUid: (uid) => set(s => { s.uid = uid }),
+    setUid: (uid) => {
+      if (!uid) snapshotReceived = false  // reset for next login
+      set(s => { s.uid = uid })
+    },
     setLoading: (loading) => set(s => { s.loading = loading }),
 
     loadUserData: async (uid) => {
@@ -194,6 +202,7 @@ export const useAppStore = create<StoreState>()(
 
         if (snap.exists()) {
           const d = snap.data() as Partial<AppState>
+          snapshotReceived = true   // mark that real data has been loaded
           set(s => {
             s.contacts       = d.contacts      ?? []
             s.meetings       = d.meetings      ?? []
@@ -212,6 +221,7 @@ export const useAppStore = create<StoreState>()(
           // New user — no document yet. Initialise store with defaults locally
           // but do NOT write to Firestore here: writing on !snap.exists() was
           // the original cause of data wipes when the listener briefly detached.
+          snapshotReceived = true   // even for new users, unblock writes once confirmed
           set(s => { s.loading = false })
         }
       }, (err) => {
@@ -240,6 +250,14 @@ export const useAppStore = create<StoreState>()(
         set(s => { s.syncing = true })
         const { contacts, meetings, dottedLines, peerLines, chartContacts,
                 positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines } = get()
+
+        // Safety: block write if no snapshot has arrived yet — this prevents
+        // an early save from overwriting real Firestore data with empty defaults.
+        if (!snapshotReceived) {
+          set(s => { s.syncing = false })
+          return
+        }
+
         try {
           // merge: true means this write only touches the fields listed —
           // it can never wipe a field that wasn't included in this call
@@ -387,6 +405,14 @@ export const useAppStore = create<StoreState>()(
             }
           })
         })
+        // Sync done/progress to linked meeting action items
+        if (task.progress === 100) {
+          s.meetings.forEach(m => {
+            m.actionItems.forEach(a => {
+              if (a.taskId === task.id) a.done = true
+            })
+          })
+        }
       })
       get().saveUserData()
     },
@@ -399,6 +425,15 @@ export const useAppStore = create<StoreState>()(
         const taskIdx = fromBucket.tasks.findIndex(t => t.id === taskId)
         if (taskIdx < 0) return
         const [task] = fromBucket.tasks.splice(taskIdx, 1)
+        // If moved to done bucket, mark task progress=100 and sync to meeting items
+        if (toBucketId === 'done') {
+          task.progress = 100
+          s.meetings.forEach(m => {
+            m.actionItems.forEach(a => {
+              if (a.taskId === taskId) a.done = true
+            })
+          })
+        }
         toBucket.tasks.push(task)
       })
       get().saveUserData()

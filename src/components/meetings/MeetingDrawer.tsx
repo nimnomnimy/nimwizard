@@ -39,10 +39,17 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
   const titleRef = useRef<HTMLInputElement>(null)
   const actionInputRef = useRef<HTMLInputElement>(null)
 
-  // Previous meeting with same attendees (for reference tab)
-  const previousMeeting = meetings
-    .filter(m => m.id !== meeting?.id && m.date < date && m.attendees.some(a => attendees.includes(a)))
-    .sort((a, b) => b.date.localeCompare(a.date))[0] ?? null
+  // Previous meetings for reference tab:
+  // - If attendees are selected, prioritise meetings that share at least one attendee
+  // - Otherwise fall back to the most recent past meetings so the tab is useful
+  //   even before attendees are filled in on a new meeting
+  const pastMeetings = meetings
+    .filter(m => m.id !== meeting?.id && m.date < date)
+    .sort((a, b) => b.date.localeCompare(a.date))
+
+  const previousMeeting = attendees.length > 0
+    ? (pastMeetings.find(m => m.attendees.some(a => attendees.includes(a))) ?? pastMeetings[0] ?? null)
+    : (pastMeetings[0] ?? null)
 
   useEffect(() => {
     if (open) {
@@ -306,12 +313,16 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
                   <circle cx="20" cy="20" r="15" stroke="currentColor" strokeWidth="1.5"/>
                   <path d="M20 12v8l5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                 </svg>
-                <p className="text-sm text-center">No previous meeting found with these attendees</p>
+                <p className="text-sm text-center">No previous meetings found</p>
               </div>
             ) : (
               <div className="flex flex-col gap-4">
                 <div className="bg-slate-50 rounded-xl p-3">
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-0.5">Previous meeting</p>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-0.5">
+                    {attendees.length > 0 && previousMeeting.attendees.some(a => attendees.includes(a))
+                      ? 'Previous meeting · shared attendees'
+                      : 'Most recent meeting'}
+                  </p>
                   <p className="text-sm font-semibold text-slate-800">{previousMeeting.title}</p>
                   <p className="text-xs text-slate-400 mt-0.5">{previousMeeting.date}</p>
                 </div>
