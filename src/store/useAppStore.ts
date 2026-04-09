@@ -61,20 +61,35 @@ interface StoreState extends AppState {
   addTimeline: (t: Timeline) => void
   updateTimeline: (t: Timeline) => void
   deleteTimeline: (id: string) => void
-  // Atomic: add a new Task to a bucket AND update a timeline item in one write
+
+  // Atomic cross-feature mutations (prevent concurrent-save races)
+
+  /** Create a new task in a bucket AND add/update the linked timeline item in one write. */
   addTaskAndUpdateTimeline: (
     bucketId: string,
     task: import('../types').Task,
     timelineId: string,
     updatedItem: TimelineItem,
   ) => void
-  // Atomic: sync a sub-task change to the task bucket AND update timeline sub-items
-  updateSubTaskAndTimeline: (
+
+  /**
+   * Save/update a subtask on a parent task AND sync the matching TimelineSubItem
+   * on the timeline bar that has taskId === parentTaskId.
+   * If no matching bar exists nothing bad happens.
+   */
+  saveSubTaskWithTimelineSync: (
     bucketId: string,
     parentTaskId: string,
     sub: import('../types').SubTask,
-    timelineId: string,
-    updatedItem: TimelineItem,
+    /** pass the id of the TimelineSubItem to update (equals sub.id by convention) */
+    subItemId: string,
+  ) => void
+
+  /** Delete a subtask AND remove the matching sub-item from any timeline bar. */
+  deleteSubTaskWithTimelineSync: (
+    bucketId: string,
+    parentTaskId: string,
+    subId: string,
   ) => void
 }
 
@@ -101,8 +116,6 @@ export const useAppStore = create<StoreState>()(
 
     loadUserData: async (uid) => {
       set(s => { s.loading = true })
-
-      // Real-time listener on user doc
       const userRef = doc(db, 'users', uid)
       const unsub = onSnapshot(userRef, (snap) => {
         if (snap.exists()) {
@@ -122,7 +135,6 @@ export const useAppStore = create<StoreState>()(
             s.loading = false
           })
         } else {
-          // First time user — create their doc with defaults
           setDoc(userRef, {
             contacts: [], meetings: [], dottedLines: [], peerLines: [],
             chartContacts: [], positions: {}, activeChartOrg: null,
@@ -199,7 +211,6 @@ export const useAppStore = create<StoreState>()(
 
     updateTask: (bucketId, task) => {
       set(s => {
-        // Update task in bucket
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
         if (bucket) {
           const idx = bucket.tasks.findIndex(t => t.id === task.id)
@@ -241,10 +252,8 @@ export const useAppStore = create<StoreState>()(
 
     addTaskAndUpdateTimeline: (bucketId, task, timelineId, updatedItem) => {
       set(s => {
-        // Add the new task to the bucket
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
         if (bucket) bucket.tasks.push(task)
-        // Update the timeline item (with taskId linked back)
         const tl = s.timelines.find(x => x.id === timelineId)
         if (tl) {
           const idx = tl.items.findIndex(i => i.id === updatedItem.id)
@@ -255,9 +264,9 @@ export const useAppStore = create<StoreState>()(
       get().saveUserData()
     },
 
-    updateSubTaskAndTimeline: (bucketId, parentTaskId, sub, timelineId, updatedItem) => {
+    saveSubTaskWithTimelineSync: (bucketId, parentTaskId, sub, subItemId) => {
       set(s => {
-        // Sync sub-task into the parent task in the bucket
+        // 1. Update the SubTask on the parent Task
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
         if (bucket) {
           const task = bucket.tasks.find(t => t.id === parentTaskId)
@@ -268,11 +277,48 @@ export const useAppStore = create<StoreState>()(
             else task.subTasks.push(sub)
           }
         }
-        // Update the timeline item (with updated subItems)
-        const tl = s.timelines.find(x => x.id === timelineId)
-        if (tl) {
-          const idx = tl.items.findIndex(i => i.id === updatedItem.id)
-          if (idx >= 0) tl.items[idx] = updatedItem
+
+        // 2. Find timeline bar linked to this task and sync the sub-item
+        for (const tl of s.timelines) {
+          const item = tl.items.find(i => i.taskId === parentTaskId)
+          if (item) {
+            if (!item.subItems) item.subItems = []
+            const siIdx = item.subItems.findIndex(si => si.id === subItemId)
+            const today = new Date().toISOString().split('T')[0]
+            const sevenDaysLater = new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]
+            const updated = {
+              id: subItemId,
+              label: sub.text,
+              startDate: item.subItems[siIdx]?.startDate ?? item.startDate ?? today,
+              endDate: item.subItems[siIdx]?.endDate ?? item.endDate ?? sevenDaysLater,
+              progress: sub.progress ?? 0,
+              done: sub.done,
+              subTaskId: sub.id,
+            }
+            if (siIdx >= 0) item.subItems[siIdx] = updated
+            else item.subItems.push(updated)
+            break
+          }
+        }
+      })
+      get().saveUserData()
+    },
+
+    deleteSubTaskWithTimelineSync: (bucketId, parentTaskId, subId) => {
+      set(s => {
+        // Remove from task
+        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        if (bucket) {
+          const task = bucket.tasks.find(t => t.id === parentTaskId)
+          if (task) task.subTasks = (task.subTasks ?? []).filter(st => st.id !== subId)
+        }
+        // Remove from timeline bar
+        for (const tl of s.timelines) {
+          const item = tl.items.find(i => i.taskId === parentTaskId)
+          if (item) {
+            item.subItems = (item.subItems ?? []).filter(si => si.id !== subId && si.subTaskId !== subId)
+            break
+          }
         }
       })
       get().saveUserData()

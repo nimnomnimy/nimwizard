@@ -38,6 +38,8 @@ export default function TasksPage() {
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
   const moveTaskStore = useAppStore(s => s.moveTask)
+  const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
+  const deleteSubTaskWithTimelineSync = useAppStore(s => s.deleteSubTaskWithTimelineSync)
   const timelines = useAppStore(s => s.timelines)
 
   const [search, setSearch] = useState('')
@@ -152,13 +154,8 @@ export default function TasksPage() {
     if (!subDrawer) return
     const { bucketId, task } = subDrawer
     const existing = (task.subTasks ?? []).some(s => s.id === sub.id)
-    const newSubTasks = existing
-      ? (task.subTasks ?? []).map(s => s.id === sub.id ? sub : s)
-      : [...(task.subTasks ?? []), sub]
-    const updatedTask = { ...task, subTasks: newSubTasks }
-    setTaskBuckets(taskBuckets.map(b =>
-      b.id === bucketId ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? updatedTask : t) } : b
-    ))
+    // Sync to timeline bar if task is linked to one
+    saveSubTaskWithTimelineSync(bucketId, task.id, sub, sub.id)
     setSubDrawer(null)
     showToast(existing ? 'Sub-task updated' : 'Sub-task added', 'success')
   }
@@ -166,10 +163,7 @@ export default function TasksPage() {
   const deleteSubTask = (subId: string) => {
     if (!subDrawer) return
     const { bucketId, task } = subDrawer
-    const updatedTask = { ...task, subTasks: (task.subTasks ?? []).filter(s => s.id !== subId) }
-    setTaskBuckets(taskBuckets.map(b =>
-      b.id === bucketId ? { ...b, tasks: b.tasks.map(t => t.id === task.id ? updatedTask : t) } : b
-    ))
+    deleteSubTaskWithTimelineSync(bucketId, task.id, subId)
     setSubDrawer(null)
     showToast('Sub-task deleted')
   }

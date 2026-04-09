@@ -83,7 +83,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const addTaskAndUpdateTimeline = useAppStore(s => s.addTaskAndUpdateTimeline)
-  const updateSubTaskAndTimeline = useAppStore(s => s.updateSubTaskAndTimeline)
+  const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
+  const deleteSubTaskWithTimelineSync = useAppStore(s => s.deleteSubTaskWithTimelineSync)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
   const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
 
@@ -334,41 +335,52 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // ── Sub-item save from sub-drawer ─────────────────────────────────────────
   function saveSubItemFromDrawer(sub: import('../../types').SubTask) {
     if (!subDrawer) return
-    const { item, subItem } = subDrawer
-    const asTimelineSub: TimelineSubItem = {
-      id: subItem?.id ?? sub.id,
-      label: sub.text,
-      startDate: subItem?.startDate ?? formatDate(new Date()),
-      endDate: subItem?.endDate ?? formatDate(addDays(new Date(), 7)),
-      progress: sub.progress ?? 0,
-      done: sub.done,
-      taskId: subItem?.taskId,
-      subTaskId: sub.id,
-    }
-    const existingSub = (item.subItems ?? []).some(s => s.id === asTimelineSub.id)
-    const newSubs = existingSub
-      ? (item.subItems ?? []).map(s => s.id === asTimelineSub.id ? asTimelineSub : s)
-      : [...(item.subItems ?? []), asTimelineSub]
-    const updatedItem = { ...item, subItems: newSubs }
+    const { item } = subDrawer
 
     if (item.taskId) {
-      // Atomic: sync sub-task to bucket task AND update timeline item in one write
-      const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id }))).find(x => x.task.id === item.taskId)
+      // Atomic: saves SubTask on the parent Task AND syncs the TimelineSubItem — one write
+      const bucketEntry = taskBuckets
+        .flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id })))
+        .find(x => x.task.id === item.taskId)
       if (bucketEntry) {
-        updateSubTaskAndTimeline(bucketEntry.bucketId, item.taskId, sub, timeline.id, updatedItem)
+        saveSubTaskWithTimelineSync(bucketEntry.bucketId, item.taskId, sub, sub.id)
         setSubDrawer(null)
         return
       }
     }
 
-    // No linked task — just update the timeline
-    update({ items: timeline.items.map(i => i.id === item.id ? updatedItem : i) })
+    // Bar not linked to a task yet — just update the timeline sub-item locally
+    const { subItem } = subDrawer
+    const asTimelineSub: TimelineSubItem = {
+      id: subItem?.id ?? sub.id,
+      label: sub.text,
+      startDate: subItem?.startDate ?? item.startDate,
+      endDate: subItem?.endDate ?? item.endDate,
+      progress: sub.progress ?? 0,
+      done: sub.done,
+      subTaskId: sub.id,
+    }
+    const existingSi = (item.subItems ?? []).some(s => s.id === asTimelineSub.id)
+    const newSubs = existingSi
+      ? (item.subItems ?? []).map(s => s.id === asTimelineSub.id ? asTimelineSub : s)
+      : [...(item.subItems ?? []), asTimelineSub]
+    update({ items: timeline.items.map(i => i.id === item.id ? { ...i, subItems: newSubs } : i) })
     setSubDrawer(null)
   }
 
   function deleteSubItemFromDrawer(subId: string) {
     if (!subDrawer) return
     const { item } = subDrawer
+    if (item.taskId) {
+      const bucketEntry = taskBuckets
+        .flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id })))
+        .find(x => x.task.id === item.taskId)
+      if (bucketEntry) {
+        deleteSubTaskWithTimelineSync(bucketEntry.bucketId, item.taskId, subId)
+        setSubDrawer(null)
+        return
+      }
+    }
     update({ items: timeline.items.map(i => i.id === item.id ? { ...i, subItems: (i.subItems ?? []).filter(s => s.id !== subId) } : i) })
     setSubDrawer(null)
   }

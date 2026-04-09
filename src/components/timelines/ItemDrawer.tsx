@@ -270,17 +270,11 @@ export default function ItemDrawer({
                   className="w-full accent-blue-500" />
               </div>
 
-              {/* ── Link to Task ──────────────────────────────────────── */}
-              {allTasks.length > 0 && (
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Link to Task</label>
-                  <select value={taskId} onChange={e => setTaskId(e.target.value)}
-                    className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
-                    <option value="">— None —</option>
-                    {allTasks.map(t => (
-                      <option key={t.id} value={t.id}>{t.bucketName}: {t.text}</option>
-                    ))}
-                  </select>
+              {/* Task auto-created on save — no manual link needed */}
+              {taskId && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-indigo-50 rounded-xl border border-indigo-100">
+                  <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M1 7l3 3 8-7" stroke="#6366f1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  <span className="text-xs text-indigo-600 font-medium">Linked to task in Tasks</span>
                 </div>
               )}
 
@@ -373,16 +367,6 @@ export default function ItemDrawer({
                         Done
                       </label>
                     </div>
-                    {/* Optional task link for sub-item */}
-                    {allTasks.length > 0 && (
-                      <select value={sub.taskId ?? ''} onChange={e => updateSubItem(sub.id, { taskId: e.target.value || undefined })}
-                        className="w-full px-2 py-2 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white min-h-[40px]">
-                        <option value="">Link task (optional)</option>
-                        {allTasks.map(t => (
-                          <option key={t.id} value={t.id}>{t.bucketName}: {t.text}</option>
-                        ))}
-                      </select>
-                    )}
                   </div>
                 ))}
               </div>

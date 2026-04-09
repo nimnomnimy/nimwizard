@@ -21,13 +21,15 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
   const taskBuckets  = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
   const updateTask   = useAppStore(s => s.updateTask)
+  const timelines    = useAppStore(s => s.timelines)
 
-  const [text,     setText]     = useState('')
-  const [notes,    setNotes]    = useState('')
-  const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium')
-  const [due,      setDue]      = useState('')
-  const [progress, setProgress] = useState(0)
-  const [targetBucket, setTargetBucket] = useState(bucketId)
+  const [text,          setText]         = useState('')
+  const [notes,         setNotes]        = useState('')
+  const [priority,      setPriority]     = useState<'low' | 'medium' | 'high'>('medium')
+  const [due,           setDue]          = useState('')
+  const [progress,      setProgress]     = useState(0)
+  const [targetBucket,  setTargetBucket] = useState(bucketId)
+  const [timelineId,    setTimelineId]   = useState<string>('')
   const titleRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
@@ -38,6 +40,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       setDue(task?.due ?? '')
       setProgress(task?.progress ?? 0)
       setTargetBucket(bucketId)
+      setTimelineId(task?.timelineId ?? '')
       setTimeout(() => titleRef.current?.focus(), 100)
     }
   }, [open, task, bucketId])
@@ -54,6 +57,11 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       due: due || undefined,
       progress: progress > 0 ? progress : undefined,
       createdAt: task?.createdAt ?? Date.now(),
+      // Preserve fields not edited here
+      subTasks: task?.subTasks,
+      collapsed: task?.collapsed,
+      predecessorIds: task?.predecessorIds,
+      timelineId: timelineId || undefined,
     }
 
     if (task && targetBucket === bucketId) {
@@ -130,6 +138,23 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
             </select>
           </div>
 
+          {/* Timeline assignment */}
+          {timelines.length > 0 && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Timeline</label>
+              <select value={timelineId} onChange={e => setTimelineId(e.target.value)}
+                className="w-full px-3 py-3 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[48px] bg-white">
+                <option value="">— None —</option>
+                {timelines.map(tl => (
+                  <option key={tl.id} value={tl.id}>{tl.name}</option>
+                ))}
+              </select>
+              {timelineId && (
+                <p className="text-[11px] text-slate-400">This task will appear in the selected timeline's filter.</p>
+              )}
+            </div>
+          )}
+
           {/* Priority */}
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Priority</label>
@@ -158,7 +183,6 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
             <input type="range" min={0} max={100} value={progress}
               onChange={e => setProgress(Number(e.target.value))}
               className="w-full accent-blue-500" />
-            {/* Quick presets */}
             <div className="flex gap-1.5 flex-wrap">
               {[0, 25, 50, 75, 100].map(v => (
                 <button key={v} type="button" onClick={() => setProgress(v)}
