@@ -18,6 +18,9 @@ export function useAuth() {
       setUid(user?.uid ?? null)
       if (user) {
         dataUnsubRef.current = await loadUserData(user.uid)
+      } else {
+        // No user signed in — stop the loading spinner
+        useAppStore.getState().setLoading(false)
       }
     })
     return () => {

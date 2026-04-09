@@ -21,6 +21,7 @@ interface StoreState extends AppState {
 
   // Auth
   setUid: (uid: string | null) => void
+  setLoading: (loading: boolean) => void
 
   // Data lifecycle
   loadUserData: (uid: string) => Promise<Unsubscribe>
@@ -72,6 +73,7 @@ export const useAppStore = create<StoreState>()(
     emailSettings: {},
 
     setUid: (uid) => set(s => { s.uid = uid }),
+    setLoading: (loading) => set(s => { s.loading = loading }),
 
     loadUserData: async (uid) => {
       set(s => { s.loading = true })

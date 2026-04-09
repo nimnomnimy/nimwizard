@@ -8,6 +8,7 @@ import OrgChartPage from './pages/OrgChartPage'
 import MeetingsPage from './pages/MeetingsPage'
 import TasksPage from './pages/TasksPage'
 import SetupPage from './pages/SetupPage'
+import AdminPage from './pages/AdminPage'
 
 function AppRoutes() {
   useAuth()
@@ -34,6 +35,7 @@ function AppRoutes() {
         <Route path="/tasks"    element={<TasksPage />} />
         <Route path="/setup"    element={<SetupPage />} />
       </Route>
+      <Route path="/admin" element={<AdminPage />} />
       <Route path="*" element={<Navigate to="/contacts" replace />} />
     </Routes>
   )
