@@ -10,10 +10,12 @@ import SubTaskDrawer from '../tasks/SubTaskDrawer'
 import { useAppStore } from '../../store/useAppStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const LANE_HEIGHT    = 52
-const ADD_TASK_ROW_H = 26   // "Add task" button row below lane header
-const SUB_ITEM_H     = 28
-const SUB_ITEM_PAD   = 4
+const LANE_HEADER_H  = 36   // lane name row height
+const BAR_ROW_H      = 40   // height of one task row
+const SUB_ROW_H      = 32   // height of one sub-item row
+const ADD_TASK_ROW_H = 28   // "+ Add task" button at bottom of label col
+// Legacy alias kept for predecessor-line calculations
+const LANE_HEIGHT    = LANE_HEADER_H
 const DEFAULT_LABEL_W = 180
 const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
@@ -400,12 +402,43 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     }
   }, [])
 
-  // ── Lane height (includes sub-items if expanded) ──────────────────────────
-  function laneH(laneId: string) {
-    if (timeline.swimLanes.find(l=>l.id===laneId)?.collapsed) return LANE_HEIGHT + ADD_TASK_ROW_H
-    const items = timeline.items.filter(i=>i.swimLaneId===laneId && i.type==='bar')
-    const maxSubs = Math.max(0, ...items.map(i => i.collapsed ? 0 : (i.subItems?.length ?? 0)))
-    return LANE_HEIGHT + ADD_TASK_ROW_H + maxSubs * (SUB_ITEM_H + SUB_ITEM_PAD)
+  // ── Row layout helpers ────────────────────────────────────────────────────
+  /** Total height of a lane including header, all task rows, sub-rows, add-task button */
+  function laneH(laneId: string): number {
+    const lane = timeline.swimLanes.find(l => l.id === laneId)
+    if (lane?.collapsed) return LANE_HEADER_H + ADD_TASK_ROW_H
+    const items = timeline.items.filter(i => i.swimLaneId === laneId && i.type === 'bar')
+    const rowsHeight = items.reduce((sum, item) => {
+      const subCount = item.collapsed ? 0 : (item.subItems?.length ?? 0)
+      return sum + BAR_ROW_H + subCount * SUB_ROW_H
+    }, 0)
+    return LANE_HEADER_H + rowsHeight + ADD_TASK_ROW_H
+  }
+
+  /** Y offset (within the canvas area) of a task bar — below the header */
+  function itemBarY(laneId: string, itemId: string): number {
+    const items = timeline.items.filter(i => i.swimLaneId === laneId && i.type === 'bar')
+    let y = LANE_HEADER_H
+    for (const item of items) {
+      if (item.id === itemId) return y + (BAR_ROW_H - 28) / 2
+      const subCount = item.collapsed ? 0 : (item.subItems?.length ?? 0)
+      y += BAR_ROW_H + subCount * SUB_ROW_H
+    }
+    return y + (BAR_ROW_H - 28) / 2
+  }
+
+  /** Y offset of a sub-item bar within the canvas */
+  function subItemY(laneId: string, parentItemId: string, subIdx: number): number {
+    const items = timeline.items.filter(i => i.swimLaneId === laneId && i.type === 'bar')
+    let y = LANE_HEADER_H
+    for (const item of items) {
+      if (item.id === parentItemId) {
+        return y + BAR_ROW_H + subIdx * SUB_ROW_H + (SUB_ROW_H - 24) / 2
+      }
+      const subCount = item.collapsed ? 0 : (item.subItems?.length ?? 0)
+      y += BAR_ROW_H + subCount * SUB_ROW_H
+    }
+    return y
   }
 
   const totalCanvasH = timeline.swimLanes.reduce((s, l) => s + laneH(l.id), 0)
@@ -594,8 +627,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
               const laneHeight = laneH(lane.id)
               const laneItems  = timeline.items.filter(i => i.swimLaneId===lane.id)
               const laneGhost  = ghost?.laneId===lane.id ? ghost : null
-              const barY       = (LANE_HEIGHT - 28) / 2
               const collapsed  = lane.collapsed
+
+              const barItems = laneItems.filter(i => i.type === 'bar')
 
               return (
                 <div key={lane.id} style={{ position:'absolute', top:laneY, left:0, width:labelWidth+totalWidthPx, height:laneHeight, display:'flex' }}>
@@ -603,9 +637,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   {/* ── Label column (sticky) ───────────────────────────── */}
                   <div style={{ width:labelWidth, flexShrink:0, height:laneHeight }}
                     className="sticky left-0 z-10 bg-white border-r border-b border-slate-200 flex flex-col relative group">
-                    {/* Main row */}
-                    <div className="flex items-center px-2 gap-1.5" style={{ minHeight: LANE_HEIGHT }}>
-                      {/* Collapse toggle */}
+
+                    {/* Lane header row */}
+                    <div className="flex items-center px-2 gap-1.5 flex-shrink-0 border-b border-slate-100" style={{ height: LANE_HEADER_H }}>
                       <button onClick={() => toggleLane(lane.id)}
                         className="text-slate-300 hover:text-slate-500 flex-shrink-0 transition-colors p-0.5">
                         <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"
@@ -613,30 +647,64 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                           <path d="M2 3l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
                         </svg>
                       </button>
-                      {/* Color swatch */}
                       <div className="relative flex-shrink-0">
                         <div style={{ backgroundColor:lane.color }} className="w-2.5 h-2.5 rounded-full" />
                         <input type="color" value={lane.color} onChange={e=>colorLane(lane.id,e.target.value)}
                           className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
                       </div>
-                      {/* Name */}
                       <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
                         className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 truncate" />
-                      {/* Delete lane */}
                       {timeline.swimLanes.length > 1 && (
-                        <button onClick={()=>deleteLane(lane.id)}
-                          title="Delete lane"
+                        <button onClick={()=>deleteLane(lane.id)} title="Delete lane"
                           className="lg:opacity-0 lg:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 active:text-red-500 transition-all flex-shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center">
                           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M4.5 3V2h3v1M2.5 3l.8 7h5.4l.8-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </button>
                       )}
                     </div>
-                    {/* Add task row */}
+
+                    {/* Per-task label rows */}
+                    {!collapsed && barItems.map(item => {
+                      const subItems = item.subItems ?? []
+                      const itemCollapsed = item.collapsed
+                      return (
+                        <div key={item.id} className="flex flex-col flex-shrink-0 border-b border-slate-50">
+                          {/* Task label row */}
+                          <div className="flex items-center gap-1.5 px-2" style={{ height: BAR_ROW_H }}>
+                            {subItems.length > 0 && (
+                              <button onClick={e=>{ e.stopPropagation(); update({ items: timeline.items.map(i=>i.id===item.id?{...i,collapsed:!i.collapsed}:i) }) }}
+                                className="text-slate-300 hover:text-slate-500 flex-shrink-0 transition-colors p-0.5">
+                                <svg width="9" height="9" viewBox="0 0 9 9" fill="currentColor"
+                                  style={{ transform: itemCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition:'transform 0.15s' }}>
+                                  <path d="M1.5 3l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none"/>
+                                </svg>
+                              </button>
+                            )}
+                            <div className="w-2 h-2 rounded-sm flex-shrink-0" style={{ backgroundColor: item.color }} />
+                            <span className="flex-1 text-xs font-medium text-slate-700 truncate leading-tight"
+                              title={item.label}>{item.label || <span className="text-slate-300 italic">Untitled</span>}</span>
+                          </div>
+                          {/* Sub-item label rows */}
+                          {!itemCollapsed && subItems.map(sub => (
+                            <div key={sub.id} className="flex items-center gap-1.5 pl-6 pr-2 border-t border-slate-50 cursor-pointer hover:bg-slate-50 transition-colors"
+                              style={{ height: SUB_ROW_H }}
+                              onClick={() => setSubDrawer({ item, subItem: sub })}>
+                              <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 opacity-60" style={{ backgroundColor: item.color }} />
+                              <span className="flex-1 text-[11px] text-slate-500 truncate">{sub.label || <span className="text-slate-300 italic">Untitled</span>}</span>
+                              {sub.done && <span className="text-[9px] text-emerald-500 font-bold flex-shrink-0">✓</span>}
+                            </div>
+                          ))}
+                        </div>
+                      )
+                    })}
+
+                    {/* Add task button */}
                     <button onClick={()=>addTaskForLane(lane.id)}
-                      className="flex items-center gap-1.5 px-2 py-1 text-[10px] font-semibold text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors w-full border-t border-slate-100 min-h-[26px]">
+                      className="flex items-center gap-1.5 px-2 text-[10px] font-semibold text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors w-full border-t border-slate-100 flex-shrink-0"
+                      style={{ height: ADD_TASK_ROW_H }}>
                       <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
                       Add task
                     </button>
+
                     {/* Resize handle */}
                     <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
                       className="hover:bg-blue-300/40 transition-colors"
@@ -654,39 +722,54 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       return <div key={i} style={{ position:'absolute', left:lx, top:0, bottom:0, width:1, backgroundColor:'#f1f5f9', pointerEvents:'none' }} />
                     })}
 
+                    {/* Horizontal row dividers on canvas */}
+                    {!collapsed && (() => {
+                      const dividers: React.ReactNode[] = []
+                      let y = LANE_HEADER_H
+                      for (const item of barItems) {
+                        y += BAR_ROW_H
+                        dividers.push(<div key={item.id} style={{ position:'absolute', left:0, right:0, top:y-1, height:1, backgroundColor:'#f8fafc', pointerEvents:'none', zIndex:0 }} />)
+                        if (!item.collapsed) {
+                          for (let si = 0; si < (item.subItems?.length ?? 0); si++) {
+                            y += SUB_ROW_H
+                            dividers.push(<div key={item.id+'-s'+si} style={{ position:'absolute', left:0, right:0, top:y-1, height:1, backgroundColor:'#f1f5f9', pointerEvents:'none', zIndex:0 }} />)
+                          }
+                        }
+                      }
+                      return dividers
+                    })()}
+
                     {!collapsed && (
                       <>
                         {/* Ghost bar while drawing */}
                         {laneGhost && laneGhost.width >= MIN_DRAW_PX && (
-                          <div style={{ position:'absolute', left:laneGhost.left, top:barY, width:laneGhost.width, height:28,
+                          <div style={{ position:'absolute', left:laneGhost.left, top:LANE_HEADER_H + (BAR_ROW_H - 28)/2, width:laneGhost.width, height:28,
                             borderRadius:6, backgroundColor:lane.color, opacity:0.3, border:`2px solid ${lane.color}`, pointerEvents:'none', zIndex:1 }} />
                         )}
 
-                        {/* Bar items */}
-                        {laneItems.filter(i=>i.type==='bar').map(item => {
+                        {/* Bar items — each on its own row */}
+                        {barItems.map(item => {
                           const x = itemX(item); const w = itemW(item)
                           const subItems = item.subItems ?? []
                           const itemCollapsed = item.collapsed
+                          const bY = itemBarY(lane.id, item.id)
 
                           return (
                             <div key={item.id}>
                               {/* Main bar */}
-                              <div style={{ position:'absolute', left:x, top:barY, width:w, height:28,
+                              <div style={{ position:'absolute', left:x, top:bY, width:w, height:28,
                                 borderRadius:6, backgroundColor:item.color, opacity:0.9,
                                 cursor:'grab', display:'flex', alignItems:'center', overflow:'hidden', zIndex:2,
                                 boxShadow:'0 1px 3px rgba(0,0,0,0.15)', touchAction:'none' }}
                                 onPointerDown={e=>startBarDrag(e,item,'move')}
                                 onClick={e=>{ e.stopPropagation(); setEditingItem(item); setEditingMilestone(null); setAddingForLane(lane.id); setDrawerOpen(true) }}>
-                                {/* Resize left */}
                                 <div style={{ width:8, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                   className="hover:bg-black/10"
                                   onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-left') }} />
-                                {/* Progress */}
                                 {item.progress>0 && (
                                   <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${item.progress}%`,
                                     backgroundColor:'rgba(0,0,0,0.18)', borderRadius:6, pointerEvents:'none' }} />
                                 )}
-                                {/* Label + date */}
                                 <span style={{ flex:1, fontSize:11, fontWeight:600, color:'white', whiteSpace:'nowrap',
                                   overflow:'hidden', textOverflow:'ellipsis', paddingLeft:2, paddingRight:4,
                                   textShadow:'0 1px 2px rgba(0,0,0,0.3)', pointerEvents:'none' }}>
@@ -695,26 +778,18 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                     {item.startDate.slice(5)} – {item.endDate.slice(5)}
                                   </span>}
                                 </span>
-                                {/* Collapse sub-items toggle */}
-                                {subItems.length>0 && (
-                                  <button style={{ color:'white', opacity:0.7, paddingRight:4, fontSize:9, flexShrink:0, pointerEvents:'all' }}
-                                    onClick={e=>{e.stopPropagation(); update({ items: timeline.items.map(i=>i.id===item.id?{...i,collapsed:!i.collapsed}:i) })}}>
-                                    {itemCollapsed?'▶':'▼'}
-                                  </button>
-                                )}
-                                {/* Resize right */}
                                 <div style={{ width:8, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                   className="hover:bg-black/10"
                                   onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-right') }} />
                               </div>
 
-                              {/* Sub-items */}
+                              {/* Sub-item bars — each on its own row */}
                               {!itemCollapsed && subItems.map((sub, si) => {
                                 const sx = itemX(sub); const sw = itemW(sub)
-                                const subY = LANE_HEIGHT + si*(SUB_ITEM_H+SUB_ITEM_PAD)
+                                const sY = subItemY(lane.id, item.id, si)
                                 return (
-                                  <div key={sub.id} style={{ position:'absolute', left:sx, top:subY, width:sw, height:SUB_ITEM_H,
-                                    borderRadius:4, backgroundColor: item.color, opacity:0.6,
+                                  <div key={sub.id} style={{ position:'absolute', left:sx, top:sY, width:sw, height:24,
+                                    borderRadius:4, backgroundColor: item.color, opacity:0.55,
                                     cursor:'grab', display:'flex', alignItems:'center', overflow:'hidden', zIndex:2,
                                     boxShadow:'0 1px 2px rgba(0,0,0,0.1)', touchAction:'none' }}
                                     onPointerDown={e=>startBarDrag(e,sub,'move',item.id)}
@@ -728,8 +803,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                     <span style={{ flex:1, fontSize:10, fontWeight:600, color:'white', whiteSpace:'nowrap',
                                       overflow:'hidden', textOverflow:'ellipsis', paddingLeft:2,
                                       textShadow:'0 1px 1px rgba(0,0,0,0.3)', pointerEvents:'none' }}>
-                                      {sub.label}
-                                      {sub.done && ' ✓'}
+                                      {sub.label}{sub.done && ' ✓'}
                                     </span>
                                     <div style={{ width:6, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                       onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,sub,'resize-right',item.id) }} />
