@@ -669,10 +669,9 @@ export const useAppStore = create<StoreState>()(
       const taggedSubItems = (updatedItem.subItems ?? []).map(si => ({
         ...si, subTaskId: si.subTaskId ?? si.id,
       }))
-      const taskWithSubs  = { ...task, subTasks: subTasks.length > 0 ? subTasks : undefined }
+      const taskWithSubs   = { ...task, subTasks: subTasks.length > 0 ? subTasks : undefined }
       const itemWithTagged = { ...updatedItem, subItems: taggedSubItems.length > 0 ? taggedSubItems : undefined }
 
-      let updatedTimeline: Timeline | null = null
       set(s => {
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
         if (bucket) bucket.tasks.push(taskWithSubs)
@@ -681,18 +680,18 @@ export const useAppStore = create<StoreState>()(
           const idx = tl.items.findIndex(i => i.id === itemWithTagged.id)
           if (idx >= 0) tl.items[idx] = itemWithTagged
           else tl.items.push(itemWithTagged)
-          updatedTimeline = tl
         }
       })
       const u = get().uid
       if (!u) return
-      const tl = updatedTimeline ?? get().timelines.find(x => x.id === timelineId)
+      // Read from get() AFTER set() — Immer draft proxies are revoked once set() returns
+      const tl = get().timelines.find(x => x.id === timelineId)
       if (tl) batchWriteTaskAndTimeline(u, bucketId, taskWithSubs, tl)
         .catch(e => console.error('[addTaskAndUpdateTimeline batch]', e))
     },
 
     saveTaskWithTimelineItem: (bucketId, task) => {
-      let affectedTimeline: Timeline | null = null
+      let affectedTimelineId: string | null = null
       set(s => {
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
         if (bucket) {
@@ -728,7 +727,7 @@ export const useAppStore = create<StoreState>()(
                 taskId: task.id,
               })
             }
-            affectedTimeline = tl
+            affectedTimelineId = tl.id  // store id only — proxy is revoked after set()
           }
         } else {
           s.timelines.forEach(tl => {
@@ -746,20 +745,20 @@ export const useAppStore = create<StoreState>()(
 
       const u = get().uid
       if (!u) return
-      if (affectedTimeline) {
-        batchWriteTaskAndTimeline(u, bucketId, task, affectedTimeline)
+      if (affectedTimelineId) {
+        // Read fresh (non-draft) timeline from state after set() has committed
+        const tl = get().timelines.find(x => x.id === affectedTimelineId)
+        if (tl) batchWriteTaskAndTimeline(u, bucketId, task, tl)
           .catch(e => console.error('[saveTaskWithTimelineItem batch]', e))
       } else {
         writeTask(u, bucketId, task)
-        // Write any timelines affected by the label/progress sync
         get().timelines.filter(tl => tl.items.some(i => i.taskId === task.id))
           .forEach(tl => writeTimeline(u, tl))
       }
     },
 
     saveSubTaskWithTimelineSync: (bucketId, parentTaskId, sub, subItemId) => {
-      let affectedTask: Task | null = null
-      let affectedTimeline: Timeline | null = null
+      let affectedTimelineId: string | null = null
 
       set(s => {
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
@@ -772,7 +771,6 @@ export const useAppStore = create<StoreState>()(
           const span = subtaskDateSpan(task.subTasks)
           if (span.startDate) task.startDate = span.startDate
           if (span.due)       task.due        = span.due
-          affectedTask = task
         }
 
         for (const tl of s.timelines) {
@@ -789,7 +787,7 @@ export const useAppStore = create<StoreState>()(
             const allEnds   = item.subItems.map(si => si.endDate).filter(Boolean) as string[]
             if (allStarts.length) item.startDate = allStarts.reduce((a, b) => a < b ? a : b)
             if (allEnds.length)   item.endDate   = allEnds.reduce((a, b) => a > b ? a : b)
-            affectedTimeline = tl
+            affectedTimelineId = tl.id  // id only — proxy revoked after set()
             break
           }
         }
@@ -797,17 +795,19 @@ export const useAppStore = create<StoreState>()(
 
       const u = get().uid
       if (!u) return
-      if (affectedTask && affectedTimeline) {
-        batchWriteTaskAndTimeline(u, bucketId, affectedTask, affectedTimeline)
+      // Read fresh state after set() — drafts are revoked
+      const task = get().taskBuckets.find(b => b.id === bucketId)?.tasks.find(t => t.id === parentTaskId)
+      if (task && affectedTimelineId) {
+        const tl = get().timelines.find(x => x.id === affectedTimelineId)
+        if (tl) batchWriteTaskAndTimeline(u, bucketId, task, tl)
           .catch(e => console.error('[saveSubTaskWithTimelineSync batch]', e))
-      } else if (affectedTask) {
-        writeTask(u, bucketId, affectedTask)
+      } else if (task) {
+        writeTask(u, bucketId, task)
       }
     },
 
     deleteSubTaskWithTimelineSync: (bucketId, parentTaskId, subId) => {
-      let affectedTask: Task | null = null
-      let affectedTimeline: Timeline | null = null
+      let affectedTimelineId: string | null = null
 
       set(s => {
         const bucket = s.taskBuckets.find(b => b.id === bucketId)
@@ -817,7 +817,6 @@ export const useAppStore = create<StoreState>()(
           const span = subtaskDateSpan(task.subTasks ?? [])
           if (span.startDate) task.startDate = span.startDate
           if (span.due)       task.due        = span.due
-          affectedTask = task
         }
 
         for (const tl of s.timelines) {
@@ -828,7 +827,7 @@ export const useAppStore = create<StoreState>()(
             const allEnds   = (item.subItems ?? []).map(si => si.endDate).filter(Boolean) as string[]
             if (allStarts.length) item.startDate = allStarts.reduce((a, b) => a < b ? a : b)
             if (allEnds.length)   item.endDate   = allEnds.reduce((a, b) => a > b ? a : b)
-            affectedTimeline = tl
+            affectedTimelineId = tl.id
             break
           }
         }
@@ -836,19 +835,20 @@ export const useAppStore = create<StoreState>()(
 
       const u = get().uid
       if (!u) return
-      if (affectedTask && affectedTimeline) {
-        batchWriteTaskAndTimeline(u, bucketId, affectedTask, affectedTimeline)
+      const task = get().taskBuckets.find(b => b.id === bucketId)?.tasks.find(t => t.id === parentTaskId)
+      if (task && affectedTimelineId) {
+        const tl = get().timelines.find(x => x.id === affectedTimelineId)
+        if (tl) batchWriteTaskAndTimeline(u, bucketId, task, tl)
           .catch(e => console.error('[deleteSubTaskWithTimelineSync batch]', e))
-      } else if (affectedTask) {
-        writeTask(u, bucketId, affectedTask)
+      } else if (task) {
+        writeTask(u, bucketId, task)
       }
     },
 
     syncBarSubItemsToTask: (updatedItem) => {
       if (!updatedItem.taskId || !updatedItem.subItems?.length) return
       let affectedBucketId: string | null = null
-      let affectedTask: Task | null = null
-      let affectedTimeline: Timeline | null = null
+      let affectedTimelineId: string | null = null
 
       set(s => {
         for (const bucket of s.taskBuckets) {
@@ -867,7 +867,6 @@ export const useAppStore = create<StoreState>()(
             const span = subtaskDateSpan(task.subTasks)
             if (span.startDate) task.startDate = span.startDate
             if (span.due) task.due = span.due
-            affectedTask = task
             break
           }
         }
@@ -879,19 +878,23 @@ export const useAppStore = create<StoreState>()(
               ...updatedItem,
               subItems: (updatedItem.subItems ?? []).map(si => ({ ...si, subTaskId: si.subTaskId ?? si.id })),
             }
-            affectedTimeline = tl
+            affectedTimelineId = tl.id
             break
           }
         }
       })
 
       const u = get().uid
-      if (!u || !affectedBucketId || !affectedTask) return
-      if (affectedTimeline) {
-        batchWriteTaskAndTimeline(u, affectedBucketId, affectedTask, affectedTimeline)
+      if (!u || !affectedBucketId) return
+      // Read fresh state after set() — Immer drafts are revoked
+      const task = get().taskBuckets.find(b => b.id === affectedBucketId)?.tasks.find(t => t.id === updatedItem.taskId)
+      if (!task) return
+      if (affectedTimelineId) {
+        const tl = get().timelines.find(x => x.id === affectedTimelineId)
+        if (tl) batchWriteTaskAndTimeline(u, affectedBucketId, task, tl)
           .catch(e => console.error('[syncBarSubItemsToTask batch]', e))
       } else {
-        writeTask(u, affectedBucketId, affectedTask)
+        writeTask(u, affectedBucketId, task)
       }
     },
 
