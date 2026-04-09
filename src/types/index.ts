@@ -85,6 +85,52 @@ export interface EmailSettings {
   fromEmail?: string
 }
 
+// ─── Timelines ────────────────────────────────────────────────────────────────
+
+export type Timescale = 'days' | 'weeks' | 'months' | 'quarters' | 'years'
+export type SubTimescale = 'days' | 'weeks' | 'months' | 'quarters' | null
+
+export interface TimelineMilestone {
+  id: string
+  label: string
+  date: string
+  color: string
+}
+
+export interface SwimLane {
+  id: string
+  label: string
+  color: string
+  category?: string
+}
+
+export interface TimelineItem {
+  id: string
+  swimLaneId: string
+  label: string
+  type: 'bar' | 'milestone'
+  startDate: string
+  endDate: string
+  color: string
+  progress: number   // 0–100
+  notes?: string
+}
+
+export interface Timeline {
+  id: string
+  name: string
+  createdAt: number
+  timescale: Timescale
+  subTimescale: SubTimescale
+  startDate: string
+  endDate: string
+  swimLanes: SwimLane[]
+  items: TimelineItem[]
+  milestones: TimelineMilestone[]
+}
+
+// ─── App State ────────────────────────────────────────────────────────────────
+
 export interface AppState {
   contacts: Contact[]
   meetings: Meeting[]
@@ -96,4 +142,5 @@ export interface AppState {
   taskBuckets: TaskBucket[]
   savedCharts: SavedChart[]
   emailSettings: EmailSettings
+  timelines: Timeline[]
 }

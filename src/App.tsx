@@ -9,6 +9,8 @@ import MeetingsPage from './pages/MeetingsPage'
 import TasksPage from './pages/TasksPage'
 import SetupPage from './pages/SetupPage'
 import AdminPage from './pages/AdminPage'
+import TimelinesPage from './pages/TimelinesPage'
+import TimelineEditorPage from './pages/TimelineEditorPage'
 
 function AppRoutes() {
   useAuth()
@@ -32,8 +34,10 @@ function AppRoutes() {
         <Route path="/contacts" element={<ContactsPage />} />
         <Route path="/org"      element={<OrgChartPage />} />
         <Route path="/meetings" element={<MeetingsPage />} />
-        <Route path="/tasks"    element={<TasksPage />} />
-        <Route path="/setup"    element={<SetupPage />} />
+        <Route path="/tasks"       element={<TasksPage />} />
+        <Route path="/timelines"   element={<TimelinesPage />} />
+        <Route path="/timelines/:id" element={<TimelineEditorPage />} />
+        <Route path="/setup"       element={<SetupPage />} />
       </Route>
       <Route path="/admin" element={<AdminPage />} />
       <Route path="*" element={<Navigate to="/contacts" replace />} />

@@ -5,7 +5,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
-import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings } from '../types'
+import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline } from '../types'
 
 const DEFAULT_BUCKETS: TaskBucket[] = [
   { id: 'unsorted',   name: 'Unsorted',   color: '#a78bfa', tasks: [] },
@@ -53,6 +53,11 @@ interface StoreState extends AppState {
 
   // Settings
   setEmailSettings: (settings: EmailSettings) => void
+
+  // Timelines
+  addTimeline: (t: Timeline) => void
+  updateTimeline: (t: Timeline) => void
+  deleteTimeline: (id: string) => void
 }
 
 export const useAppStore = create<StoreState>()(
@@ -71,6 +76,7 @@ export const useAppStore = create<StoreState>()(
     taskBuckets: DEFAULT_BUCKETS,
     savedCharts: [],
     emailSettings: {},
+    timelines: [],
 
     setUid: (uid) => set(s => { s.uid = uid }),
     setLoading: (loading) => set(s => { s.loading = loading }),
@@ -94,6 +100,7 @@ export const useAppStore = create<StoreState>()(
             s.taskBuckets   = d.taskBuckets   ?? DEFAULT_BUCKETS
             s.savedCharts   = d.savedCharts   ?? []
             s.emailSettings = d.emailSettings ?? {}
+            s.timelines     = d.timelines     ?? []
             s.loading = false
           })
         } else {
@@ -101,7 +108,7 @@ export const useAppStore = create<StoreState>()(
           setDoc(userRef, {
             contacts: [], meetings: [], dottedLines: [], peerLines: [],
             chartContacts: [], positions: {}, activeChartOrg: null,
-            taskBuckets: DEFAULT_BUCKETS, savedCharts: [], emailSettings: {},
+            taskBuckets: DEFAULT_BUCKETS, savedCharts: [], emailSettings: {}, timelines: [],
           })
           set(s => { s.loading = false })
         }
@@ -114,10 +121,10 @@ export const useAppStore = create<StoreState>()(
       if (!uid) return
       set(s => { s.syncing = true })
       const { contacts, meetings, dottedLines, peerLines, chartContacts,
-              positions, activeChartOrg, taskBuckets, savedCharts, emailSettings } = get()
+              positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines } = get()
       await setDoc(doc(db, 'users', uid), {
         contacts, meetings, dottedLines, peerLines, chartContacts,
-        positions, activeChartOrg, taskBuckets, savedCharts, emailSettings,
+        positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines,
       })
       set(s => { s.syncing = false })
     },
@@ -164,5 +171,12 @@ export const useAppStore = create<StoreState>()(
 
     setTaskBuckets: (buckets) => { set(s => { s.taskBuckets = buckets }); get().saveUserData() },
     setEmailSettings: (settings) => { set(s => { s.emailSettings = settings }); get().saveUserData() },
+
+    addTimeline: (t) => { set(s => { s.timelines.push(t) }); get().saveUserData() },
+    updateTimeline: (t) => {
+      set(s => { const i = s.timelines.findIndex(x => x.id === t.id); if (i >= 0) s.timelines[i] = t })
+      get().saveUserData()
+    },
+    deleteTimeline: (id) => { set(s => { s.timelines = s.timelines.filter(t => t.id !== id) }); get().saveUserData() },
   }))
 )
