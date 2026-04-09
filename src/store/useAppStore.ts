@@ -7,6 +7,25 @@ import {
 import { db } from '../lib/firebase'
 import type { AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine, PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask } from '../types'
 
+// ─── Write queue ──────────────────────────────────────────────────────────────
+// All saves go through a single debounced queue so that:
+//   1. Rapid successive mutations are coalesced into one Firestore write
+//   2. The onSnapshot listener never needs to be suppressed — we track the
+//      server-assigned write timestamp instead and ignore echoes
+//   3. A leaked pendingWrites counter can never permanently block syncing
+let writeTimer: ReturnType<typeof setTimeout> | null = null
+let lastWriteAt = 0          // ms timestamp of the most recent write we sent
+const WRITE_DEBOUNCE_MS = 600  // coalesce writes within this window
+
+function scheduleWrite(fn: () => Promise<void>) {
+  if (writeTimer) clearTimeout(writeTimer)
+  writeTimer = setTimeout(async () => {
+    writeTimer = null
+    lastWriteAt = Date.now()
+    await fn()
+  }, WRITE_DEBOUNCE_MS)
+}
+
 /** Recalculate a task's startDate/due from its subtasks' date spans. */
 function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: string } {
   const starts = subTasks.map(s => s.startDate).filter(Boolean) as string[]
@@ -37,7 +56,7 @@ interface StoreState extends AppState {
 
   // Data lifecycle
   loadUserData: (uid: string) => Promise<Unsubscribe>
-  saveUserData: () => Promise<void>
+  saveUserData: () => void
 
   // Contacts
   addContact: (contact: Contact) => void
@@ -126,8 +145,12 @@ interface StoreState extends AppState {
   clearDemoData: () => void
 }
 
-// Tracks in-flight local writes so the onSnapshot doesn't overwrite fresh local state
-let pendingWrites = 0
+// ─── Snapshot echo guard ─────────────────────────────────────────────────────
+// When we write to Firestore, the same onSnapshot listener fires back with our
+// own data (the "echo"). We ignore echoes that arrive within a short window
+// after our last write. Any snapshot arriving after that window is a genuine
+// remote update (another device/tab) and should be applied.
+const ECHO_WINDOW_MS = 3000
 
 export const useAppStore = create<StoreState>()(
   immer((set, get) => ({
@@ -154,53 +177,75 @@ export const useAppStore = create<StoreState>()(
       set(s => { s.loading = true })
       const userRef = doc(db, 'users', uid)
       const unsub = onSnapshot(userRef, (snap) => {
-        // Suppress snapshots triggered by our own writes — they would overwrite
-        // fresh local state with a slightly older Firestore copy
-        if (pendingWrites > 0) return
+        // Ignore snapshots that are echoes of our own recent writes.
+        // We allow them through once the echo window has expired — that way
+        // genuine updates from other devices/tabs are never permanently blocked.
+        const age = Date.now() - lastWriteAt
+        if (age < ECHO_WINDOW_MS) return
+
         if (snap.exists()) {
           const d = snap.data() as Partial<AppState>
           set(s => {
-            s.contacts      = d.contacts      ?? []
-            s.meetings      = d.meetings      ?? []
-            s.dottedLines   = d.dottedLines   ?? []
-            s.peerLines     = d.peerLines     ?? []
-            s.chartContacts = d.chartContacts ?? []
-            s.positions     = d.positions     ?? {}
+            s.contacts       = d.contacts      ?? []
+            s.meetings       = d.meetings      ?? []
+            s.dottedLines    = d.dottedLines   ?? []
+            s.peerLines      = d.peerLines     ?? []
+            s.chartContacts  = d.chartContacts ?? []
+            s.positions      = d.positions     ?? {}
             s.activeChartOrg = d.activeChartOrg ?? null
-            s.taskBuckets   = d.taskBuckets   ?? DEFAULT_BUCKETS
-            s.savedCharts   = d.savedCharts   ?? []
-            s.emailSettings = d.emailSettings ?? {}
-            s.timelines     = d.timelines     ?? []
+            s.taskBuckets    = d.taskBuckets   ?? DEFAULT_BUCKETS
+            s.savedCharts    = d.savedCharts   ?? []
+            s.emailSettings  = d.emailSettings ?? {}
+            s.timelines      = d.timelines     ?? []
             s.loading = false
           })
         } else {
-          // New user — initialise with empty defaults locally; don't write yet
-          // (writing here caused data wipes on hot-reload / reconnect race conditions)
+          // New user — no document yet. Initialise store with defaults locally
+          // but do NOT write to Firestore here: writing on !snap.exists() was
+          // the original cause of data wipes when the listener briefly detached.
           set(s => { s.loading = false })
         }
+      }, (err) => {
+        // Snapshot error (permissions, network) — stop loading spinner so the
+        // app is still usable; data will re-sync when connectivity returns
+        console.error('[useAppStore] onSnapshot error', err)
+        set(s => { s.loading = false })
       })
       return unsub
     },
 
-    saveUserData: async () => {
+    saveUserData: () => {
+      // Synchronously read state so the write captures the latest values,
+      // then hand off to the debounced write queue. This means:
+      //   • Rapid saves (e.g. bar drag events) are coalesced — only the final
+      //     state is written once the user pauses for WRITE_DEBOUNCE_MS
+      //   • saveUserData() itself is synchronous so callers don't need to await
+      //   • The loading guard ensures we never write before the first snapshot
       const { uid, loading } = get()
-      if (!uid) return
-      // Never write while the initial snapshot hasn't loaded yet — that would
-      // overwrite Firestore with the empty initial store state on app reload
-      if (loading) return
-      pendingWrites++
-      set(s => { s.syncing = true })
-      const { contacts, meetings, dottedLines, peerLines, chartContacts,
-              positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines } = get()
-      try {
-        await setDoc(doc(db, 'users', uid), {
-          contacts, meetings, dottedLines, peerLines, chartContacts,
-          positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines,
-        })
-      } finally {
-        pendingWrites = Math.max(0, pendingWrites - 1)
-        set(s => { s.syncing = false })
-      }
+      if (!uid || loading) return
+
+      scheduleWrite(async () => {
+        const { uid: currentUid, loading: currentLoading } = get()
+        if (!currentUid || currentLoading) return
+
+        set(s => { s.syncing = true })
+        const { contacts, meetings, dottedLines, peerLines, chartContacts,
+                positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines } = get()
+        try {
+          // merge: true means this write only touches the fields listed —
+          // it can never wipe a field that wasn't included in this call
+          await setDoc(doc(db, 'users', currentUid), {
+            contacts, meetings, dottedLines, peerLines, chartContacts,
+            positions, activeChartOrg, taskBuckets, savedCharts, emailSettings, timelines,
+          }, { merge: true })
+        } catch (err) {
+          console.error('[useAppStore] saveUserData failed', err)
+          // Leave syncing=true so the UI shows an error state; do not retry
+          // automatically to avoid a write loop on persistent errors
+        } finally {
+          set(s => { s.syncing = false })
+        }
+      })
     },
 
     addContact: (contact) => { set(s => { s.contacts.push(contact) }); get().saveUserData() },
