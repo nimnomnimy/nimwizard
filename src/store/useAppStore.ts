@@ -183,8 +183,11 @@ export const useAppStore = create<StoreState>()(
     },
 
     saveUserData: async () => {
-      const { uid } = get()
+      const { uid, loading } = get()
       if (!uid) return
+      // Never write while the initial snapshot hasn't loaded yet — that would
+      // overwrite Firestore with the empty initial store state on app reload
+      if (loading) return
       pendingWrites++
       set(s => { s.syncing = true })
       const { contacts, meetings, dottedLines, peerLines, chartContacts,
