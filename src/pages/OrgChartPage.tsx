@@ -85,6 +85,8 @@ export default function OrgChartPage() {
   const [panelOrg, setPanelOrg] = useState('')
   const [drawerContactId, setDrawerContactId] = useState<string | null | undefined>(undefined)
   const [showSavedMenu, setShowSavedMenu] = useState(false)
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
+  const [isDraggingNode, setIsDraggingNode] = useState(false)
 
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
@@ -361,7 +363,7 @@ export default function OrgChartPage() {
 
   // ─── Node drag handlers ─────────────────────────────────────────────────────
   const onNodePointerDown = (e: React.PointerEvent, c: Contact) => {
-    if (e.button !== 0) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
     const el = e.currentTarget as HTMLElement
     el.setPointerCapture(e.pointerId)
     nodeDrag.current = {
@@ -372,6 +374,7 @@ export default function OrgChartPage() {
       startCY: e.clientY,
       moved: false,
     }
+    setIsDraggingNode(true)
     e.preventDefault()
   }
 
@@ -398,8 +401,13 @@ export default function OrgChartPage() {
       const y = snap(Math.max(0, parseInt(el.style.top)  || 0))
       el.style.left = x + 'px'; el.style.top = y + 'px'
       setPositions({ ...positions, [c.id]: { x, y } })
+      setSelectedNodeId(null)
+    } else if (e.pointerType === 'touch') {
+      // Tap on touch: toggle selected state to reveal handles/actions
+      setSelectedNodeId(prev => prev === c.id ? null : c.id)
     }
     nodeDrag.current = null
+    setIsDraggingNode(false)
   }
 
   // ─── Panel contacts ─────────────────────────────────────────────────────────
@@ -606,9 +614,10 @@ export default function OrgChartPage() {
           </div>
         )}
 
-        {/* Chart scroll area */}
+        {/* Chart scroll area — lock scroll while dragging a node on touch */}
         <div ref={areaRef} className="flex-1 overflow-auto relative"
-          onClick={() => { if (connMode) setConnMode(null) }}>
+          style={{ touchAction: isDraggingNode ? 'none' : 'auto' }}
+          onClick={() => { if (connMode) setConnMode(null); setSelectedNodeId(null) }}>
 
           {/* Relative container for nodes + SVG */}
           <div ref={treeRef} className="relative" style={{ minWidth: '100%', minHeight: '100%' }}>
@@ -643,14 +652,15 @@ export default function OrgChartPage() {
             {visibleContacts.map(c => {
               const pos = getPos(c.id)
               const isConnSource = connMode?.sourceId === c.id
+              const isSelected   = selectedNodeId === c.id
               return (
                 <div key={c.id}
                   data-node-id={c.id}
                   className={`absolute select-none bg-white border-2 rounded-xl shadow-md overflow-visible group
-                    ${isConnSource ? 'border-blue-400 ring-2 ring-blue-200' : 'border-slate-200'}
+                    ${isConnSource ? 'border-blue-400 ring-2 ring-blue-200' : isSelected ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'}
                     ${connMode && !isConnSource ? 'cursor-crosshair hover:border-blue-400 hover:shadow-lg' : 'cursor-grab active:cursor-grabbing'}
                   `}
-                  style={{ left: pos.x, top: pos.y, width: NODE_W, minHeight: NODE_H, touchAction: 'none', zIndex: 10 }}
+                  style={{ left: pos.x, top: pos.y, width: NODE_W, minHeight: NODE_H, touchAction: 'none', zIndex: isSelected ? 20 : 10 }}
                   onPointerDown={e => {
                     if ((e.target as HTMLElement).closest('[data-handle],[data-action]')) return
                     if (connMode) { applyConn(c.id); return }
@@ -663,17 +673,17 @@ export default function OrgChartPage() {
                     if (connMode) { applyConn(c.id); e.stopPropagation() }
                   }}
                 >
-                  {/* Connection handles */}
+                  {/* Connection handles — always visible when selected on touch */}
                   {(['top','bottom','right','left'] as ConnDir[]).map(dir => (
                     <button key={dir} data-handle={dir}
                       title={CONN_LABELS[dir](c.name)}
                       onClick={e => { e.stopPropagation(); setConnMode({ sourceId: c.id, dir, sourceName: c.name }) }}
-                      className={`absolute z-20 w-5 h-5 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-sm transition-opacity opacity-0 hover:opacity-100 focus:opacity-100
-                        ${dir === 'top'    ? '-top-2.5 left-1/2 -translate-x-1/2' : ''}
-                        ${dir === 'bottom' ? '-bottom-2.5 left-1/2 -translate-x-1/2' : ''}
-                        ${dir === 'right'  ? 'top-1/2 -right-2.5 -translate-y-1/2' : ''}
-                        ${dir === 'left'   ? 'top-1/2 -left-2.5 -translate-y-1/2' : ''}
-                        group-hover:opacity-100
+                      className={`absolute z-20 w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-sm transition-opacity
+                        ${dir === 'top'    ? '-top-3 left-1/2 -translate-x-1/2' : ''}
+                        ${dir === 'bottom' ? '-bottom-3 left-1/2 -translate-x-1/2' : ''}
+                        ${dir === 'right'  ? 'top-1/2 -right-3 -translate-y-1/2' : ''}
+                        ${dir === 'left'   ? 'top-1/2 -left-3 -translate-y-1/2' : ''}
+                        ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}
                       `}
                       style={{ background: CONN_COLORS[dir] }}>
                       {dir === 'top' ? '↑' : dir === 'bottom' ? '↓' : dir === 'right' ? '⟷' : '⋯'}
@@ -697,18 +707,18 @@ export default function OrgChartPage() {
                     </div>
                   </div>
 
-                  {/* Node actions */}
-                  <div className="absolute top-1 right-1 flex gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+                  {/* Node actions — always visible when selected */}
+                  <div className={`absolute top-1 right-1 flex gap-0.5 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
                     <button data-action="edit"
-                      onClick={e => { e.stopPropagation(); setDrawerContactId(c.id) }}
-                      className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-blue-500 hover:bg-blue-50 bg-white/80">
+                      onClick={e => { e.stopPropagation(); setDrawerContactId(c.id); setSelectedNodeId(null) }}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 bg-white/90 shadow-sm">
                       <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
                         <path d="M8 1.5l1.5 1.5L3 9.5H1.5V8L8 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     </button>
                     <button data-action="remove"
-                      onClick={e => { e.stopPropagation(); removeFromChart(c.id) }}
-                      className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 bg-white/80">
+                      onClick={e => { e.stopPropagation(); removeFromChart(c.id); setSelectedNodeId(null) }}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:bg-red-100 bg-white/90 shadow-sm">
                       <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
                         <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                       </svg>
