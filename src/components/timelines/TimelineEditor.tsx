@@ -88,6 +88,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const addTaskAndUpdateTimeline = useAppStore(s => s.addTaskAndUpdateTimeline)
   const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
   const deleteSubTaskWithTimelineSync = useAppStore(s => s.deleteSubTaskWithTimelineSync)
+  const syncBarSubItemsToTask = useAppStore(s => s.syncBarSubItemsToTask)
   const allTasks = taskBuckets.flatMap(b => b.tasks.map(t => ({ ...t, bucketName: b.name })))
   const allTasksFlat = taskBuckets.flatMap(b => b.tasks)
 
@@ -315,6 +316,13 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       savedItem = { ...item, taskId: newTaskId }
       // Atomic: add task + update timeline in one store write to avoid race
       addTaskAndUpdateTimeline('unsorted', newTask, timeline.id, savedItem)
+      setDrawerOpen(false); setEditingItem(null)
+      return
+    }
+
+    // If updating an existing bar linked to a task, sync sub-items to task's subTasks
+    if (exists && savedItem.taskId && savedItem.subItems?.length) {
+      syncBarSubItemsToTask(savedItem)
       setDrawerOpen(false); setEditingItem(null)
       return
     }

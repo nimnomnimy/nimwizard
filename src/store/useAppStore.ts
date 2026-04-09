@@ -113,6 +113,12 @@ interface StoreState extends AppState {
     subId: string,
   ) => void
 
+  /**
+   * When an existing bar is saved from ItemDrawer, sync its full subItems list
+   * to the linked task's subTasks in one atomic write.
+   */
+  syncBarSubItemsToTask: (updatedItem: TimelineItem) => void
+
   /** Load demo data into the account (merges on top of existing data). */
   loadDemoData: () => void
 
@@ -434,6 +440,63 @@ export const useAppStore = create<StoreState>()(
             break
           }
         }
+      })
+      get().saveUserData()
+    },
+
+    syncBarSubItemsToTask: (updatedItem) => {
+      if (!updatedItem.taskId || !updatedItem.subItems?.length) return
+      set(s => {
+        // Find the bucket + task
+        let foundBucketId: string | null = null
+        let foundTask: import('../types').Task | null = null
+        for (const bucket of s.taskBuckets) {
+          const t = bucket.tasks.find(x => x.id === updatedItem.taskId)
+          if (t) { foundBucketId = bucket.id; foundTask = t; break }
+        }
+        if (!foundTask || !foundBucketId) return
+
+        const bucket = s.taskBuckets.find(b => b.id === foundBucketId)!
+        const taskIdx = bucket.tasks.findIndex(t => t.id === updatedItem.taskId)
+        const task = bucket.tasks[taskIdx]
+
+        // Merge sub-items into task.subTasks (add new, update existing, keep orphans)
+        if (!task.subTasks) task.subTasks = []
+        for (const si of updatedItem.subItems ?? []) {
+          const subId = si.subTaskId ?? si.id
+          const existingIdx = task.subTasks.findIndex(st => st.id === subId)
+          const asSub: import('../types').SubTask = {
+            id: subId,
+            text: si.label || 'Untitled',
+            startDate: si.startDate || undefined,
+            due: si.endDate || undefined,
+            progress: si.progress,
+            done: si.done,
+          }
+          if (existingIdx >= 0) task.subTasks[existingIdx] = { ...task.subTasks[existingIdx], ...asSub }
+          else task.subTasks.push(asSub)
+        }
+
+        // Also update the timeline item itself
+        for (const tl of s.timelines) {
+          const itemIdx = tl.items.findIndex(i => i.id === updatedItem.id)
+          if (itemIdx >= 0) {
+            // Tag each sub-item with its matching subTaskId
+            tl.items[itemIdx] = {
+              ...updatedItem,
+              subItems: (updatedItem.subItems ?? []).map(si => ({
+                ...si,
+                subTaskId: si.subTaskId ?? si.id,
+              })),
+            }
+            break
+          }
+        }
+
+        // Recalculate task date span from subtasks
+        const span = subtaskDateSpan(task.subTasks)
+        if (span.startDate) task.startDate = span.startDate
+        if (span.due) task.due = span.due
       })
       get().saveUserData()
     },
