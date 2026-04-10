@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useCallback } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
@@ -52,6 +52,71 @@ export default function TasksPage() {
   const [drawer, setDrawer] = useState<DrawerState | null>(null)
   const [subDrawer, setSubDrawer] = useState<SubDrawerState | null>(null)
   const [activeBucket, setActiveBucket] = useState(taskBuckets[0]?.id ?? '')
+
+  // Column width resize state (desktop)
+  const [colWidths, setColWidths] = useState<Record<string, number>>({})
+  const colResizeRef = useRef<{ bucketId: string; startX: number; startW: number } | null>(null)
+
+  const getColWidth = (bucketId: string) => colWidths[bucketId] ?? 256
+
+  const startColResize = useCallback((e: React.PointerEvent, bucketId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const el = (e.currentTarget as HTMLElement).closest('[data-bucket-col]') as HTMLElement | null
+    colResizeRef.current = { bucketId, startX: e.clientX, startW: el?.offsetWidth ?? getColWidth(bucketId) }
+    const onMove = (ev: PointerEvent) => {
+      if (!colResizeRef.current) return
+      const newW = Math.max(180, colResizeRef.current.startW + ev.clientX - colResizeRef.current.startX)
+      setColWidths(prev => ({ ...prev, [colResizeRef.current!.bucketId]: newW }))
+    }
+    const onUp = () => {
+      colResizeRef.current = null
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }, [])
+
+  // Drag-to-reorder within/across columns (HTML5 drag API)
+  const htmlDragRef = useRef<{ taskId: string; fromBucketId: string } | null>(null)
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null) // `${bucketId}:${taskId}` or `${bucketId}:__end`
+
+  const handleDragStart = useCallback((e: React.DragEvent, taskId: string, bucketId: string) => {
+    htmlDragRef.current = { taskId, fromBucketId: bucketId }
+    e.dataTransfer.effectAllowed = 'move'
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent, toBucketId: string, beforeTaskId: string | null) => {
+    e.preventDefault()
+    setDragOverKey(null)
+    const drag = htmlDragRef.current
+    htmlDragRef.current = null
+    if (!drag) return
+    const fromBucket = taskBuckets.find(b => b.id === drag.fromBucketId)
+    const toBucket = taskBuckets.find(b => b.id === toBucketId)
+    if (!fromBucket || !toBucket) return
+    const task = fromBucket.tasks.find(t => t.id === drag.taskId)
+    if (!task) return
+    const newFrom = fromBucket.tasks.filter(t => t.id !== drag.taskId)
+    let newTo = drag.fromBucketId === toBucketId ? newFrom : [...toBucket.tasks]
+    if (beforeTaskId) {
+      const idx = newTo.findIndex(t => t.id === beforeTaskId)
+      if (idx >= 0) newTo.splice(idx, 0, task)
+      else newTo.push(task)
+    } else {
+      newTo = [...newTo, task]
+    }
+    if (drag.fromBucketId === toBucketId) {
+      setTaskBuckets(taskBuckets.map(b => b.id === toBucketId ? { ...b, tasks: newTo } : b))
+    } else {
+      setTaskBuckets(taskBuckets.map(b =>
+        b.id === drag.fromBucketId ? { ...b, tasks: newFrom } :
+        b.id === toBucketId ? { ...b, tasks: newTo } : b
+      ))
+      showToast('Task moved', 'success')
+    }
+  }, [taskBuckets, setTaskBuckets])
 
   // Timelines that have at least one linked task
   const timelinesWithTasks = useMemo(() => {
@@ -374,11 +439,16 @@ export default function TasksPage() {
       <div className="flex-1 overflow-hidden">
 
         {/* Desktop: all columns side by side */}
-        <div className="hidden lg:flex h-full gap-4 p-4 overflow-x-auto">
+        <div className="hidden lg:flex h-full gap-0 p-4 overflow-x-auto">
           {taskBuckets.map((b: TaskBucket) => {
             const tasks = b.tasks.filter(t => matchesFilter(t, b.id))
+            const colW = getColWidth(b.id)
             return (
-              <div key={b.id} className="flex flex-col w-64 flex-shrink-0">
+              <div key={b.id} data-bucket-col={b.id}
+                className="flex flex-col flex-shrink-0 relative pr-4"
+                style={{ width: colW }}
+                onDragOver={e => { e.preventDefault(); e.dataTransfer.dropEffect = 'move' }}
+                onDrop={e => handleDrop(e, b.id, null)}>
                 <div className="flex items-center gap-2 mb-3">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ background: b.color }} />
                   <span className="text-sm font-bold text-slate-700">{b.name}</span>
@@ -390,10 +460,22 @@ export default function TasksPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto scroll-touch flex flex-col gap-2 pr-0.5">
                   {tasks.length === 0 && (
-                    <div className="text-center py-8 text-slate-300 text-sm">No tasks</div>
+                    <div
+                      className={`text-center py-8 text-slate-300 text-sm rounded-xl border-2 border-dashed transition-colors ${dragOverKey === `${b.id}:__end` ? 'border-blue-300 bg-blue-50' : 'border-transparent'}`}
+                      onDragOver={e => { e.preventDefault(); setDragOverKey(`${b.id}:__end`) }}
+                      onDragLeave={() => setDragOverKey(null)}
+                      onDrop={e => handleDrop(e, b.id, null)}>
+                      Drop here
+                    </div>
                   )}
                   {tasks.map(t => (
-                    <div key={t.id}>
+                    <div key={t.id}
+                      draggable
+                      onDragStart={e => handleDragStart(e, t.id, b.id)}
+                      onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragOverKey(`${b.id}:${t.id}`) }}
+                      onDragLeave={() => setDragOverKey(null)}
+                      onDrop={e => { e.stopPropagation(); handleDrop(e, b.id, t.id) }}
+                      className={`transition-all ${dragOverKey === `${b.id}:${t.id}` ? 'border-t-2 border-blue-400 pt-1' : ''}`}>
                       <TaskCard task={t} bucketId={b.id}
                         buckets={taskBuckets}
                         onEdit={() => setDrawer({ bucketId: b.id, task: t })}
@@ -408,6 +490,19 @@ export default function TasksPage() {
                       </button>
                     </div>
                   ))}
+                  {/* Drop zone at bottom of non-empty column */}
+                  {tasks.length > 0 && (
+                    <div className={`h-8 rounded-xl border-2 border-dashed transition-colors ${dragOverKey === `${b.id}:__end` ? 'border-blue-300 bg-blue-50' : 'border-transparent'}`}
+                      onDragOver={e => { e.preventDefault(); setDragOverKey(`${b.id}:__end`) }}
+                      onDragLeave={() => setDragOverKey(null)}
+                      onDrop={e => handleDrop(e, b.id, null)} />
+                  )}
+                </div>
+                {/* Column resize handle */}
+                <div
+                  className="absolute right-1 top-0 bottom-0 w-3 cursor-col-resize flex items-center justify-center group"
+                  onPointerDown={e => startColResize(e, b.id)}>
+                  <div className="w-0.5 h-8 bg-slate-200 rounded-full group-hover:bg-slate-400 group-active:bg-blue-400 transition-colors" />
                 </div>
               </div>
             )

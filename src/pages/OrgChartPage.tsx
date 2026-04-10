@@ -89,6 +89,7 @@ export default function OrgChartPage() {
   const [showSavedMenu, setShowSavedMenu] = useState(false)
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null)
   const [isDraggingNode, setIsDraggingNode] = useState(false)
+  const [zoom, setZoom] = useState(1)
 
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
@@ -646,7 +647,7 @@ export default function OrgChartPage() {
           onClick={() => { if (connMode) setConnMode(null); setSelectedNodeId(null) }}>
 
           {/* Relative container for nodes + SVG */}
-          <div ref={treeRef} className="relative" style={{ minWidth: '100%', minHeight: '100%' }}>
+          <div ref={treeRef} className="relative origin-top-left" style={{ minWidth: '100%', minHeight: '100%', transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
 
             {/* Dot grid canvas */}
             <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
@@ -752,6 +753,21 @@ export default function OrgChartPage() {
                 </div>
               )
             })}
+          </div>
+
+          {/* Zoom controls */}
+          <div className="absolute bottom-4 right-4 flex flex-col gap-1 z-20">
+            <button
+              onClick={() => setZoom(z => Math.min(2, Math.round((z + 0.1) * 10) / 10))}
+              className="w-9 h-9 bg-white border border-slate-200 rounded-xl shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-50 active:bg-slate-100 text-lg font-bold transition-colors select-none">
+              +
+            </button>
+            <div className="text-center text-[10px] text-slate-400 font-semibold py-0.5">{Math.round(zoom * 100)}%</div>
+            <button
+              onClick={() => setZoom(z => Math.max(0.3, Math.round((z - 0.1) * 10) / 10))}
+              className="w-9 h-9 bg-white border border-slate-200 rounded-xl shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-50 active:bg-slate-100 text-lg font-bold transition-colors select-none">
+            −
+            </button>
           </div>
         </div>
       </div>

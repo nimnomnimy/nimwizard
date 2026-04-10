@@ -86,11 +86,16 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
       swimLaneId: swimLaneId || undefined,
     }
 
+    // Auto-move to done bucket if progress = 100
+    const effectiveBucket = progress >= 100
+      ? (taskBuckets.find(b => b.id === 'done')?.id ?? targetBucket)
+      : targetBucket
+
     // Use atomic action — handles bucket upsert + timeline bar create/update
-    saveTaskWithTimelineItem(targetBucket, updated)
+    saveTaskWithTimelineItem(effectiveBucket, updated)
 
     // If bucket changed for an existing task, also remove from old bucket
-    if (task && targetBucket !== bucketId) {
+    if (task && effectiveBucket !== bucketId) {
       const newBuckets = taskBuckets.map((b: TaskBucket) =>
         b.id === bucketId ? { ...b, tasks: b.tasks.filter(t => t.id !== task.id) } : b
       )
@@ -184,7 +189,19 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
 
           {/* Progress */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress — {progress}%</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Progress — {progress}%</label>
+              <button type="button"
+                onClick={() => { setProgress(progress === 100 ? 0 : 100) }}
+                className={`flex items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full border transition-colors ${
+                  progress === 100 ? 'bg-emerald-500 text-white border-emerald-500' : 'border-slate-200 text-slate-500 hover:border-emerald-400 hover:text-emerald-600'
+                }`}>
+                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                  <path d="M1.5 5l2.5 2.5 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+                Done
+              </button>
+            </div>
             <input type="range" min={0} max={100} value={progress}
               onChange={e => setProgress(Number(e.target.value))}
               className="w-full accent-blue-500" />

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import { uid } from '../../lib/utils'
 import { showToast } from '../ui/Toast'
-import type { Meeting, ActionItem, Contact } from '../../types'
+import type { Meeting, ActionItem, Contact, Task } from '../../types'
 
 interface Props {
   open: boolean
@@ -24,8 +24,11 @@ function todayStr() {
 export default function MeetingDrawer({ open, meeting, onClose }: Props) {
   const contacts = useAppStore(s => s.contacts)
   const meetings = useAppStore(s => s.meetings)
+  const taskBuckets = useAppStore(s => s.taskBuckets)
   const deleteMeeting = useAppStore(s => s.deleteMeeting)
   const saveMeetingWithTasks = useAppStore(s => s.saveMeetingWithTasks)
+
+  const allTasks: Task[] = taskBuckets.flatMap(b => b.tasks)
 
   const [title, setTitle] = useState('')
   const [date, setDate] = useState(todayStr())
@@ -34,6 +37,8 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
   const [discussion, setDiscussion] = useState('')
   const [actionItems, setActionItems] = useState<ActionItem[]>([])
   const [newActionText, setNewActionText] = useState('')
+  const [actionSearch, setActionSearch] = useState('')
+  const [showActionSearch, setShowActionSearch] = useState(false)
   const [activeTab, setActiveTab] = useState<'current' | 'previous'>('current')
 
   const titleRef = useRef<HTMLInputElement>(null)
@@ -60,6 +65,8 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
       setActionItems(meeting?.actionItems ?? [])
       setAttendeeSearch('')
       setNewActionText('')
+      setActionSearch('')
+      setShowActionSearch(false)
       setActiveTab('current')
       setTimeout(() => titleRef.current?.focus(), 100)
     }
@@ -86,6 +93,28 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
     setNewActionText('')
     setTimeout(() => actionInputRef.current?.focus(), 50)
   }
+
+  const addTaskAsActionItem = (task: Task) => {
+    if (actionItems.some(a => a.taskId === task.id)) { showToast('Already added'); return }
+    const item: ActionItem = {
+      id: uid(),
+      text: task.text,
+      done: (task.progress ?? 0) >= 100,
+      taskId: task.id,
+      priority: task.priority,
+      due: task.due,
+    }
+    setActionItems(prev => [...prev, item])
+    setActionSearch('')
+    setShowActionSearch(false)
+    showToast(`"${task.text}" added`, 'success')
+  }
+
+  const filteredActionTasks = allTasks.filter(t => {
+    if (!actionSearch.trim()) return false
+    const q = actionSearch.toLowerCase()
+    return t.text.toLowerCase().includes(q)
+  }).slice(0, 8)
 
   const updateActionItem = (id: string, patch: Partial<ActionItem>) => {
     setActionItems(prev => prev.map(a => a.id === id ? { ...a, ...patch } : a))
@@ -157,22 +186,24 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
           </button>
         </div>
 
-        {/* Tabs (only show Previous tab when there's a relevant previous meeting) */}
-        <div className="flex border-b border-slate-100 flex-shrink-0">
-          <button onClick={() => setActiveTab('current')}
-            className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${activeTab === 'current' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
-            This Meeting
-          </button>
-          <button onClick={() => setActiveTab('previous')}
-            className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${activeTab === 'previous' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
-            Previous
-            {previousMeeting && previousMeeting.actionItems.some(a => !a.done) && (
-              <span className="ml-1.5 bg-amber-100 text-amber-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
-                {previousMeeting.actionItems.filter(a => !a.done).length}
-              </span>
-            )}
-          </button>
-        </div>
+        {/* Tabs — only show Previous tab when editing an existing meeting */}
+        {meeting && (
+          <div className="flex border-b border-slate-100 flex-shrink-0">
+            <button onClick={() => setActiveTab('current')}
+              className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${activeTab === 'current' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
+              This Meeting
+            </button>
+            <button onClick={() => setActiveTab('previous')}
+              className={`flex-1 py-2.5 text-sm font-semibold border-b-2 transition-colors ${activeTab === 'previous' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
+              Previous
+              {previousMeeting && previousMeeting.actionItems.some(a => !a.done) && (
+                <span className="ml-1.5 bg-amber-100 text-amber-600 text-[10px] px-1.5 py-0.5 rounded-full font-bold">
+                  {previousMeeting.actionItems.filter(a => !a.done).length}
+                </span>
+              )}
+            </button>
+          </div>
+        )}
 
         {/* Current meeting tab */}
         {activeTab === 'current' && (
@@ -241,7 +272,44 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
 
             {/* Action Items */}
             <div className="flex flex-col gap-2">
-              <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Action Items</label>
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Action Items</label>
+                <button type="button"
+                  onClick={() => setShowActionSearch(s => !s)}
+                  className={`text-xs font-semibold px-2 py-1 rounded-lg transition-colors ${showActionSearch ? 'bg-blue-100 text-blue-600' : 'text-blue-500 hover:bg-blue-50'}`}>
+                  Search tasks…
+                </button>
+              </div>
+
+              {/* Task search */}
+              {showActionSearch && (
+                <div className="relative">
+                  <input type="text" autoFocus value={actionSearch} onChange={e => setActionSearch(e.target.value)}
+                    placeholder="Search existing tasks…"
+                    className="w-full px-3 py-2.5 border border-blue-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] bg-blue-50" />
+                  {filteredActionTasks.length > 0 && (
+                    <div className="border border-slate-200 rounded-xl overflow-hidden shadow-sm mt-1 max-h-48 overflow-y-auto">
+                      {filteredActionTasks.map(t => (
+                        <button key={t.id} type="button"
+                          onClick={() => addTaskAsActionItem(t)}
+                          disabled={actionItems.some(a => a.taskId === t.id)}
+                          className="w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 border-b border-slate-100 last:border-0 flex items-center gap-2 disabled:opacity-40">
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className="flex-shrink-0 text-slate-400">
+                            <rect x="1" y="1" width="10" height="10" rx="2" stroke="currentColor" strokeWidth="1.3"/>
+                          </svg>
+                          <span className="flex-1 font-medium text-slate-800 truncate">{t.text}</span>
+                          {t.priority && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                            t.priority === 'high' ? 'text-red-600 bg-red-50' : t.priority === 'medium' ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50'
+                          }`}>{t.priority}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {actionSearch && filteredActionTasks.length === 0 && (
+                    <p className="text-xs text-slate-400 px-1 mt-1">No matching tasks</p>
+                  )}
+                </div>
+              )}
 
               {actionItems.map(item => (
                 <div key={item.id} className="flex items-start gap-2 bg-slate-50 rounded-xl p-2.5">
@@ -255,7 +323,12 @@ export default function MeetingDrawer({ open, meeting, onClose }: Props) {
                   </button>
 
                   <div className="flex-1 min-w-0">
-                    <p className={`text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{item.text}</p>
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-sm ${item.done ? 'line-through text-slate-400' : 'text-slate-800'}`}>{item.text}</p>
+                      {item.taskId && (
+                        <span className="text-[9px] font-bold bg-indigo-50 text-indigo-500 px-1.5 py-0.5 rounded-full flex-shrink-0">task</span>
+                      )}
+                    </div>
 
                     <div className="flex flex-wrap gap-1.5 mt-1.5">
                       {/* Assignee */}

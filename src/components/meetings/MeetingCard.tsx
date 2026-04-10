@@ -1,9 +1,11 @@
+import { useState } from 'react'
 import type { Meeting, Contact } from '../../types'
 
 interface Props {
   meeting: Meeting
   contacts: Contact[]
   onEdit: () => void
+  onClone: () => void
   onDelete: () => void
 }
 
@@ -18,17 +20,20 @@ function isPast(date: string) {
   return date < today
 }
 
-export default function MeetingCard({ meeting, contacts, onEdit, onDelete }: Props) {
+export default function MeetingCard({ meeting, contacts, onEdit, onClone, onDelete }: Props) {
   const { day, month, year } = fmtDate(meeting.date)
   const past = isPast(meeting.date)
   const openItems = meeting.actionItems.filter(a => !a.done).length
   const totalItems = meeting.actionItems.length
   const attendeeContacts = meeting.attendees.map(id => contacts.find(c => c.id === id)).filter(Boolean) as Contact[]
+  const [showMenu, setShowMenu] = useState(false)
 
   return (
+    <div className="relative">
+    {showMenu && <div className="fixed inset-0 z-10" onClick={() => setShowMenu(false)} />}
     <div
       className={`bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden cursor-pointer hover:border-blue-300 hover:shadow-md active:bg-slate-50 transition-all ${past ? 'opacity-80' : ''}`}
-      onClick={onEdit}>
+      onClick={() => setShowMenu(true)}>
       <div className="flex gap-3 p-3">
         {/* Date block */}
         <div className={`flex-shrink-0 w-12 rounded-lg flex flex-col items-center justify-center py-2 ${past ? 'bg-slate-100' : 'bg-blue-50'}`}>
@@ -76,22 +81,42 @@ export default function MeetingCard({ meeting, contacts, onEdit, onDelete }: Pro
           )}
         </div>
 
-        {/* Actions */}
-        <div className="flex flex-col items-center gap-1 flex-shrink-0" onClick={e => e.stopPropagation()}>
-          <button onClick={onEdit}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors">
-            <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
-              <path d="M9.5 1.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-          </button>
-          <button onClick={onDelete}
-            className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:bg-red-100 transition-colors">
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-              <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-            </svg>
-          </button>
+        {/* Chevron indicator */}
+        <div className="flex items-center flex-shrink-0 text-slate-300">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+            <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </div>
       </div>
+    </div>
+
+    {/* Action menu */}
+    {showMenu && (
+      <div className="absolute right-2 top-2 z-20 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden min-w-[160px]">
+        <button onClick={() => { setShowMenu(false); onEdit() }}
+          className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-b border-slate-100">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M9.5 1.5l2 2-7 7H2.5v-2l7-7z" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
+          Edit meeting
+        </button>
+        <button onClick={() => { setShowMenu(false); onClone() }}
+          className="w-full text-left px-4 py-3 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2.5 border-b border-slate-100">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <rect x="4" y="4" width="8" height="8" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+            <path d="M1 9V2a1 1 0 011-1h7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+          </svg>
+          Clone as new
+        </button>
+        <button onClick={() => { setShowMenu(false); onDelete() }}
+          className="w-full text-left px-4 py-3 text-sm text-red-500 hover:bg-red-50 flex items-center gap-2.5">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
+            <path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          Delete
+        </button>
+      </div>
+    )}
     </div>
   )
 }

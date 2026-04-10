@@ -4,6 +4,7 @@ import { showToast } from '../components/ui/Toast'
 import MeetingCard from '../components/meetings/MeetingCard'
 import MeetingDrawer from '../components/meetings/MeetingDrawer'
 import type { Meeting } from '../types'
+import { uid } from '../lib/utils'
 
 type DateFilter = 'all' | 'upcoming' | 'past'
 
@@ -51,6 +52,19 @@ export default function MeetingsPage() {
     if (!confirm('Delete this meeting?')) return
     deleteMeeting(id)
     showToast('Meeting deleted')
+  }
+
+  const handleClone = (m: Meeting) => {
+    const today = todayStr()
+    const clone: Meeting = {
+      ...m,
+      id: uid(),
+      title: `${m.title} (copy)`,
+      date: today,
+      actionItems: m.actionItems.map(a => ({ ...a, id: uid(), done: false })),
+      createdAt: Date.now(),
+    }
+    setDrawer(clone)
   }
 
   return (
@@ -119,6 +133,7 @@ export default function MeetingsPage() {
           filtered.map(m => (
             <MeetingCard key={m.id} meeting={m} contacts={contacts}
               onEdit={() => setDrawer(m)}
+              onClone={() => handleClone(m)}
               onDelete={() => handleDelete(m.id)} />
           ))
         )}
