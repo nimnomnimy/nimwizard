@@ -207,9 +207,9 @@ export default function TasksPage() {
             </button>
             <ExportMenu
               onCSV={() => { exportTasksCSV(taskBuckets); showToast('Tasks exported as CSV', 'success') }}
-              onXLSX={() => { exportTasksXLSX(taskBuckets); showToast('Tasks exported as Excel', 'success') }}
+              onXLSX={() => exportTasksXLSX(taskBuckets).then(() => showToast('Tasks exported as Excel', 'success')).catch(() => showToast('Export failed'))}
               onPDF={() => { exportTasksPDF(taskBuckets); showToast('Tasks exported as PDF', 'success') }}
-              onPPTX={() => { exportTasksPPTX(taskBuckets); showToast('Tasks exported as PowerPoint', 'success') }}
+              onPPTX={() => exportTasksPPTX(taskBuckets).then(() => showToast('Tasks exported as PowerPoint', 'success')).catch(() => showToast('Export failed'))}
             />
             <button onClick={() => setDrawer({ bucketId: activeBucket || taskBuckets[0]?.id, task: null })}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 min-h-[44px] transition-colors">

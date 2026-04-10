@@ -16,7 +16,7 @@ import { showToast } from '../components/ui/Toast'
 type ExportMode = 'gantt' | 'table' | 'both'
 
 // Two-step export popover: pick mode then format
-function TimelineExportMenu({ timeline, ganttRef }: { timeline: Timeline; ganttRef: React.RefObject<HTMLDivElement | null> }) {
+function TimelineExportMenu({ timeline }: { timeline: Timeline }) {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<'mode' | 'format'>('mode')
   const [mode, setMode] = useState<ExportMode>('both')
@@ -41,11 +41,10 @@ function TimelineExportMenu({ timeline, ganttRef }: { timeline: Timeline; ganttR
     close()
     setBusy(true)
     try {
-      const el = ganttRef.current
       if (fmt === 'csv') exportTimelineCSV(timeline, mode)
-      else if (fmt === 'xlsx') await exportTimelineXLSX(timeline, mode, el)
-      else if (fmt === 'pdf') await exportTimelinePDF(timeline, mode, el)
-      else await exportTimelinePPTX(timeline, mode, el)
+      else if (fmt === 'xlsx') await exportTimelineXLSX(timeline, mode)
+      else if (fmt === 'pdf') await exportTimelinePDF(timeline, mode)
+      else await exportTimelinePPTX(timeline, mode)
       showToast(`Exported as ${fmt.toUpperCase()}`, 'success')
     } catch {
       showToast('Export failed')
@@ -115,8 +114,6 @@ export default function TimelineEditorPage() {
   const timelines = useAppStore(s => s.timelines)
   const updateTimeline = useAppStore(s => s.updateTimeline)
   const navigate = useNavigate()
-  const ganttRef = useRef<HTMLDivElement | null>(null)
-
   const timeline = timelines.find(t => t.id === id)
 
   if (!timeline) {
@@ -200,7 +197,7 @@ export default function TimelineEditorPage() {
         </button>
 
         {/* Export menu */}
-        <TimelineExportMenu timeline={timeline} ganttRef={ganttRef} />
+        <TimelineExportMenu timeline={timeline} />
       </div>
 
       {/* Mobile date range */}
@@ -216,7 +213,7 @@ export default function TimelineEditorPage() {
 
       {/* Editor */}
       <div className="flex-1 overflow-hidden">
-        <TimelineEditor timeline={timeline} onChange={handleChange} ganttRef={ganttRef} />
+        <TimelineEditor timeline={timeline} onChange={handleChange} />
       </div>
     </div>
   )

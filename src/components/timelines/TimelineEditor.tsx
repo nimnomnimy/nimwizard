@@ -41,7 +41,6 @@ const LANE_COLORS = ['#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6'
 interface Props {
   timeline: Timeline
   onChange: (t: Timeline) => void
-  ganttRef?: React.RefObject<HTMLDivElement | null>
 }
 
 interface BarDrag {
@@ -77,21 +76,27 @@ function currentPeriodBounds(timescale: Timescale): { start: Date; end: Date } {
   }
 }
 
-export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) {
+export default function TimelineEditor({ timeline, onChange }: Props) {
   const scrollRef  = useRef<HTMLDivElement>(null)
   const canvasRef  = useRef<HTMLDivElement>(null)
   const dragRef    = useRef<ActiveDrag | null>(null)
   // Maps laneId → canvas-relative Y bounds (top inclusive, bottom exclusive)
   const laneBoundsRef = useRef<Map<string, { top: number; bottom: number }>>(new Map())
 
-  const labelWidth = timeline.labelWidth ?? DEFAULT_LABEL_W
+  // Visual resize overrides — declared early so they can be used in derived values below
+  const [labelResizeVisual, setLabelResizeVisual] = useState<number | null>(null)
+  const [colResizeVisual, setColResizeVisual] = useState<{ dateKey: string; width: number } | null>(null)
+
+  const labelWidth = labelResizeVisual ?? (timeline.labelWidth ?? DEFAULT_LABEL_W)
 
   const viewStart = parseDate(timeline.startDate)
   const viewEnd   = parseDate(timeline.endDate)
   const yearMode  = timeline.yearMode ?? 'calendar'
   const showWeekends = timeline.showWeekends ?? true
   const weekLabels   = timeline.weekLabels   ?? 'range'
-  const colWidthMap  = timeline.colWidthMap  ?? {}
+  const colWidthMap  = colResizeVisual
+    ? { ...(timeline.colWidthMap ?? {}), [colResizeVisual.dateKey]: colResizeVisual.width }
+    : (timeline.colWidthMap ?? {})
 
   // New header row system
   const { topRow: dblGroups, midRow: tickCols, weekendCols } = getHeaderRows(
@@ -161,6 +166,17 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
 
   // Column resize drag (individual column width)
   const colResizeDragRef = useRef<{ dateKey: string; startX: number; startWidth: number } | null>(null)
+  // Tracks the last committed col-resize width so onUp closure can write to store
+  const colResizeFinalRef = useRef<{ dateKey: string; width: number } | null>(null)
+
+  // Drag visual override — updated on every pointermove via RAF, avoids store writes during drag
+  // Maps itemId (or subId) → { startDate, endDate } for the in-flight position
+  const [dragVisual, setDragVisual] = useState<{ id: string; startDate: string; endDate: string } | null>(null)
+  const dragRafRef = useRef<number | null>(null)
+  // Cached canvas rect at drag start (avoids getBoundingClientRect in move)
+  const canvasRectRef = useRef<{ left: number; top: number }>({ left: 0, top: 0 })
+  // Ref for label resize final width (accessible in closure)
+  const labelResizeFinalRef = useRef<number | null>(null)
 
   // Stable refs so window listeners always call latest handler
   const onPointerMoveRef = useRef<(e: PointerEvent) => void>(() => {})
@@ -177,6 +193,39 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
   const periodX2 = dateToPxVar(periodBounds.end)
 
   const update = useCallback((patch: Partial<Timeline>) => { onChange({ ...timeline, ...patch }) }, [timeline, onChange])
+
+  // Stable ref to latest timeline (for use in event closures that must not capture stale state)
+  const timelineRef = useRef(timeline)
+  timelineRef.current = timeline
+
+  // Stable function to update a single column width — safe to call from event closures
+  const updateTimelineColWidth = useCallback((dateKey: string, width: number) => {
+    const t = timelineRef.current
+    onChange({ ...t, colWidthMap: { ...(t.colWidthMap ?? {}), [dateKey]: width } })
+  }, [onChange])
+
+  // Update a timeline item and sync to linked Task if present
+  const updateTask = useAppStore(s => s.updateTask)
+  const patchTimelineItem = useCallback((id: string, patch: Partial<import('../../types').TimelineItem>) => {
+    const t = timelineRef.current
+    const existing = t.items.find(i => i.id === id)
+    if (!existing) return
+    const updated = { ...existing, ...patch }
+    onChange({ ...t, items: t.items.map(i => i.id === id ? updated : i) })
+    // Sync to linked task
+    if (updated.taskId) {
+      const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(tk => ({ task: tk, bucketId: b.id }))).find(x => x.task.id === updated.taskId)
+      if (bucketEntry) {
+        const syncedTask = {
+          ...bucketEntry.task,
+          text: updated.label || bucketEntry.task.text,
+          due: updated.endDate || bucketEntry.task.due,
+          progress: updated.progress !== undefined ? updated.progress : bucketEntry.task.progress,
+        }
+        updateTask(bucketEntry.bucketId, syncedTask)
+      }
+    }
+  }, [onChange, taskBuckets, updateTask])
 
   // ── Global pointer listeners for drag (works on mobile with pointer capture removed) ──
   useEffect(() => {
@@ -220,17 +269,29 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
 
   // ── Coordinate helpers ────────────────────────────────────────────────────
   function clientXToCanvasX(clientX: number) {
-    return clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0)
+    // Use cached rect during drag to avoid forced reflow; fall back to live rect otherwise
+    const left = dragRef.current ? canvasRectRef.current.left : (canvasRef.current?.getBoundingClientRect().left ?? 0)
+    return clientX - left
   }
   function canvasXToDate(canvasX: number) { return pxToDateVar(canvasX - labelWidth) }
-  function itemX(item: TimelineItem | TimelineSubItem) { return dateToPxVar(parseDate(item.startDate)) }
+  function itemX(item: TimelineItem | TimelineSubItem) {
+    const start = (dragVisual?.id === item.id) ? dragVisual.startDate : item.startDate
+    return dateToPxVar(parseDate(start))
+  }
   function itemW(item: TimelineItem | TimelineSubItem) {
-    return Math.max(dateToPxVar(parseDate(item.endDate)) - dateToPxVar(parseDate(item.startDate)), MIN_BAR_W)
+    const start = (dragVisual?.id === item.id) ? dragVisual.startDate : item.startDate
+    const end   = (dragVisual?.id === item.id) ? dragVisual.endDate   : item.endDate
+    return Math.max(dateToPxVar(parseDate(end)) - dateToPxVar(parseDate(start)), MIN_BAR_W)
   }
 
   // ── Bar drag ──────────────────────────────────────────────────────────────
   function startBarDrag(e: React.PointerEvent, item: TimelineItem | TimelineSubItem, kind: BarDrag['kind'], parentId?: string, laneId?: string) {
     e.stopPropagation(); e.preventDefault()
+    // Cache rect at drag start to avoid getBoundingClientRect in pointermove
+    if (canvasRef.current) {
+      const r = canvasRef.current.getBoundingClientRect()
+      canvasRectRef.current = { left: r.left, top: r.top }
+    }
     dragRef.current = {
       kind, itemId: parentId ?? item.id, subId: parentId ? item.id : undefined,
       origLaneId: laneId ?? '',
@@ -264,8 +325,10 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
     if (!drag) return
 
     if (drag.kind === 'label-resize') {
-      const newW = Math.min(MAX_LABEL_W, Math.max(MIN_LABEL_W, drag.startWidth + (e.clientX - drag.startClientX)))
-      update({ labelWidth: Math.round(newW) })
+      const newW = Math.round(Math.min(MAX_LABEL_W, Math.max(MIN_LABEL_W, drag.startWidth + (e.clientX - drag.startClientX))))
+      // Visual-only during drag — commit to store on pointerup
+      labelResizeFinalRef.current = newW
+      setLabelResizeVisual(newW)
       return
     }
 
@@ -290,11 +353,7 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
 
     // Cross-lane: detect which lane the pointer is over (only for 'move')
     if (drag.kind === 'move' && !drag.subId) {
-      // canvasRef is the inner content div — its getBoundingClientRect().top reflects
-      // scroll (it moves up as user scrolls). The ruler is sticky so always at the
-      // top of the viewport; lane bounds are relative to the swim-lanes container
-      // which starts immediately after the ruler in the content flow.
-      const canvasTop = canvasRef.current?.getBoundingClientRect().top ?? 0
+      const canvasTop = canvasRectRef.current.top
       const rulerH = DBL_MAJOR_H + DBL_MINOR_H + (minor ? SUB_RULER_H : 0)
       const canvasY = e.clientY - canvasTop - rulerH
       let targetId: string | null = null
@@ -304,45 +363,29 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
       setDragTargetLaneId(targetId)
     }
 
-    if (drag.subId) {
-      const items = timeline.items.map(it => {
-        if (it.id !== drag.itemId) return it
-        const subs = (it.subItems ?? []).map(s => {
-          if (s.id !== drag.subId) return s
-          let newStart = drag.origStart, newEnd = drag.origEnd
-          if (drag.kind === 'move') {
-            newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
-            newEnd   = addDays(newStart, Math.max(1, Math.round((drag.origEnd.getTime()-drag.origStart.getTime())/86400000)))
-          } else if (drag.kind === 'resize-left') {
-            newStart = addDays(drag.origStart, daysDelta)
-            if (newStart >= drag.origEnd) newStart = addDays(drag.origEnd,-1)
-          } else {
-            newEnd = addDays(drag.origEnd, daysDelta)
-            if (newEnd <= drag.origStart) newEnd = addDays(drag.origStart,1)
-          }
-          return { ...s, startDate: formatDate(newStart), endDate: formatDate(newEnd) }
-        })
-        return { ...it, subItems: subs }
-      })
-      update({ items }); return
+    // Compute new dates for visual override
+    let newStart = drag.origStart, newEnd = drag.origEnd
+    if (drag.kind === 'move') {
+      newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
+      newEnd   = addDays(newStart, Math.max(1, Math.round((drag.origEnd.getTime()-drag.origStart.getTime())/86400000)))
+    } else if (drag.kind === 'resize-left') {
+      newStart = addDays(drag.origStart, daysDelta)
+      if (newStart >= drag.origEnd) newStart = addDays(drag.origEnd, -1)
+    } else {
+      newEnd = addDays(drag.origEnd, daysDelta)
+      if (newEnd <= drag.origStart) newEnd = addDays(drag.origStart, 1)
     }
 
-    const items = timeline.items.map(it => {
-      if (it.id !== drag.itemId) return it
-      let newStart = drag.origStart, newEnd = drag.origEnd
-      if (drag.kind === 'move') {
-        newStart = snapDate(addDays(drag.origStart, daysDelta), timeline.timescale)
-        newEnd   = addDays(newStart, Math.max(1, Math.round((drag.origEnd.getTime()-drag.origStart.getTime())/86400000)))
-      } else if (drag.kind === 'resize-left') {
-        newStart = addDays(drag.origStart, daysDelta)
-        if (newStart >= drag.origEnd) newStart = addDays(drag.origEnd,-1)
-      } else {
-        newEnd = addDays(drag.origEnd, daysDelta)
-        if (newEnd <= drag.origStart) newEnd = addDays(drag.origStart,1)
-      }
-      return { ...it, startDate: formatDate(newStart), endDate: formatDate(newEnd) }
+    // Throttle visual state updates via RAF — no store writes during drag
+    const visualId = drag.subId ?? drag.itemId
+    const newStartStr = formatDate(newStart)
+    const newEndStr   = formatDate(newEnd)
+
+    if (dragRafRef.current !== null) cancelAnimationFrame(dragRafRef.current)
+    dragRafRef.current = requestAnimationFrame(() => {
+      dragRafRef.current = null
+      setDragVisual({ id: visualId, startDate: newStartStr, endDate: newEndStr })
     })
-    update({ items })
   }
 
   // ── Pointer up ────────────────────────────────────────────────────────────
@@ -352,6 +395,18 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
     setDragging(false)
     const finalTargetLaneId = dragTargetLaneId
     setDragTargetLaneId(null)
+
+    // Cancel any pending RAF
+    if (dragRafRef.current !== null) { cancelAnimationFrame(dragRafRef.current); dragRafRef.current = null }
+
+    // Commit label resize
+    if (drag?.kind === 'label-resize') {
+      const finalW = labelResizeFinalRef.current
+      labelResizeFinalRef.current = null
+      setLabelResizeVisual(null)
+      if (finalW !== null) update({ labelWidth: finalW })
+      return
+    }
 
     if (drag?.kind === 'draw' && ghost) {
       setGhost(null)
@@ -377,16 +432,46 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
           color: lane?.color ?? '#6366f1', progress: 0 })
         setEditingMilestone(null); setAddingForLane(drag.laneId); setDrawerOpen(true)
       }
+    } else if (drag && (drag.kind === 'move' || drag.kind === 'resize-left' || drag.kind === 'resize-right')) {
+      setGhost(null)
+      const visual = dragVisual
+      setDragVisual(null)
+
+      // Commit final dates to store
+      if (visual) {
+        if (drag.subId) {
+          update({
+            items: timeline.items.map(it => {
+              if (it.id !== drag.itemId) return it
+              return { ...it, subItems: (it.subItems ?? []).map(s =>
+                s.id !== drag.subId ? s : { ...s, startDate: visual.startDate, endDate: visual.endDate }
+              )}
+            })
+          })
+        } else {
+          let newItems = timeline.items.map(it => {
+            if (it.id !== drag.itemId) return it
+            const patched = { ...it, startDate: visual.startDate, endDate: visual.endDate }
+            // Cross-lane drop
+            if (drag.kind === 'move' && finalTargetLaneId && finalTargetLaneId !== drag.origLaneId) {
+              return { ...patched, swimLaneId: finalTargetLaneId }
+            }
+            return patched
+          })
+          update({ items: newItems })
+        }
+      } else {
+        // No visual movement — handle cross-lane drop only
+        if (drag.kind === 'move' && !drag.subId && finalTargetLaneId && finalTargetLaneId !== drag.origLaneId) {
+          update({
+            items: timeline.items.map(it =>
+              it.id === drag.itemId ? { ...it, swimLaneId: finalTargetLaneId } : it
+            )
+          })
+        }
+      }
     } else {
       setGhost(null)
-      // Cross-lane drop: reassign item to target lane
-      if (drag?.kind === 'move' && !drag.subId && finalTargetLaneId && finalTargetLaneId !== drag.origLaneId) {
-        update({
-          items: timeline.items.map(it =>
-            it.id === drag.itemId ? { ...it, swimLaneId: finalTargetLaneId } : it
-          )
-        })
-      }
     }
   }
 
@@ -727,7 +812,7 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
       <div ref={scrollRef}
         className="flex-1 min-h-0 overflow-auto scroll-touch select-none"
         style={{ touchAction: dragging ? 'none' : 'pan-x pan-y' }}>
-        <div ref={el => { (canvasRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (ganttRef) (ganttRef as React.MutableRefObject<HTMLDivElement | null>).current = el }} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
+        <div ref={el => { (canvasRef as React.MutableRefObject<HTMLDivElement | null>).current = el }} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
 
           {/* ── Ruler (always double-row: group label above + major ticks below) ── */}
           <div className="sticky top-0 z-20 bg-white border-b border-slate-200">
@@ -795,13 +880,21 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
                           e.stopPropagation(); e.preventDefault()
                           colResizeDragRef.current = { dateKey, startX: e.clientX, startWidth: col.widthPx }
                           const onMove = (me: PointerEvent) => {
-                            const drag = colResizeDragRef.current
-                            if (!drag) return
-                            const newW = Math.max(12, drag.startWidth + (me.clientX - drag.startX))
-                            update({ colWidthMap: { ...colWidthMap, [drag.dateKey]: Math.round(newW) } })
+                            const d = colResizeDragRef.current
+                            if (!d) return
+                            const newW = Math.round(Math.max(12, d.startWidth + (me.clientX - d.startX)))
+                            colResizeFinalRef.current = { dateKey: d.dateKey, width: newW }
+                            setColResizeVisual({ dateKey: d.dateKey, width: newW })
                           }
                           const onUp = () => {
                             colResizeDragRef.current = null
+                            setColResizeVisual(null)
+                            const final = colResizeFinalRef.current
+                            colResizeFinalRef.current = null
+                            if (final) {
+                              // Use updateTimelineRef to access current colWidthMap without stale closure
+                              updateTimelineColWidth(final.dateKey, final.width)
+                            }
                             window.removeEventListener('pointermove', onMove)
                             window.removeEventListener('pointerup', onUp)
                           }
@@ -1166,7 +1259,7 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
       {/* ── Table view panel ─────────────────────────────────────────────── */}
       {showTable && (
         <div className="flex-shrink-0 overflow-auto border-t border-slate-200" style={{ maxHeight: '40vh' }}>
-          <TimelineTable timeline={timeline} onChange={onChange} />
+          <TimelineTable timeline={timeline} onChange={onChange} onPatchItem={patchTimelineItem} />
         </div>
       )}
 

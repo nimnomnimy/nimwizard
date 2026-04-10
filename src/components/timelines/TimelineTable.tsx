@@ -6,6 +6,7 @@ import { addDays, formatDate } from './utils/dateLayout'
 interface Props {
   timeline: Timeline
   onChange: (t: Timeline) => void
+  onPatchItem?: (id: string, patch: Partial<TimelineItem>) => void
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -101,7 +102,7 @@ function LanePicker({ value, lanes, onCommit }: { value: string; lanes: SwimLane
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TimelineTable({ timeline, onChange }: Props) {
+export default function TimelineTable({ timeline, onChange, onPatchItem }: Props) {
   const update = (patch: Partial<Timeline>) => onChange({ ...timeline, ...patch })
 
   // ── Milestone mutations ───────────────────────────────────────────────────
@@ -118,7 +119,11 @@ export default function TimelineTable({ timeline, onChange }: Props) {
 
   // ── Item mutations ────────────────────────────────────────────────────────
   function patchItem(id: string, patch: Partial<TimelineItem>) {
-    update({ items: timeline.items.map(i => i.id === id ? { ...i, ...patch } : i) })
+    if (onPatchItem) {
+      onPatchItem(id, patch)
+    } else {
+      update({ items: timeline.items.map(i => i.id === id ? { ...i, ...patch } : i) })
+    }
   }
   function addItem(laneId: string) {
     const lane = timeline.swimLanes.find(l => l.id === laneId)

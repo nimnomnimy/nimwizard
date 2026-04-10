@@ -559,9 +559,9 @@ export default function OrgChartPage() {
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <ExportMenu
               onCSV={() => { exportContactsCSV(visibleContacts); showToast('Exported as CSV', 'success') }}
-              onXLSX={() => { exportContactsXLSX(visibleContacts, treeRef.current).then(() => showToast('Exported as Excel', 'success')).catch(() => showToast('Export failed')) }}
-              onPDF={() => { exportContactsPDF(visibleContacts, treeRef.current).then(() => showToast('Exported as PDF', 'success')).catch(() => showToast('Export failed')) }}
-              onPPTX={() => { exportContactsPPTX(visibleContacts, treeRef.current).then(() => showToast('Exported as PowerPoint', 'success')).catch(() => showToast('Export failed')) }}
+              onXLSX={() => { exportContactsXLSX(visibleContacts, { contacts: visibleContacts, positions, dottedLines, peerLines }).then(() => showToast('Exported as Excel', 'success')).catch(() => showToast('Export failed')) }}
+              onPDF={() => { exportContactsPDF(visibleContacts, { contacts: visibleContacts, positions, dottedLines, peerLines }).then(() => showToast('Exported as PDF', 'success')).catch(() => showToast('Export failed')) }}
+              onPPTX={() => { exportContactsPPTX(visibleContacts, { contacts: visibleContacts, positions, dottedLines, peerLines }).then(() => showToast('Exported as PowerPoint', 'success')).catch(() => showToast('Export failed')) }}
             />
             <button onClick={cleanupLayout}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 active:bg-slate-100 min-h-[36px] transition-colors">
