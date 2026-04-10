@@ -19,16 +19,17 @@ type BranchStyle = 'tree' | 'staggered' | 'right-column' | 'left-column' | 'two-
 type ShapeFormat = 'rect' | 'rounded' | 'wide-rounded' | 'card-accent'
 
 // ─── Color themes ─────────────────────────────────────────────────────────────
-interface Theme { name: string; colors: string[] }  // colors indexed by depth 0–4+
-
-const THEMES: Theme[] = [
+// 5 accent colors indexed by hierarchy depth 0–4
+// These color the accent bar, avatar bg, and node border — cards stay white.
+const PRESET_THEMES: { name: string; colors: string[] }[] = [
   { name: 'Default',   colors: ['#6366f1','#3b82f6','#06b6d4','#10b981','#f59e0b'] },
   { name: 'Agile',     colors: ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6'] },
   { name: 'Formula',   colors: ['#1e40af','#7c3aed','#be185d','#047857','#b45309'] },
-  { name: 'Modulus',   colors: ['#0f172a','#1e293b','#334155','#475569','#64748b'] },
+  { name: 'Modulus',   colors: ['#334155','#475569','#64748b','#94a3b8','#cbd5e1'] },
   { name: 'Pastel',    colors: ['#818cf8','#67e8f9','#86efac','#fde68a','#fca5a5'] },
   { name: 'Ocean',     colors: ['#0ea5e9','#2dd4bf','#a3e635','#fb923c','#e879f9'] },
 ]
+const DEPTH_LABELS = ['Level 1 (C-suite)', 'Level 2 (GM)', 'Level 3 (Director)', 'Level 4 (Manager)', 'Level 5 (Individual)']
 
 // ─── Level → depth map ───────────────────────────────────────────────────────
 const LEVEL_DEPTH: Record<string, number> = {
@@ -54,64 +55,98 @@ function computeTreeLayout(
   if (!contacts.length) return {}
   const { roots } = buildTreeMap(contacts)
 
-  function subtreeWidth(node: any): number {
+  // ── Tree / Staggered: measure subtree width ──────────────────────────────
+  function subtreeWidthTree(node: any): number {
     if (!node.children.length) return NODE_W
-    if (branchStyle === 'left-column' || branchStyle === 'right-column') return NODE_W + hGap + NODE_W
-    if (branchStyle === 'two-column') {
-      const cols = Math.ceil(node.children.length / 2)
-      return Math.max(NODE_W, cols * (NODE_W + hGap) - hGap)
-    }
-    const cw = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0)
+    const cw = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0)
     return Math.max(NODE_W, cw + hGap * (node.children.length - 1))
+  }
+
+  // ── Column styles: measure subtree height (for sizing parent columns) ───
+  function subtreeHeight(node: any): number {
+    if (!node.children.length) return NODE_H
+    const childrenH = node.children.reduce((s: number, c: any) => s + subtreeHeight(c) + vGap, 0) - vGap
+    return NODE_H + vGap + childrenH
+  }
+
+  // ── Two-column: measure subtree width recursively ───────────────────────
+  function subtreeWidthTwoCol(node: any): number {
+    if (!node.children.length) return NODE_W
+    const cols = Math.min(2, node.children.length)
+    const myW = cols * NODE_W + (cols - 1) * hGap
+    const childMaxW = Math.max(...node.children.map((c: any) => subtreeWidthTwoCol(c)))
+    return Math.max(myW, childMaxW)
   }
 
   const positions: Record<string, Position> = {}
 
-  function layout(node: any, centerX: number, y: number, depth: number) {
+  function layout(node: any, centerX: number, y: number) {
     positions[node.id] = { x: Math.round(centerX - NODE_W / 2), y }
     if (!node.children.length) return
 
     const childY = y + NODE_H + vGap
 
     if (branchStyle === 'right-column') {
-      // Parent at left, children stacked down-right
-      node.children.forEach((child: any, i: number) => {
-        layout(child, centerX + NODE_W / 2 + hGap + NODE_W / 2, y + i * (NODE_H + vGap / 2), depth + 1)
+      // Parent on left, children stacked vertically to the right
+      const colX = centerX + NODE_W / 2 + hGap + NODE_W / 2
+      let childY2 = y
+      node.children.forEach((child: any) => {
+        layout(child, colX, childY2)
+        childY2 += subtreeHeight(child) + vGap
       })
     } else if (branchStyle === 'left-column') {
-      node.children.forEach((child: any, i: number) => {
-        layout(child, centerX - NODE_W / 2 - hGap - NODE_W / 2, y + i * (NODE_H + vGap / 2), depth + 1)
+      // Parent on right, children stacked vertically to the left
+      const colX = centerX - NODE_W / 2 - hGap - NODE_W / 2
+      let childY2 = y
+      node.children.forEach((child: any) => {
+        layout(child, colX, childY2)
+        childY2 += subtreeHeight(child) + vGap
       })
     } else if (branchStyle === 'two-column') {
+      // Two columns of children below parent
+      const totalCols = Math.min(2, node.children.length)
+      const totalW = totalCols * NODE_W + (totalCols - 1) * hGap
+      const startX = centerX - totalW / 2 + NODE_W / 2
       node.children.forEach((child: any, i: number) => {
         const col = i % 2
         const row = Math.floor(i / 2)
-        const offsetX = col === 0 ? -(NODE_W / 2 + hGap / 2) : NODE_W / 2 + hGap / 2
-        layout(child, centerX + offsetX, childY + row * (NODE_H + vGap / 2), depth + 1)
+        const cx = startX + col * (NODE_W + hGap)
+        layout(child, cx, childY + row * (NODE_H + vGap))
       })
     } else if (branchStyle === 'staggered') {
+      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0) + hGap * (node.children.length - 1)
+      let cx = centerX - totalW / 2
       node.children.forEach((child: any, i: number) => {
-        const staggerX = centerX + (i - (node.children.length - 1) / 2) * (NODE_W + hGap)
-        const staggerY = childY + (i % 2) * (NODE_H / 2 + vGap / 3)
-        layout(child, staggerX, staggerY, depth + 1)
+        const sw = subtreeWidthTree(child)
+        const staggerY = childY + (i % 2) * Math.round(NODE_H * 0.4 + vGap * 0.3)
+        layout(child, cx + sw / 2, staggerY)
+        cx += sw + hGap
       })
     } else {
       // Default tree
-      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (node.children.length - 1)
+      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0) + hGap * (node.children.length - 1)
       let cx = centerX - totalW / 2
       node.children.forEach((child: any) => {
-        const sw = subtreeWidth(child)
-        layout(child, cx + sw / 2, childY, depth + 1)
+        const sw = subtreeWidthTree(child)
+        layout(child, cx + sw / 2, childY)
         cx += sw + hGap
       })
     }
   }
 
+  // Place roots side by side with spacing
   let startX = 30
   roots.forEach(r => {
-    const sw = subtreeWidth(r)
-    layout(r, startX + sw / 2, 30, 0)
-    startX += sw + hGap * 2
+    let rootW: number
+    if (branchStyle === 'right-column' || branchStyle === 'left-column') {
+      rootW = NODE_W + hGap + NODE_W  // parent + gap + child column
+    } else if (branchStyle === 'two-column') {
+      rootW = subtreeWidthTwoCol(r)
+    } else {
+      rootW = subtreeWidthTree(r)
+    }
+    layout(r, startX + rootW / 2, 30)
+    startX += rootW + hGap * 2
   })
   return positions
 }
@@ -173,8 +208,9 @@ export default function OrgChartPage() {
   const [shapeFormat, setShapeFormat] = useState<ShapeFormat>('rounded')
   const [hGap, setHGap] = useState(54)
   const [vGap, setVGap] = useState(60)
-  const [themeIndex, setThemeIndex] = useState(0)
   const [useThemeColors, setUseThemeColors] = useState(false)
+  const [accentColors, setAccentColors] = useState<string[]>(PRESET_THEMES[0].colors)
+  const [editingColorDepth, setEditingColorDepth] = useState<number | null>(null)
 
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
@@ -203,12 +239,11 @@ export default function OrgChartPage() {
 
   const uniqueOrgs = [...new Set(contacts.map(c => c.org).filter(Boolean) as string[])].sort()
 
-  // Node color from theme
-  function nodeColor(contactId: string): string {
+  // Accent color from theme (colors the border, avatar bg, and accent bar — card stays white)
+  function nodeAccentColor(contactId: string): string {
     if (!useThemeColors) return ''
     const depth = getNodeDepth(contactId, contacts)
-    const theme = THEMES[themeIndex]
-    return theme.colors[Math.min(depth, theme.colors.length - 1)]
+    return accentColors[Math.min(depth, accentColors.length - 1)]
   }
 
   // Node border/shape classes
@@ -795,25 +830,74 @@ export default function OrgChartPage() {
               {/* Color Themes */}
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Colour Theme</p>
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Accent Colours</p>
                   <button onClick={() => setUseThemeColors(t => !t)}
                     className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${useThemeColors ? 'bg-blue-500' : 'bg-slate-200'}`}>
                     <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${useThemeColors ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
                   </button>
                 </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  {THEMES.map((theme, i) => (
-                    <button key={theme.name} onClick={() => { setThemeIndex(i); setUseThemeColors(true) }}
-                      className={`flex flex-col items-start gap-1 p-2 rounded-lg border-2 transition-colors ${themeIndex === i && useThemeColors ? 'border-blue-500 bg-blue-50' : 'border-slate-100 hover:border-slate-200'}`}>
+
+                {/* Preset swatches */}
+                <div className="grid grid-cols-3 gap-1 mb-3">
+                  {PRESET_THEMES.map(theme => (
+                    <button key={theme.name}
+                      onClick={() => { setAccentColors(theme.colors); setUseThemeColors(true) }}
+                      className={`flex flex-col items-center gap-1 p-1.5 rounded-lg border transition-colors ${
+                        useThemeColors && accentColors.join() === theme.colors.join()
+                          ? 'border-blue-500 bg-blue-50' : 'border-slate-100 hover:border-slate-200'
+                      }`}>
                       <div className="flex gap-0.5">
-                        {theme.colors.map((c, j) => (
-                          <div key={j} className="w-4 h-4 rounded-sm" style={{ background: c }} />
+                        {theme.colors.slice(0,5).map((col, j) => (
+                          <div key={j} className="w-3 h-3 rounded-sm" style={{ background: col }} />
                         ))}
                       </div>
-                      <span className="text-[10px] font-semibold text-slate-600">{theme.name}</span>
+                      <span className="text-[9px] font-semibold text-slate-500">{theme.name}</span>
                     </button>
                   ))}
                 </div>
+
+                {/* Custom per-level colour pickers */}
+                {useThemeColors && (
+                  <div className="flex flex-col gap-1.5">
+                    <p className="text-[10px] text-slate-400 font-medium mb-0.5">Customise by level</p>
+                    {DEPTH_LABELS.map((label, depth) => (
+                      <div key={depth} className="flex items-center gap-2">
+                        <div className="relative">
+                          <div className="w-6 h-6 rounded border border-slate-200 cursor-pointer overflow-hidden"
+                            style={{ background: accentColors[depth] }}
+                            onClick={() => setEditingColorDepth(editingColorDepth === depth ? null : depth)} />
+                          {editingColorDepth === depth && (
+                            <input
+                              type="color"
+                              value={accentColors[depth]}
+                              onChange={e => {
+                                const next = [...accentColors]
+                                next[depth] = e.target.value
+                                setAccentColors(next)
+                              }}
+                              onBlur={() => setEditingColorDepth(null)}
+                              autoFocus
+                              className="absolute top-7 left-0 w-8 h-8 p-0 border-0 cursor-pointer opacity-0 z-10"
+                              style={{ width: 32, height: 32 }}
+                            />
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-500 truncate flex-1">{label}</span>
+                        <input
+                          type="color"
+                          value={accentColors[depth]}
+                          onChange={e => {
+                            const next = [...accentColors]
+                            next[depth] = e.target.value
+                            setAccentColors(next)
+                          }}
+                          className="w-6 h-6 rounded border border-slate-200 cursor-pointer p-0"
+                          title={label}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -962,7 +1046,7 @@ export default function OrgChartPage() {
               const pos = getPos(c.id)
               const isConnSource = connMode?.sourceId === c.id
               const isSelected   = selectedNodeId === c.id
-              const themeColor   = nodeColor(c.id)
+              const accent       = nodeAccentColor(c.id)  // empty string when themes off
               const hasAccent    = shapeFormat === 'card-accent'
 
               return (
@@ -978,8 +1062,8 @@ export default function OrgChartPage() {
                     width: NODE_W, minHeight: NODE_H,
                     touchAction: 'none',
                     zIndex: isSelected ? 20 : 10,
-                    background: useThemeColors && themeColor ? themeColor : 'white',
-                    border: `2px solid ${useThemeColors && themeColor ? themeColor : (isConnSource ? '#93c5fd' : isSelected ? '#bfdbfe' : '#e2e8f0')}`,
+                    background: 'white',
+                    border: `2px solid ${accent || (isConnSource ? '#93c5fd' : isSelected ? '#bfdbfe' : '#e2e8f0')}`,
                   }}
                   onPointerDown={e => {
                     if ((e.target as HTMLElement).closest('[data-handle],[data-action]')) return
@@ -996,7 +1080,7 @@ export default function OrgChartPage() {
                   {/* Card accent bar */}
                   {hasAccent && (
                     <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
-                      style={{ background: useThemeColors && themeColor ? 'rgba(255,255,255,0.4)' : (avatarColor(c.name)) }} />
+                      style={{ background: accent || avatarColor(c.name) }} />
                   )}
 
                   {/* Connection handles */}
@@ -1018,15 +1102,15 @@ export default function OrgChartPage() {
 
                   {/* Node content */}
                   <div className={`p-2.5 flex items-center gap-2 ${hasAccent ? 'pl-4' : ''}`}>
-                    <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${useThemeColors && themeColor ? 'text-white bg-white/25' : 'text-white'}`}
-                      style={useThemeColors && themeColor ? {} : { background: avatarColor(c.name) }}>
+                    <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold text-white"
+                      style={{ background: accent || avatarColor(c.name) }}>
                       {initials(c.name)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className={`text-xs font-bold truncate ${useThemeColors && themeColor ? 'text-white' : 'text-slate-800'}`}>{c.name}</p>
-                      {c.title && <p className={`text-[10px] truncate ${useThemeColors && themeColor ? 'text-white/75' : 'text-slate-400'}`}>{c.title}</p>}
+                      <p className="text-xs font-bold truncate text-slate-800">{c.name}</p>
+                      {c.title && <p className="text-[10px] truncate text-slate-400">{c.title}</p>}
                       {c.level && (
-                        <span className={`text-[9px] font-bold uppercase tracking-wide ${useThemeColors && themeColor ? 'text-white/60' : 'text-slate-400'}`}>
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
                           {LEVEL_LABELS[c.level as Level] ?? c.level}
                         </span>
                       )}
