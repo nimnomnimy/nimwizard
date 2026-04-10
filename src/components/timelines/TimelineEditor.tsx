@@ -7,6 +7,7 @@ import {
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
 import SubTaskDrawer from '../tasks/SubTaskDrawer'
+import TimelineTable from './TimelineTable'
 import { useAppStore } from '../../store/useAppStore'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -149,6 +150,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // Ghost + drag lock
   const [ghost,    setGhost]    = useState<Ghost | null>(null)
   const [dragging, setDragging] = useState(false)
+
+  // Table view
+  const [showTable, setShowTable] = useState(false)
 
   // Stable refs so window listeners always call latest handler
   const onPointerMoveRef = useRef<(e: PointerEvent) => void>(() => {})
@@ -641,11 +645,26 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"><path d="M5 0 L10 5 L5 10 L0 5 Z"/></svg>
           Milestone
         </button>
+
+        <button
+          onClick={() => setShowTable(t => !t)}
+          className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg min-h-[32px] transition-colors border ${
+            showTable
+              ? 'bg-indigo-50 border-indigo-200 text-indigo-700'
+              : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'
+          }`}>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <rect x="1" y="1" width="10" height="2" rx="0.5" fill="currentColor"/>
+            <rect x="1" y="5" width="10" height="2" rx="0.5" fill="currentColor"/>
+            <rect x="1" y="9" width="10" height="2" rx="0.5" fill="currentColor"/>
+          </svg>
+          Table
+        </button>
       </div>
 
       {/* ── Scrollable canvas ─────────────────────────────────────────────── */}
       <div ref={scrollRef}
-        className="flex-1 overflow-auto scroll-touch select-none"
+        className="flex-1 min-h-0 overflow-auto scroll-touch select-none"
         style={{ touchAction: dragging ? 'none' : 'pan-x pan-y' }}>
         <div ref={canvasRef} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
 
@@ -1054,6 +1073,13 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           </div>
         </div>
       </div>
+
+      {/* ── Table view panel ─────────────────────────────────────────────── */}
+      {showTable && (
+        <div className="flex-shrink-0 overflow-auto border-t border-slate-200" style={{ maxHeight: '40vh' }}>
+          <TimelineTable timeline={timeline} onChange={onChange} />
+        </div>
+      )}
 
       {/* ── Tap popover: Bar vs Milestone ────────────────────────────────── */}
       {tapPopover && (
