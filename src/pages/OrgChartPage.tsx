@@ -5,14 +5,36 @@ import { showToast } from '../components/ui/Toast'
 import ContactDrawer from '../components/contacts/ContactDrawer'
 import ExportMenu from '../components/ui/ExportMenu'
 import { exportContactsCSV, exportContactsXLSX, exportContactsPDF, exportContactsPPTX } from '../lib/exportUtils'
-import type { Contact, Position } from '../types'
+import type { Contact, Position, Level } from '../types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const NODE_W = 200
 const NODE_H = 88
-const H_GAP = 54
-const V_GAP = 60
 const SNAP = 20
+
+// ─── Branch styles ───────────────────────────────────────────────────────────
+type BranchStyle = 'tree' | 'staggered' | 'right-column' | 'left-column' | 'two-column'
+
+// ─── Shape formats ────────────────────────────────────────────────────────────
+type ShapeFormat = 'rect' | 'rounded' | 'wide-rounded' | 'card-accent'
+
+// ─── Color themes ─────────────────────────────────────────────────────────────
+interface Theme { name: string; colors: string[] }  // colors indexed by depth 0–4+
+
+const THEMES: Theme[] = [
+  { name: 'Default',   colors: ['#6366f1','#3b82f6','#06b6d4','#10b981','#f59e0b'] },
+  { name: 'Agile',     colors: ['#ef4444','#f97316','#eab308','#22c55e','#3b82f6'] },
+  { name: 'Formula',   colors: ['#1e40af','#7c3aed','#be185d','#047857','#b45309'] },
+  { name: 'Modulus',   colors: ['#0f172a','#1e293b','#334155','#475569','#64748b'] },
+  { name: 'Pastel',    colors: ['#818cf8','#67e8f9','#86efac','#fde68a','#fca5a5'] },
+  { name: 'Ocean',     colors: ['#0ea5e9','#2dd4bf','#a3e635','#fb923c','#e879f9'] },
+]
+
+// ─── Level → depth map ───────────────────────────────────────────────────────
+const LEVEL_DEPTH: Record<string, number> = {
+  'c-level': 0, 'gm': 1, 'head-of': 2, 'director': 2,
+  'manager': 3, 'lead': 3, 'individual': 4,
+}
 
 // ─── Tree layout ─────────────────────────────────────────────────────────────
 function buildTreeMap(contacts: Contact[]) {
@@ -23,34 +45,73 @@ function buildTreeMap(contacts: Contact[]) {
   return { map, roots }
 }
 
-function computeTreeLayout(contacts: Contact[]): Record<string, Position> {
+function computeTreeLayout(
+  contacts: Contact[],
+  hGap: number,
+  vGap: number,
+  branchStyle: BranchStyle,
+): Record<string, Position> {
   if (!contacts.length) return {}
   const { roots } = buildTreeMap(contacts)
 
   function subtreeWidth(node: any): number {
     if (!node.children.length) return NODE_W
+    if (branchStyle === 'left-column' || branchStyle === 'right-column') return NODE_W + hGap + NODE_W
+    if (branchStyle === 'two-column') {
+      const cols = Math.ceil(node.children.length / 2)
+      return Math.max(NODE_W, cols * (NODE_W + hGap) - hGap)
+    }
     const cw = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0)
-    return Math.max(NODE_W, cw + H_GAP * (node.children.length - 1))
+    return Math.max(NODE_W, cw + hGap * (node.children.length - 1))
   }
 
   const positions: Record<string, Position> = {}
-  function layout(node: any, centerX: number, y: number) {
+
+  function layout(node: any, centerX: number, y: number, depth: number) {
     positions[node.id] = { x: Math.round(centerX - NODE_W / 2), y }
     if (!node.children.length) return
-    const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + H_GAP * (node.children.length - 1)
-    let cx = centerX - totalW / 2
-    node.children.forEach((child: any) => {
-      const sw = subtreeWidth(child)
-      layout(child, cx + sw / 2, y + NODE_H + V_GAP)
-      cx += sw + H_GAP
-    })
+
+    const childY = y + NODE_H + vGap
+
+    if (branchStyle === 'right-column') {
+      // Parent at left, children stacked down-right
+      node.children.forEach((child: any, i: number) => {
+        layout(child, centerX + NODE_W / 2 + hGap + NODE_W / 2, y + i * (NODE_H + vGap / 2), depth + 1)
+      })
+    } else if (branchStyle === 'left-column') {
+      node.children.forEach((child: any, i: number) => {
+        layout(child, centerX - NODE_W / 2 - hGap - NODE_W / 2, y + i * (NODE_H + vGap / 2), depth + 1)
+      })
+    } else if (branchStyle === 'two-column') {
+      node.children.forEach((child: any, i: number) => {
+        const col = i % 2
+        const row = Math.floor(i / 2)
+        const offsetX = col === 0 ? -(NODE_W / 2 + hGap / 2) : NODE_W / 2 + hGap / 2
+        layout(child, centerX + offsetX, childY + row * (NODE_H + vGap / 2), depth + 1)
+      })
+    } else if (branchStyle === 'staggered') {
+      node.children.forEach((child: any, i: number) => {
+        const staggerX = centerX + (i - (node.children.length - 1) / 2) * (NODE_W + hGap)
+        const staggerY = childY + (i % 2) * (NODE_H / 2 + vGap / 3)
+        layout(child, staggerX, staggerY, depth + 1)
+      })
+    } else {
+      // Default tree
+      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (node.children.length - 1)
+      let cx = centerX - totalW / 2
+      node.children.forEach((child: any) => {
+        const sw = subtreeWidth(child)
+        layout(child, cx + sw / 2, childY, depth + 1)
+        cx += sw + hGap
+      })
+    }
   }
 
   let startX = 30
   roots.forEach(r => {
     const sw = subtreeWidth(r)
-    layout(r, startX + sw / 2, 30)
-    startX += sw + H_GAP * 2
+    layout(r, startX + sw / 2, 30, 0)
+    startX += sw + hGap * 2
   })
   return positions
 }
@@ -60,6 +121,21 @@ function snap(v: number) { return Math.round(v / SNAP) * SNAP }
 // ─── Connection modes ─────────────────────────────────────────────────────────
 type ConnDir = 'top' | 'bottom' | 'right' | 'left'
 interface ConnMode { sourceId: string; dir: ConnDir; sourceName: string }
+
+// ─── Node depth calculator ────────────────────────────────────────────────────
+function getNodeDepth(id: string, contacts: Contact[]): number {
+  const c = contacts.find(x => x.id === id)
+  if (!c) return 0
+  if (c.level && LEVEL_DEPTH[c.level] !== undefined) return LEVEL_DEPTH[c.level]
+  // Fallback: count ancestors
+  let depth = 0, cur = c
+  while (cur.parentId) {
+    const parent = contacts.find(x => x.id === cur.parentId)
+    if (!parent) break
+    cur = parent; depth++
+  }
+  return depth
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export default function OrgChartPage() {
@@ -83,6 +159,7 @@ export default function OrgChartPage() {
 
   // Panel state
   const [panelOpen, setPanelOpen] = useState(false)
+  const [panelTab, setPanelTab] = useState<'contacts' | 'style'>('contacts')
   const [panelSearch, setPanelSearch] = useState('')
   const [panelOrg, setPanelOrg] = useState('')
   const [drawerContactId, setDrawerContactId] = useState<string | null | undefined>(undefined)
@@ -91,15 +168,23 @@ export default function OrgChartPage() {
   const [isDraggingNode, setIsDraggingNode] = useState(false)
   const [zoom, setZoom] = useState(1)
 
+  // Style settings
+  const [branchStyle, setBranchStyle] = useState<BranchStyle>('tree')
+  const [shapeFormat, setShapeFormat] = useState<ShapeFormat>('rounded')
+  const [hGap, setHGap] = useState(54)
+  const [vGap, setVGap] = useState(60)
+  const [themeIndex, setThemeIndex] = useState(0)
+  const [useThemeColors, setUseThemeColors] = useState(false)
+
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
 
-  // Per-connection midpoint offsets: key = `${fromId}:${toId}`, value = offset px (horizontal for peer, vertical for reporting)
+  // Per-connection midpoint offsets
   const [lineOffsets, setLineOffsets] = useState<Record<string, number>>({})
   const lineOffsetsRef = useRef<Record<string, number>>({})
   useEffect(() => { lineOffsetsRef.current = lineOffsets }, [lineOffsets])
 
-  // Drag refs (avoid re-renders during drag)
+  // Drag refs
   const areaRef   = useRef<HTMLDivElement>(null)
   const treeRef   = useRef<HTMLDivElement>(null)
   const svgRef    = useRef<SVGSVGElement>(null)
@@ -108,16 +193,31 @@ export default function OrgChartPage() {
   const nodeDrag    = useRef<{ id: string; origX: number; origY: number; startCX: number; startCY: number; moved: boolean } | null>(null)
   const connModeRef = useRef<ConnMode | null>(null)
 
-  // Sync connMode into ref for use in event handlers
   useEffect(() => { connModeRef.current = connMode }, [connMode])
 
-  // Visible contacts (filtered by org)
+  // Visible contacts
   const chartContactObjs = contacts.filter(c => chartContacts.includes(c.id))
   const visibleContacts  = activeChartOrg
     ? chartContactObjs.filter(c => c.org === activeChartOrg)
     : chartContactObjs
 
   const uniqueOrgs = [...new Set(contacts.map(c => c.org).filter(Boolean) as string[])].sort()
+
+  // Node color from theme
+  function nodeColor(contactId: string): string {
+    if (!useThemeColors) return ''
+    const depth = getNodeDepth(contactId, contacts)
+    const theme = THEMES[themeIndex]
+    return theme.colors[Math.min(depth, theme.colors.length - 1)]
+  }
+
+  // Node border/shape classes
+  function nodeShapeClass(): string {
+    if (shapeFormat === 'rect') return 'rounded-none'
+    if (shapeFormat === 'wide-rounded') return 'rounded-2xl'
+    if (shapeFormat === 'card-accent') return 'rounded-xl'
+    return 'rounded-xl'  // 'rounded'
+  }
 
   // ─── Draw dot grid ──────────────────────────────────────────────────────────
   const drawGrid = useCallback((w: number, h: number) => {
@@ -167,18 +267,16 @@ export default function OrgChartPage() {
       const offset = lineOffsetsRef.current[connKey] ?? 0
 
       let pathD: string, strokeColor: string
-      let handleX: number, handleY: number   // midpoint handle position
-      let isPeer = false
+      let handleX: number, handleY: number
+      const isPeer = style === 'peer'
 
-      if (style === 'peer') {
-        isPeer = true
+      if (isPeer) {
         const left  = p.x < ch.x ? p  : ch
         const right = p.x < ch.x ? ch : p
         const y1 = left.y  + left.h  / 2
         const y2 = right.y + right.h / 2
         const x1 = left.x  + left.w
         const x2 = right.x
-        // midX can be dragged left/right
         const midX = (x1 + x2) / 2 + offset
         pathD = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
         strokeColor = '#f59e0b'
@@ -186,7 +284,6 @@ export default function OrgChartPage() {
       } else {
         const x1 = p.x  + p.w  / 2, y1 = p.y  + p.h
         const x2 = ch.x + ch.w / 2, y2 = ch.y
-        // midY can be dragged up/down
         const midY = (y1 + y2) / 2 + offset
         pathD = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
         strokeColor = style === 'dashed' ? '#8b5cf6' : '#cbd5e1'
@@ -202,7 +299,7 @@ export default function OrgChartPage() {
       visPath.setAttribute('stroke-linejoin', 'round')
       visPath.setAttribute('pointer-events', 'none')
       if (style === 'dashed') visPath.setAttribute('stroke-dasharray', '5,4')
-      if (style === 'peer')   visPath.setAttribute('stroke-dasharray', '6,3')
+      if (isPeer) visPath.setAttribute('stroke-dasharray', '6,3')
       ;(svg as SVGSVGElement).appendChild(visPath)
 
       const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
@@ -216,30 +313,27 @@ export default function OrgChartPage() {
       let downX = 0, downY = 0
       hitPath.addEventListener('pointerdown', e => {
         downX = e.clientX; downY = e.clientY
-        visPath.setAttribute('stroke', '#ef4444')
-        visPath.setAttribute('stroke-width', '2.5')
+        visPath.setAttribute('stroke', '#ef4444'); visPath.setAttribute('stroke-width', '2.5')
       })
       hitPath.addEventListener('pointerup', e => {
         const moved = Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8
-        if (!moved) {
-          e.stopPropagation()
-          if (confirm('Remove this connection?')) { onDelete() }
-        }
-        visPath.setAttribute('stroke', strokeColor)
-        visPath.setAttribute('stroke-width', '1.5')
+        if (!moved) { e.stopPropagation(); if (confirm('Remove this connection?')) onDelete() }
+        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
       })
       hitPath.addEventListener('pointercancel', () => {
         visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
       })
       hitPath.addEventListener('mouseenter', () => {
         visPath.setAttribute('stroke', '#ef4444'); visPath.setAttribute('stroke-width', '2.5')
+        handle.style.opacity = '1'
       })
       hitPath.addEventListener('mouseleave', () => {
         visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
+        handle.style.opacity = '0'
       })
       ;(svg as SVGSVGElement).appendChild(hitPath)
 
-      // ── Midpoint drag handle ──
+      // Midpoint drag handle
       const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
       handle.setAttribute('cx', String(handleX))
       handle.setAttribute('cy', String(handleY))
@@ -252,13 +346,9 @@ export default function OrgChartPage() {
       handle.style.transition = 'opacity 0.15s'
       ;(svg as SVGSVGElement).appendChild(handle)
 
-      // Show handle on hover of hit path
-      hitPath.addEventListener('mouseenter', () => { handle.style.opacity = '1' })
-      hitPath.addEventListener('mouseleave', () => { handle.style.opacity = '0' })
       handle.addEventListener('mouseenter', () => { handle.style.opacity = '1' })
       handle.addEventListener('mouseleave', () => { handle.style.opacity = '0' })
 
-      // Drag handle
       let dragStartCoord = 0, dragStartOffset = 0
       handle.addEventListener('pointerdown', e => {
         e.stopPropagation()
@@ -270,30 +360,22 @@ export default function OrgChartPage() {
       handle.addEventListener('pointermove', e => {
         if (!handle.hasPointerCapture(e.pointerId)) return
         const delta = (isPeer ? e.clientX : e.clientY) - dragStartCoord
-        const newOffset = dragStartOffset + delta
-        lineOffsetsRef.current = { ...lineOffsetsRef.current, [connKey]: newOffset }
+        lineOffsetsRef.current = { ...lineOffsetsRef.current, [connKey]: dragStartOffset + delta }
         setLineOffsets({ ...lineOffsetsRef.current })
       })
-      handle.addEventListener('pointerup', () => {
-        handle.style.opacity = '0'
-      })
+      handle.addEventListener('pointerup', () => { handle.style.opacity = '0' })
     }
 
-    // Solid reporting lines
     contacts.forEach(c => {
       if (c.parentId && visibleIds.has(c.id) && visibleIds.has(c.parentId)) {
-        drawLine(c.parentId, c.id, 'solid', () => {
-          updateContact({ ...c, parentId: undefined })
-        })
+        drawLine(c.parentId, c.id, 'solid', () => updateContact({ ...c, parentId: undefined }))
       }
     })
-    // Dotted lines
     dottedLines.forEach(dl => {
       if (visibleIds.has(dl.fromId) && visibleIds.has(dl.toId)) {
         drawLine(dl.fromId, dl.toId, 'dashed', () => removeDottedLine(dl.fromId, dl.toId))
       }
     })
-    // Peer lines
     peerLines.forEach(pl => {
       if (visibleIds.has(pl.fromId) && visibleIds.has(pl.toId)) {
         drawLine(pl.fromId, pl.toId, 'peer', () => removePeerLine(pl.fromId, pl.toId))
@@ -301,7 +383,7 @@ export default function OrgChartPage() {
     })
   }, [visibleContacts, contacts, dottedLines, peerLines, lineOffsets, updateContact, removeDottedLine, removePeerLine])
 
-  // Resize / redraw after render
+  // Resize / redraw
   useEffect(() => {
     requestAnimationFrame(() => {
       const tree = treeRef.current
@@ -351,7 +433,7 @@ export default function OrgChartPage() {
     setConnMode(null)
   }, [contacts, peerLines, dottedLines, updateContact, addPeerLine, addDottedLine])
 
-  // ─── Add contact to chart ───────────────────────────────────────────────────
+  // ─── Add / remove from chart ────────────────────────────────────────────────
   const addToChart = (c: Contact) => {
     if (chartContacts.includes(c.id)) { showToast(`${c.name} is already on the chart`); return }
     const area = areaRef.current
@@ -364,7 +446,6 @@ export default function OrgChartPage() {
     showToast(`${c.name} added to chart`, 'success')
   }
 
-  // ─── Remove from chart ─────────────────────────────────────────────────────
   const removeFromChart = (id: string) => {
     const c = contacts.find(x => x.id === id)
     const newPos = { ...positions }; delete newPos[id]
@@ -374,14 +455,14 @@ export default function OrgChartPage() {
     showToast(`${c?.name ?? 'Contact'} removed from chart`)
   }
 
-  // ─── Auto-layout ───────────────────────────────────────────────────────────
+  // ─── Auto-layout ────────────────────────────────────────────────────────────
   const cleanupLayout = () => {
-    const fresh = computeTreeLayout(visibleContacts)
+    const fresh = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle)
     setPositions({ ...positions, ...fresh })
-    showToast('Layout cleaned up', 'success')
+    showToast('Layout applied', 'success')
   }
 
-  // ─── Save chart ────────────────────────────────────────────────────────────
+  // ─── Save / export charts ───────────────────────────────────────────────────
   const doSaveChart = () => {
     const name = prompt('Name this chart:', activeChartOrg || 'My Chart')
     if (!name) return
@@ -398,7 +479,6 @@ export default function OrgChartPage() {
     setShowSavedMenu(false)
   }
 
-  // ─── Export / import charts ────────────────────────────────────────────────
   const doExportChart = (id: string) => {
     const ch = savedCharts.find(c => c.id === id)
     if (!ch) return
@@ -474,7 +554,6 @@ export default function OrgChartPage() {
       setPositions({ ...positions, [c.id]: { x, y } })
       setSelectedNodeId(null)
     } else if (e.pointerType === 'touch') {
-      // Tap on touch: toggle selected state to reveal handles/actions
       setSelectedNodeId(prev => prev === c.id ? null : c.id)
     }
     nodeDrag.current = null
@@ -491,11 +570,11 @@ export default function OrgChartPage() {
     })
     .sort((a, b) => a.name.localeCompare(b.name))
 
-  // ─── Positions: fall back to auto-layout if not set ────────────────────────
-  const layoutFallback = computeTreeLayout(visibleContacts)
+  // ─── Positions: fall back to auto-layout ────────────────────────────────────
+  const layoutFallback = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle)
   const getPos = (id: string): Position => positions[id] || layoutFallback[id] || { x: 20, y: 20 }
 
-  // ─── Connection bar labels ──────────────────────────────────────────────────
+  // ─── Connection handles ──────────────────────────────────────────────────────
   const CONN_LABELS: Record<ConnDir, (name: string) => string> = {
     top:    n => `${n} will report to…`,
     bottom: n => `…will report to ${n}`,
@@ -506,76 +585,238 @@ export default function OrgChartPage() {
     top: '#3b82f6', bottom: '#10b981', right: '#f59e0b', left: '#8b5cf6'
   }
 
+  // ─── Branch style options ────────────────────────────────────────────────────
+  const BRANCH_STYLES: { value: BranchStyle; label: string; icon: React.ReactNode }[] = [
+    { value: 'tree', label: 'Tree', icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="7" y="1" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.8"/>
+        <rect x="1" y="13" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="7" y="13" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="13" y="13" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <path d="M9 4v3M9 7H3v3M9 7h6v3" stroke="currentColor" strokeWidth="1"/>
+      </svg>
+    )},
+    { value: 'staggered', label: 'Staggered', icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="7" y="1" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.8"/>
+        <rect x="1" y="11" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="13" y="14" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <path d="M9 4v4M9 8L3 10M9 8l5 4" stroke="currentColor" strokeWidth="1"/>
+      </svg>
+    )},
+    { value: 'right-column', label: 'Right Column', icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="1" y="7" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.8"/>
+        <rect x="12" y="3" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="12" y="7" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="12" y="11" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <path d="M6 8.5h3M9 8.5V4.5h3M9 8.5v3h3M9 8.5v4.5h3" stroke="currentColor" strokeWidth="1"/>
+      </svg>
+    )},
+    { value: 'left-column', label: 'Left Column', icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="12" y="7" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.8"/>
+        <rect x="1" y="3" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="1" y="7" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="1" y="11" width="5" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <path d="M12 8.5H9M9 8.5V4.5H6M9 8.5v3H6M9 8.5v4.5H6" stroke="currentColor" strokeWidth="1"/>
+      </svg>
+    )},
+    { value: 'two-column', label: 'Two Column', icon: (
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <rect x="7" y="1" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.8"/>
+        <rect x="1" y="11" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="13" y="11" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="1" y="15" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <rect x="13" y="15" width="4" height="3" rx="0.5" fill="currentColor" opacity="0.6"/>
+        <path d="M9 4v4M9 8H3v3M9 8h6v3M3 14v1M15 14v1" stroke="currentColor" strokeWidth="1"/>
+      </svg>
+    )},
+  ]
+
+  const SHAPE_FORMATS: { value: ShapeFormat; label: string }[] = [
+    { value: 'rect',        label: 'Square' },
+    { value: 'rounded',     label: 'Rounded' },
+    { value: 'wide-rounded', label: 'Pill' },
+    { value: 'card-accent', label: 'Accent' },
+  ]
+
   return (
     <div className="h-full flex overflow-hidden bg-slate-100">
 
-      {/* ── Left panel (desktop sidebar / mobile bottom sheet) ── */}
+      {/* ── Left panel ── */}
       <>
-        {/* Mobile: overlay */}
         {panelOpen && (
           <div className="lg:hidden fixed inset-0 bg-black/30 z-20" onClick={() => setPanelOpen(false)} />
         )}
 
-        {/* Panel */}
         <div className={`
           fixed lg:static z-30
           flex flex-col bg-white border-r border-slate-200
           transition-transform duration-300
           lg:translate-x-0 lg:w-64 lg:flex-shrink-0 lg:h-full
-          inset-x-0 bottom-0 rounded-t-2xl max-h-[80dvh]
+          inset-x-0 bottom-0 rounded-t-2xl max-h-[90dvh]
           lg:inset-auto lg:rounded-none lg:max-h-full
           ${panelOpen ? 'translate-y-0' : 'translate-y-full lg:translate-y-0'}
         `}>
-          {/* Mobile drag handle */}
           <div className="lg:hidden flex justify-center pt-3 pb-1 flex-shrink-0">
             <div className="w-10 h-1 bg-slate-200 rounded-full" />
           </div>
 
-          <div className="px-3 pt-2 pb-1 border-b border-slate-100 flex-shrink-0">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Contacts</span>
-              <button onClick={() => { setDrawerContactId(null); setPanelOpen(false) }}
-                className="text-xs text-blue-500 font-semibold px-2 py-1 rounded-lg hover:bg-blue-50 min-h-[32px]">
-                + New
-              </button>
-            </div>
-            <input type="search" value={panelSearch} onChange={e => setPanelSearch(e.target.value)}
-              placeholder="Search…"
-              className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 mb-1.5" />
-            {/* Org pills */}
-            <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
-              {['', ...uniqueOrgs].map(org => (
-                <button key={org} onClick={() => setPanelOrg(org)}
-                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border flex-shrink-0 ${panelOrg === org ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-slate-400 border-slate-200'}`}>
-                  {org || 'All'}
-                </button>
-              ))}
-            </div>
+          {/* Panel tabs */}
+          <div className="flex border-b border-slate-100 flex-shrink-0">
+            <button onClick={() => setPanelTab('contacts')}
+              className={`flex-1 py-2.5 text-xs font-semibold border-b-2 transition-colors ${panelTab === 'contacts' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
+              Contacts
+            </button>
+            <button onClick={() => setPanelTab('style')}
+              className={`flex-1 py-2.5 text-xs font-semibold border-b-2 transition-colors ${panelTab === 'style' ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400'}`}>
+              Style
+            </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto scroll-touch py-1">
-            {panelContacts.length === 0 ? (
-              <p className="text-xs text-slate-400 text-center py-6">No contacts found</p>
-            ) : panelContacts.map(c => {
-              const onChart = chartContacts.includes(c.id)
-              return (
-                <button key={c.id} onClick={() => addToChart(c)}
-                  className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-blue-50 active:bg-blue-100 transition-colors ${onChart ? 'opacity-40 cursor-default' : ''}`}>
-                  <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
-                    style={{ background: avatarColor(c.name) }}>
-                    {initials(c.name)}
+          {/* ── Contacts tab ── */}
+          {panelTab === 'contacts' && (
+            <>
+              <div className="px-3 pt-2 pb-1 border-b border-slate-100 flex-shrink-0">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wide">Contacts</span>
+                  <button onClick={() => { setDrawerContactId(null); setPanelOpen(false) }}
+                    className="text-xs text-blue-500 font-semibold px-2 py-1 rounded-lg hover:bg-blue-50 min-h-[32px]">
+                    + New
+                  </button>
+                </div>
+                <input type="search" value={panelSearch} onChange={e => setPanelSearch(e.target.value)}
+                  placeholder="Search…"
+                  className="w-full px-2.5 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 mb-1.5" />
+                <div className="flex gap-1 overflow-x-auto pb-1 scrollbar-hide">
+                  {['', ...uniqueOrgs].map(org => (
+                    <button key={org} onClick={() => setPanelOrg(org)}
+                      className={`px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border flex-shrink-0 ${panelOrg === org ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-slate-400 border-slate-200'}`}>
+                      {org || 'All'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto scroll-touch py-1">
+                {panelContacts.length === 0 ? (
+                  <p className="text-xs text-slate-400 text-center py-6">No contacts found</p>
+                ) : panelContacts.map(c => {
+                  const onChart = chartContacts.includes(c.id)
+                  return (
+                    <button key={c.id} onClick={() => addToChart(c)}
+                      className={`w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-blue-50 active:bg-blue-100 transition-colors ${onChart ? 'opacity-40 cursor-default' : ''}`}>
+                      <div className="w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
+                        style={{ background: avatarColor(c.name) }}>
+                        {initials(c.name)}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-semibold text-slate-800 truncate">{c.name}</p>
+                        {(c.title || c.org) && (
+                          <p className="text-[10px] text-slate-400 truncate">{[c.title, c.org].filter(Boolean).join(' · ')}</p>
+                        )}
+                      </div>
+                      {onChart && <span className="text-[10px] text-slate-300 flex-shrink-0">on chart</span>}
+                    </button>
+                  )
+                })}
+              </div>
+            </>
+          )}
+
+          {/* ── Style tab ── */}
+          {panelTab === 'style' && (
+            <div className="flex-1 overflow-y-auto scroll-touch px-3 py-3 flex flex-col gap-5">
+
+              {/* Branch Style */}
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">Branch Style</p>
+                <div className="flex flex-col gap-1">
+                  {BRANCH_STYLES.map(bs => (
+                    <button key={bs.value} onClick={() => { setBranchStyle(bs.value) }}
+                      className={`flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-sm font-medium transition-colors ${branchStyle === bs.value ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'text-slate-600 hover:bg-slate-50'}`}>
+                      <span className={branchStyle === bs.value ? 'text-amber-500' : 'text-slate-400'}>{bs.icon}</span>
+                      {bs.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Shape Format */}
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">Shape Format</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {SHAPE_FORMATS.map(sf => (
+                    <button key={sf.value} onClick={() => setShapeFormat(sf.value)}
+                      className={`py-2 px-2 text-xs font-semibold border-2 transition-colors ${
+                        sf.value === 'rect' ? 'rounded-none' :
+                        sf.value === 'rounded' ? 'rounded-lg' :
+                        sf.value === 'wide-rounded' ? 'rounded-2xl' : 'rounded-lg'
+                      } ${shapeFormat === sf.value ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                      {sf.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Spacing */}
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">Spacing</p>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-slate-500 flex items-center gap-1.5">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2v8M10 2v8M2 6h8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                      Vertical gap
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setVGap(g => Math.max(10, g - 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">−</button>
+                      <span className="w-10 text-center text-sm font-semibold text-slate-700">{vGap}</span>
+                      <button onClick={() => setVGap(g => Math.min(200, g + 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">+</button>
+                    </div>
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-slate-800 truncate">{c.name}</p>
-                    {(c.title || c.org) && (
-                      <p className="text-[10px] text-slate-400 truncate">{[c.title, c.org].filter(Boolean).join(' · ')}</p>
-                    )}
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-slate-500 flex items-center gap-1.5">
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 2h8M2 10h8M6 2v8" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/></svg>
+                      Horizontal gap
+                    </label>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setHGap(g => Math.max(10, g - 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">−</button>
+                      <span className="w-10 text-center text-sm font-semibold text-slate-700">{hGap}</span>
+                      <button onClick={() => setHGap(g => Math.min(200, g + 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">+</button>
+                    </div>
                   </div>
-                  {onChart && <span className="text-[10px] text-slate-300 flex-shrink-0">on chart</span>}
+                </div>
+                <button onClick={cleanupLayout}
+                  className="mt-2 w-full py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-colors">
+                  Apply layout
                 </button>
-              )
-            })}
-          </div>
+              </div>
+
+              {/* Color Themes */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide">Colour Theme</p>
+                  <button onClick={() => setUseThemeColors(t => !t)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${useThemeColors ? 'bg-blue-500' : 'bg-slate-200'}`}>
+                    <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${useThemeColors ? 'translate-x-4.5' : 'translate-x-0.5'}`} />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {THEMES.map((theme, i) => (
+                    <button key={theme.name} onClick={() => { setThemeIndex(i); setUseThemeColors(true) }}
+                      className={`flex flex-col items-start gap-1 p-2 rounded-lg border-2 transition-colors ${themeIndex === i && useThemeColors ? 'border-blue-500 bg-blue-50' : 'border-slate-100 hover:border-slate-200'}`}>
+                      <div className="flex gap-0.5">
+                        {theme.colors.map((c, j) => (
+                          <div key={j} className="w-4 h-4 rounded-sm" style={{ background: c }} />
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-semibold text-slate-600">{theme.name}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </>
 
@@ -584,8 +825,6 @@ export default function OrgChartPage() {
 
         {/* Toolbar */}
         <div className="bg-white border-b border-slate-200 flex-shrink-0 px-3 py-2 flex items-center gap-2 flex-wrap">
-
-          {/* Mobile: panel toggle */}
           <button onClick={() => setPanelOpen(p => !p)}
             className="lg:hidden flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium min-h-[40px] active:bg-slate-50">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -596,7 +835,6 @@ export default function OrgChartPage() {
             Contacts
           </button>
 
-          {/* Org filter pills */}
           <div className="flex gap-1.5 overflow-x-auto scrollbar-hide flex-1">
             {[null, ...uniqueOrgs].map(org => (
               <button key={org ?? '__all'} onClick={() => setActiveChartOrg(org)}
@@ -606,7 +844,6 @@ export default function OrgChartPage() {
             ))}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
             <ExportMenu
               onCSV={() => { exportContactsCSV(visibleContacts); showToast('Exported as CSV', 'success') }}
@@ -650,12 +887,12 @@ export default function OrgChartPage() {
                                 if (!confirm(`Load "${ch.name}"? This replaces current chart data.`)) return
                                 const store = useAppStore.getState()
                                 ch.contacts.forEach(c => {
-                                  if (!store.contacts.find(x => x.id === c.id)) store.addContact(c)
+                                  if (!store.contacts.find((x: Contact) => x.id === c.id)) store.addContact(c)
                                 })
                                 store.setChartContacts(ch.chartContacts)
                                 store.setPositions(ch.positions)
-                                ch.dottedLines.forEach(d => store.addDottedLine(d))
-                                ch.peerLines.forEach(d => store.addPeerLine(d))
+                                ch.dottedLines.forEach((d: { fromId: string; toId: string }) => store.addDottedLine(d))
+                                ch.peerLines.forEach((d: { fromId: string; toId: string }) => store.addPeerLine(d))
                                 setActiveChartOrg(null)
                                 setShowSavedMenu(false)
                                 showToast(`Chart "${ch.name}" loaded`, 'success')
@@ -691,21 +928,17 @@ export default function OrgChartPage() {
           </div>
         )}
 
-        {/* Chart scroll area — lock scroll while dragging a node on touch */}
+        {/* Chart scroll area */}
         <div ref={areaRef} className="flex-1 overflow-auto relative"
           style={{ touchAction: isDraggingNode ? 'none' : 'auto' }}
           onClick={() => { if (connMode) setConnMode(null); setSelectedNodeId(null) }}>
 
-          {/* Relative container for nodes + SVG */}
-          <div ref={treeRef} className="relative origin-top-left" style={{ minWidth: '100%', minHeight: '100%', transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
+          <div ref={treeRef} className="relative origin-top-left"
+            style={{ minWidth: '100%', minHeight: '100%', transform: `scale(${zoom})`, transformOrigin: 'top left' }}>
 
-            {/* Dot grid canvas */}
             <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
-
-            {/* SVG connections layer — pointer-events on so hit paths are clickable */}
             <svg ref={svgRef} className="absolute inset-0 overflow-visible" />
 
-            {/* Empty state */}
             {visibleContacts.length === 0 && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-400">
                 <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
@@ -729,14 +962,25 @@ export default function OrgChartPage() {
               const pos = getPos(c.id)
               const isConnSource = connMode?.sourceId === c.id
               const isSelected   = selectedNodeId === c.id
+              const themeColor   = nodeColor(c.id)
+              const hasAccent    = shapeFormat === 'card-accent'
+
               return (
                 <div key={c.id}
                   data-node-id={c.id}
-                  className={`absolute select-none bg-white border-2 rounded-xl shadow-md overflow-visible group
-                    ${isConnSource ? 'border-blue-400 ring-2 ring-blue-200' : isSelected ? 'border-blue-300 ring-2 ring-blue-100' : 'border-slate-200'}
-                    ${connMode && !isConnSource ? 'cursor-crosshair hover:border-blue-400 hover:shadow-lg' : 'cursor-grab active:cursor-grabbing'}
+                  className={`absolute select-none shadow-md overflow-visible group
+                    ${nodeShapeClass()}
+                    ${isConnSource ? 'ring-2 ring-blue-300' : isSelected ? 'ring-2 ring-blue-100' : ''}
+                    ${connMode && !isConnSource ? 'cursor-crosshair hover:shadow-lg' : 'cursor-grab active:cursor-grabbing'}
                   `}
-                  style={{ left: pos.x, top: pos.y, width: NODE_W, minHeight: NODE_H, touchAction: 'none', zIndex: isSelected ? 20 : 10 }}
+                  style={{
+                    left: pos.x, top: pos.y,
+                    width: NODE_W, minHeight: NODE_H,
+                    touchAction: 'none',
+                    zIndex: isSelected ? 20 : 10,
+                    background: useThemeColors && themeColor ? themeColor : 'white',
+                    border: `2px solid ${useThemeColors && themeColor ? themeColor : (isConnSource ? '#93c5fd' : isSelected ? '#bfdbfe' : '#e2e8f0')}`,
+                  }}
                   onPointerDown={e => {
                     if ((e.target as HTMLElement).closest('[data-handle],[data-action]')) return
                     if (connMode) { applyConn(c.id); return }
@@ -749,16 +993,22 @@ export default function OrgChartPage() {
                     if (connMode) { applyConn(c.id); e.stopPropagation() }
                   }}
                 >
-                  {/* Connection handles — always visible when selected on touch */}
+                  {/* Card accent bar */}
+                  {hasAccent && (
+                    <div className="absolute left-0 top-0 bottom-0 w-1.5 rounded-l-xl"
+                      style={{ background: useThemeColors && themeColor ? 'rgba(255,255,255,0.4)' : (avatarColor(c.name)) }} />
+                  )}
+
+                  {/* Connection handles */}
                   {(['top','bottom','right','left'] as ConnDir[]).map(dir => (
                     <button key={dir} data-handle={dir}
                       title={CONN_LABELS[dir](c.name)}
                       onClick={e => { e.stopPropagation(); setConnMode({ sourceId: c.id, dir, sourceName: c.name }) }}
-                      className={`absolute z-20 w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-sm transition-opacity
-                        ${dir === 'top'    ? '-top-3 left-1/2 -translate-x-1/2' : ''}
-                        ${dir === 'bottom' ? '-bottom-3 left-1/2 -translate-x-1/2' : ''}
-                        ${dir === 'right'  ? 'top-1/2 -right-3 -translate-y-1/2' : ''}
-                        ${dir === 'left'   ? 'top-1/2 -left-3 -translate-y-1/2' : ''}
+                      className={`absolute z-20 w-5 h-5 rounded-full flex items-center justify-center text-white text-[9px] font-bold shadow transition-opacity
+                        ${dir === 'top'    ? '-top-2.5 left-1/2 -translate-x-1/2' : ''}
+                        ${dir === 'bottom' ? '-bottom-2.5 left-1/2 -translate-x-1/2' : ''}
+                        ${dir === 'right'  ? 'top-1/2 -right-2.5 -translate-y-1/2' : ''}
+                        ${dir === 'left'   ? 'top-1/2 -left-2.5 -translate-y-1/2' : ''}
                         ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus:opacity-100'}
                       `}
                       style={{ background: CONN_COLORS[dir] }}>
@@ -767,35 +1017,35 @@ export default function OrgChartPage() {
                   ))}
 
                   {/* Node content */}
-                  <div className="p-2.5 flex items-center gap-2">
-                    <div className="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-white text-xs font-bold"
-                      style={{ background: avatarColor(c.name) }}>
+                  <div className={`p-2.5 flex items-center gap-2 ${hasAccent ? 'pl-4' : ''}`}>
+                    <div className={`w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold ${useThemeColors && themeColor ? 'text-white bg-white/25' : 'text-white'}`}
+                      style={useThemeColors && themeColor ? {} : { background: avatarColor(c.name) }}>
                       {initials(c.name)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-slate-800 truncate">{c.name}</p>
-                      {c.title && <p className="text-[10px] text-slate-400 truncate">{c.title}</p>}
+                      <p className={`text-xs font-bold truncate ${useThemeColors && themeColor ? 'text-white' : 'text-slate-800'}`}>{c.name}</p>
+                      {c.title && <p className={`text-[10px] truncate ${useThemeColors && themeColor ? 'text-white/75' : 'text-slate-400'}`}>{c.title}</p>}
                       {c.level && (
-                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wide">
-                          {LEVEL_LABELS[c.level] ?? c.level}
+                        <span className={`text-[9px] font-bold uppercase tracking-wide ${useThemeColors && themeColor ? 'text-white/60' : 'text-slate-400'}`}>
+                          {LEVEL_LABELS[c.level as Level] ?? c.level}
                         </span>
                       )}
                     </div>
                   </div>
 
-                  {/* Node actions — always visible when selected */}
+                  {/* Node actions */}
                   <div className={`absolute top-1 right-1 flex gap-0.5 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
                     <button data-action="edit"
                       onClick={e => { e.stopPropagation(); setDrawerContactId(c.id); setSelectedNodeId(null) }}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 bg-white/90 shadow-sm">
-                      <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                      className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-white hover:bg-white/20 bg-black/10 transition-colors">
+                      <svg width="10" height="10" viewBox="0 0 11 11" fill="none">
                         <path d="M8 1.5l1.5 1.5L3 9.5H1.5V8L8 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     </button>
                     <button data-action="remove"
                       onClick={e => { e.stopPropagation(); removeFromChart(c.id); setSelectedNodeId(null) }}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 active:bg-red-100 bg-white/90 shadow-sm">
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                      className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-red-200 hover:bg-black/20 bg-black/10 transition-colors">
+                      <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
                         <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                       </svg>
                     </button>
@@ -816,13 +1066,12 @@ export default function OrgChartPage() {
             <button
               onClick={() => setZoom(z => Math.max(0.3, Math.round((z - 0.1) * 10) / 10))}
               className="w-9 h-9 bg-white border border-slate-200 rounded-xl shadow-md flex items-center justify-center text-slate-600 hover:bg-slate-50 active:bg-slate-100 text-lg font-bold transition-colors select-none">
-            −
+              −
             </button>
           </div>
         </div>
       </div>
 
-      {/* Contact drawer */}
       <ContactDrawer
         contactId={drawerContactId ?? null}
         open={drawerContactId !== undefined}
