@@ -5,6 +5,9 @@ import { showToast } from '../components/ui/Toast'
 import TaskCard from '../components/tasks/TaskCard'
 import TaskDrawer from '../components/tasks/TaskDrawer'
 import SubTaskDrawer from '../components/tasks/SubTaskDrawer'
+import TasksTable from '../components/tasks/TasksTable'
+import ExportMenu from '../components/ui/ExportMenu'
+import { exportTasksCSV, exportTasksXLSX, exportTasksPDF, exportTasksPPTX } from '../lib/exportUtils'
 import type { Task, TaskBucket, SubTask } from '../types'
 
 const BUCKET_COLORS = [
@@ -58,6 +61,9 @@ export default function TasksPage() {
       taskBuckets.flatMap(b => b.tasks).some(t => t.timelineId === tl.id)
     )
   }, [timelines, taskBuckets])
+
+  // Bucket management state
+  const [showTable, setShowTable] = useState(false)
 
   // Bucket management state
   const [showManage, setShowManage] = useState(false)
@@ -189,6 +195,22 @@ export default function TasksPage() {
               </svg>
               Columns
             </button>
+            <button
+              onClick={() => setShowTable(t => !t)}
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-semibold min-h-[44px] transition-colors ${showTable ? 'bg-slate-100 border-slate-300 text-slate-700' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+              <svg width="13" height="13" viewBox="0 0 12 12" fill="none">
+                <rect x="1" y="1" width="10" height="2" rx="0.5" fill="currentColor"/>
+                <rect x="1" y="5" width="10" height="2" rx="0.5" fill="currentColor"/>
+                <rect x="1" y="9" width="10" height="2" rx="0.5" fill="currentColor"/>
+              </svg>
+              Table
+            </button>
+            <ExportMenu
+              onCSV={() => { exportTasksCSV(taskBuckets); showToast('Tasks exported as CSV', 'success') }}
+              onXLSX={() => { exportTasksXLSX(taskBuckets); showToast('Tasks exported as Excel', 'success') }}
+              onPDF={() => { exportTasksPDF(taskBuckets); showToast('Tasks exported as PDF', 'success') }}
+              onPPTX={() => { exportTasksPPTX(taskBuckets); showToast('Tasks exported as PowerPoint', 'success') }}
+            />
             <button onClick={() => setDrawer({ bucketId: activeBucket || taskBuckets[0]?.id, task: null })}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 active:bg-blue-700 min-h-[44px] transition-colors">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 1v12M1 7h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
@@ -340,6 +362,13 @@ export default function TasksPage() {
           )
         })}
       </div>
+
+      {/* Table view */}
+      {showTable && (
+        <div style={{ maxHeight: '45vh', overflow: 'auto' }} className="flex-shrink-0 border-b border-slate-200">
+          <TasksTable taskBuckets={taskBuckets} onChange={setTaskBuckets} />
+        </div>
+      )}
 
       {/* Board */}
       <div className="flex-1 overflow-hidden">

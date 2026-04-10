@@ -3,6 +3,8 @@ import { useAppStore } from '../store/useAppStore'
 import { avatarColor, initials, uid, LEVEL_LABELS, downloadJSON, pickFile, readFileText } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import ContactDrawer from '../components/contacts/ContactDrawer'
+import ExportMenu from '../components/ui/ExportMenu'
+import { exportContactsCSV, exportContactsXLSX, exportContactsPDF, exportContactsPPTX } from '../lib/exportUtils'
 import type { Contact, Position } from '../types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -555,6 +557,12 @@ export default function OrgChartPage() {
 
           {/* Actions */}
           <div className="flex items-center gap-1.5 flex-shrink-0">
+            <ExportMenu
+              onCSV={() => { exportContactsCSV(visibleContacts); showToast('Exported as CSV', 'success') }}
+              onXLSX={() => { exportContactsXLSX(visibleContacts); showToast('Exported as Excel', 'success') }}
+              onPDF={() => { exportContactsPDF(visibleContacts); showToast('Exported as PDF', 'success') }}
+              onPPTX={() => { exportContactsPPTX(visibleContacts); showToast('Exported as PowerPoint', 'success') }}
+            />
             <button onClick={cleanupLayout}
               className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 active:bg-slate-100 min-h-[36px] transition-colors">
               Tidy

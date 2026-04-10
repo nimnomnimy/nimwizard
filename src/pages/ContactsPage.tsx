@@ -1,9 +1,11 @@
 import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
-import { LEVEL_LABELS, LEVEL_ORDER, downloadCSV, downloadJSON, pickFile, readFileText, parseCSV, uid } from '../lib/utils'
+import { LEVEL_ORDER, downloadJSON, pickFile, readFileText, parseCSV, uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import ContactCard from '../components/contacts/ContactCard'
 import ContactDrawer from '../components/contacts/ContactDrawer'
+import ExportMenu from '../components/ui/ExportMenu'
+import { exportContactsCSV, exportContactsXLSX, exportContactsPDF, exportContactsPPTX } from '../lib/exportUtils'
 import type { Contact, Level } from '../types'
 
 type SortKey = 'alpha' | 'level'
@@ -70,17 +72,6 @@ export default function ContactsPage() {
     if (!confirm(`Delete ${name}?`)) return
     deleteContact(id)
     showToast(`${name} deleted`)
-  }
-
-  const handleExportCSV = () => {
-    const rows = [['Name', 'Title', 'Organisation', 'Level', 'Email', 'Phone']]
-    contacts.forEach(c => rows.push([
-      c.name, c.title ?? '', c.org ?? '',
-      c.level ? LEVEL_LABELS[c.level] : '',
-      c.email ?? '', c.phone ?? '',
-    ]))
-    downloadCSV(rows, 'contacts.csv')
-    showToast('Contacts exported as CSV', 'success')
   }
 
   const handleExportJSON = () => {
@@ -154,11 +145,12 @@ export default function ContactsPage() {
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 5L2.5 9.5M7 5l4.5 4.5M7 5v8M1 1h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
               <span className="hidden sm:inline">Import</span>
             </button>
-            <button onClick={handleExportCSV}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-              <span className="hidden sm:inline">CSV</span>
-            </button>
+            <ExportMenu
+              onCSV={() => { exportContactsCSV(filtered); showToast('Contacts exported as CSV', 'success') }}
+              onXLSX={() => { exportContactsXLSX(filtered); showToast('Contacts exported as Excel', 'success') }}
+              onPDF={() => { exportContactsPDF(filtered); showToast('Contacts exported as PDF', 'success') }}
+              onPPTX={() => { exportContactsPPTX(filtered); showToast('Contacts exported as PowerPoint', 'success') }}
+            />
             <button onClick={handleExportJSON}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
