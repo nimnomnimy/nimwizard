@@ -396,29 +396,49 @@ export default function OrgChartPage() {
         if (c) updateContact({ ...c, parentId: undefined })
       }
 
-      // ── Column styles: horizontal trunk from parent side, vertical stubs ──
+      // ── Column styles: exit parent side-center, vertical bus, stubs to child side-centers ──
       if (effectiveStyle === 'right-column' || effectiveStyle === 'left-column') {
-        const isRight = effectiveStyle === 'right-column'
-        const trunkX  = isRight ? par.x + par.w : par.x
-        const parMidY = par.y + par.h / 2
+        const isRight  = effectiveStyle === 'right-column'
+        // Parent exits from right or left edge, vertically centered
+        const parExitX = isRight ? par.x + par.w : par.x
+        const parMidY  = par.y + par.h / 2
 
-        regularIds.forEach(childId => {
-          const ch = getRect(childId)
-          if (!ch) return
-          const childMidY = ch.y + ch.h / 2
-          const childEdgeX = isRight ? ch.x : ch.x + ch.w
-          // Horizontal trunk from parent edge to child column edge, then stub to child
-          const paths: SVGPathElement[] = []
-          paths.push(makePath(`M ${trunkX} ${parMidY} L ${childEdgeX} ${parMidY} L ${childEdgeX} ${childMidY} L ${isRight ? ch.x : ch.x + ch.w} ${childMidY}`, LINE_COLOR))
-          paths.forEach(p => (svg as SVGSVGElement).appendChild(p))
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(paths[0].getAttribute('d')!, LINE_COLOR, () => deleteConn(childId), paths))
-        })
+        const childRects = regularIds.map(id => ({ id, r: getRect(id) })).filter(x => x.r) as { id: string; r: NonNullable<ReturnType<typeof getRect>> }[]
 
-        // Assistants connect horizontally off the parent center
+        if (childRects.length > 0) {
+          // Bus X: fixed column edge (inner edge of child column)
+          const busX = isRight ? childRects[0].r.x : childRects[0].r.x + childRects[0].r.w
+
+          // Horizontal trunk: parent exit → bus column
+          const trunkPath = makePath(`M ${parExitX} ${parMidY} L ${busX} ${parMidY}`, LINE_COLOR)
+          ;(svg as SVGSVGElement).appendChild(trunkPath)
+
+          // Vertical bus along busX spanning all children mid-Y
+          const childMidYs = childRects.map(x => x.r.y + x.r.h / 2)
+          const busTop    = Math.min(parMidY, ...childMidYs)
+          const busBottom = Math.max(parMidY, ...childMidYs)
+          if (busTop < busBottom) {
+            const busPath = makePath(`M ${busX} ${busTop} L ${busX} ${busBottom}`, LINE_COLOR)
+            ;(svg as SVGSVGElement).appendChild(busPath)
+          }
+
+          // Stubs: horizontal from busX to each child's near edge, entering at mid-Y
+          childRects.forEach(({ id: childId, r: ch }) => {
+            const childMidY  = ch.y + ch.h / 2
+            const childEdgeX = isRight ? ch.x : ch.x + ch.w
+            const d = `M ${busX} ${childMidY} L ${childEdgeX} ${childMidY}`
+            const vis = makePath(d, LINE_COLOR)
+            ;(svg as SVGSVGElement).appendChild(vis)
+            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+          })
+        }
+
+        // Assistants: horizontal off parent side at mid-Y, then stub down to child top-center
         assistantIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
-          const d = `M ${isRight ? par.x + par.w : par.x} ${parMidY} L ${isRight ? ch.x : ch.x + ch.w} ${parMidY} L ${isRight ? ch.x : ch.x + ch.w} ${ch.y + ch.h/2} L ${isRight ? ch.x : ch.x+ch.w} ${ch.y + ch.h/2}`
+          const chCX = ch.x + ch.w / 2
+          const d = `M ${parExitX} ${parMidY} L ${chCX} ${parMidY} L ${chCX} ${ch.y}`
           const vis = makePath(d, LINE_COLOR)
           ;(svg as SVGSVGElement).appendChild(vis)
           ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
@@ -426,28 +446,26 @@ export default function OrgChartPage() {
         return
       }
 
-      // ── Tree / Two-column / Staggered: vertical trunk + horizontal bus ─────
+      // ── Tree / Two-column / Staggered: exit parent bottom-center, vertical trunk, horizontal bus, stubs into child top-centers ─────
       if (regularIds.length === 0 && assistantIds.length === 0) return
 
-      const parCX = par.x + par.w / 2
+      // Parent exits bottom-center
+      const parCX    = par.x + par.w / 2
       const trunkTop = par.y + par.h
 
-      // Find the child row Y (minimum child top among regular children)
-      const regularRects = regularIds.map(id => getRect(id)).filter(Boolean) as ReturnType<typeof getRect>[]
-      const childRowY = regularRects.length
-        ? Math.min(...regularRects.map(r => r!.y))
+      // Find bus Y = top of the highest regular child
+      const regularRects = regularIds.map(id => getRect(id)).filter(Boolean) as NonNullable<ReturnType<typeof getRect>>[]
+      const busY = regularRects.length
+        ? Math.min(...regularRects.map(r => r.y))
         : trunkTop + vGap
 
-      const trunkBottom = childRowY  // trunk goes from parent bottom to child row top
-      const busY = childRowY         // horizontal bus at child row top
-
-      // Trunk: vertical line from parent bottom straight down to bus level
       if (regularIds.length > 0) {
+        // Trunk: vertical from parent bottom-center down to bus Y
         const trunk = makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, LINE_COLOR)
         ;(svg as SVGSVGElement).appendChild(trunk)
 
-        // Bus: horizontal line spanning all regular children
-        const childCXs = regularRects.map(r => r!.x + r!.w / 2)
+        // Bus: horizontal spanning from leftmost to rightmost child top-center
+        const childCXs = regularRects.map(r => r.x + r.w / 2)
         const busLeft  = Math.min(parCX, ...childCXs)
         const busRight = Math.max(parCX, ...childCXs)
         if (busLeft < busRight) {
@@ -455,23 +473,26 @@ export default function OrgChartPage() {
           ;(svg as SVGSVGElement).appendChild(bus)
         }
 
-        // Stubs: short vertical lines from bus down to each child top
+        // Stubs: vertical from bus Y down into each child's top-center
         regularIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const cx = ch.x + ch.w / 2
-          const d = `M ${cx} ${busY} L ${cx} ${ch.y}`
-          const vis = makePath(d, LINE_COLOR)
-          ;(svg as SVGSVGElement).appendChild(vis)
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+          // stub only needed if child isn't already touching the bus
+          if (ch.y > busY) {
+            const d = `M ${cx} ${busY} L ${cx} ${ch.y}`
+            const vis = makePath(d, LINE_COLOR)
+            ;(svg as SVGSVGElement).appendChild(vis)
+            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+          }
         })
       }
 
-      // Assistants: connect off trunk midpoint with a short horizontal line then stub
+      // Assistants: tap off trunk at midpoint, horizontal to child top-center, stub down
+      const trunkBottom = busY
       assistantIds.forEach(childId => {
         const ch = getRect(childId)
         if (!ch) return
-        // Tap point on trunk: midway between parent bottom and bus
         const tapY = Math.round(trunkTop + (trunkBottom - trunkTop) * 0.5)
         const chCX = ch.x + ch.w / 2
         const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
