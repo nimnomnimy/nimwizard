@@ -46,36 +46,61 @@ function buildTreeMap(contacts: Contact[]) {
   return { map, roots }
 }
 
+// nodeBranchStyles: per-node override of branch style (key = parent node id)
 function computeTreeLayout(
   contacts: Contact[],
   hGap: number,
   vGap: number,
-  branchStyle: BranchStyle,
+  defaultBranchStyle: BranchStyle,
+  nodeBranchStyles: Record<string, BranchStyle>,
 ): Record<string, Position> {
   if (!contacts.length) return {}
   const { roots } = buildTreeMap(contacts)
 
-  // ── Tree / Staggered: measure subtree width ──────────────────────────────
-  function subtreeWidthTree(node: any): number {
+  function nodeStyle(node: any): BranchStyle {
+    return nodeBranchStyles[node.id] ?? defaultBranchStyle
+  }
+
+  // Measure how wide a subtree rooted at node will be, given its branch style
+  function subtreeWidth(node: any): number {
     if (!node.children.length) return NODE_W
-    const cw = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0)
+    const style = nodeStyle(node)
+    if (style === 'right-column' || style === 'left-column') {
+      // parent column + gap + children column; recurse for child widths
+      const childMaxW = Math.max(...node.children.map((c: any) => subtreeWidth(c)))
+      return NODE_W + hGap + childMaxW
+    }
+    if (style === 'two-column') {
+      const rows = Math.ceil(node.children.length / 2)
+      const pairW = NODE_W * 2 + hGap
+      const childRows: any[][] = []
+      for (let i = 0; i < rows; i++) childRows.push(node.children.slice(i * 2, i * 2 + 2))
+      const maxChildRowW = Math.max(...childRows.map(row =>
+        row.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (row.length - 1)
+      ))
+      return Math.max(pairW, maxChildRowW)
+    }
+    // tree / staggered
+    const cw = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0)
     return Math.max(NODE_W, cw + hGap * (node.children.length - 1))
   }
 
-  // ── Column styles: measure subtree height (for sizing parent columns) ───
+  // Measure subtree height (used by column styles for sibling spacing)
   function subtreeHeight(node: any): number {
+    const style = nodeStyle(node)
     if (!node.children.length) return NODE_H
-    const childrenH = node.children.reduce((s: number, c: any) => s + subtreeHeight(c) + vGap, 0) - vGap
-    return NODE_H + vGap + childrenH
-  }
-
-  // ── Two-column: measure subtree width recursively ───────────────────────
-  function subtreeWidthTwoCol(node: any): number {
-    if (!node.children.length) return NODE_W
-    const cols = Math.min(2, node.children.length)
-    const myW = cols * NODE_W + (cols - 1) * hGap
-    const childMaxW = Math.max(...node.children.map((c: any) => subtreeWidthTwoCol(c)))
-    return Math.max(myW, childMaxW)
+    if (style === 'right-column' || style === 'left-column') {
+      // height = parent height OR total children column height, whichever is taller
+      const childrenColH = node.children.reduce((s: number, c: any) => s + subtreeHeight(c) + vGap, -vGap)
+      return Math.max(NODE_H, childrenColH)
+    }
+    if (style === 'two-column') {
+      const rows = Math.ceil(node.children.length / 2)
+      return NODE_H + vGap + rows * (NODE_H + vGap) - vGap
+    }
+    // tree / staggered — height is parent + gap + tallest child subtree
+    const maxChildH = Math.max(...node.children.map((c: any) => subtreeHeight(c)))
+    return NODE_H + vGap + maxChildH
   }
 
   const positions: Record<string, Position> = {}
@@ -84,28 +109,28 @@ function computeTreeLayout(
     positions[node.id] = { x: Math.round(centerX - NODE_W / 2), y }
     if (!node.children.length) return
 
+    const style = nodeStyle(node)
     const childY = y + NODE_H + vGap
 
-    if (branchStyle === 'right-column') {
-      // Parent on left, children stacked vertically to the right
+    if (style === 'right-column') {
+      // Parent on left, children stacked vertically in a column to the right
       const colX = centerX + NODE_W / 2 + hGap + NODE_W / 2
-      let childY2 = y
+      let cy = y
       node.children.forEach((child: any) => {
-        layout(child, colX, childY2)
-        childY2 += subtreeHeight(child) + vGap
+        layout(child, colX, cy)
+        cy += subtreeHeight(child) + vGap
       })
-    } else if (branchStyle === 'left-column') {
-      // Parent on right, children stacked vertically to the left
+    } else if (style === 'left-column') {
+      // Parent on right, children stacked vertically in a column to the left
       const colX = centerX - NODE_W / 2 - hGap - NODE_W / 2
-      let childY2 = y
+      let cy = y
       node.children.forEach((child: any) => {
-        layout(child, colX, childY2)
-        childY2 += subtreeHeight(child) + vGap
+        layout(child, colX, cy)
+        cy += subtreeHeight(child) + vGap
       })
-    } else if (branchStyle === 'two-column') {
-      // Two columns of children below parent
-      const totalCols = Math.min(2, node.children.length)
-      const totalW = totalCols * NODE_W + (totalCols - 1) * hGap
+    } else if (style === 'two-column') {
+      // Two columns of children below parent, children pair up left-right
+      const totalW = NODE_W * 2 + hGap
       const startX = centerX - totalW / 2 + NODE_W / 2
       node.children.forEach((child: any, i: number) => {
         const col = i % 2
@@ -113,40 +138,33 @@ function computeTreeLayout(
         const cx = startX + col * (NODE_W + hGap)
         layout(child, cx, childY + row * (NODE_H + vGap))
       })
-    } else if (branchStyle === 'staggered') {
-      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0) + hGap * (node.children.length - 1)
+    } else if (style === 'staggered') {
+      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (node.children.length - 1)
       let cx = centerX - totalW / 2
       node.children.forEach((child: any, i: number) => {
-        const sw = subtreeWidthTree(child)
+        const sw = subtreeWidth(child)
         const staggerY = childY + (i % 2) * Math.round(NODE_H * 0.4 + vGap * 0.3)
         layout(child, cx + sw / 2, staggerY)
         cx += sw + hGap
       })
     } else {
-      // Default tree
-      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidthTree(c), 0) + hGap * (node.children.length - 1)
+      // tree (default)
+      const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (node.children.length - 1)
       let cx = centerX - totalW / 2
       node.children.forEach((child: any) => {
-        const sw = subtreeWidthTree(child)
+        const sw = subtreeWidth(child)
         layout(child, cx + sw / 2, childY)
         cx += sw + hGap
       })
     }
   }
 
-  // Place roots side by side with spacing
+  // Place roots side by side
   let startX = 30
   roots.forEach(r => {
-    let rootW: number
-    if (branchStyle === 'right-column' || branchStyle === 'left-column') {
-      rootW = NODE_W + hGap + NODE_W  // parent + gap + child column
-    } else if (branchStyle === 'two-column') {
-      rootW = subtreeWidthTwoCol(r)
-    } else {
-      rootW = subtreeWidthTree(r)
-    }
-    layout(r, startX + rootW / 2, 30)
-    startX += rootW + hGap * 2
+    const sw = subtreeWidth(r)
+    layout(r, startX + sw / 2, 30)
+    startX += sw + hGap * 2
   })
   return positions
 }
@@ -205,6 +223,7 @@ export default function OrgChartPage() {
 
   // Style settings
   const [branchStyle, setBranchStyle] = useState<BranchStyle>('tree')
+  const [nodeBranchStyles, setNodeBranchStyles] = useState<Record<string, BranchStyle>>({})
   const [shapeFormat, setShapeFormat] = useState<ShapeFormat>('rounded')
   const [hGap, setHGap] = useState(54)
   const [vGap, setVGap] = useState(60)
@@ -215,10 +234,8 @@ export default function OrgChartPage() {
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
 
-  // Per-connection midpoint offsets
-  const [lineOffsets, setLineOffsets] = useState<Record<string, number>>({})
+  // Per-connection midpoint offsets (peer/dotted lines only)
   const lineOffsetsRef = useRef<Record<string, number>>({})
-  useEffect(() => { lineOffsetsRef.current = lineOffsets }, [lineOffsets])
 
   // Drag refs
   const areaRef   = useRef<HTMLDivElement>(null)
@@ -281,142 +298,199 @@ export default function OrgChartPage() {
     svg.innerHTML = ''
 
     const visibleIds = new Set(visibleContacts.map(c => c.id))
+    const LINE_COLOR = '#cbd5e1'
+    const DASH_COLOR = '#8b5cf6'
+    const PEER_COLOR = '#f59e0b'
 
-    function getNodeRect(id: string) {
+    function getRect(id: string) {
       const el = (tree as HTMLElement).querySelector<HTMLElement>(`[data-node-id="${id}"]`)
       if (!el) return null
       return {
         x: parseInt(el.style.left) || 0,
-        y: parseInt(el.style.top) || 0,
+        y: parseInt(el.style.top)  || 0,
         w: el.offsetWidth  || NODE_W,
         h: el.offsetHeight || NODE_H,
       }
     }
 
-    function drawLine(fromId: string, toId: string, style: 'solid' | 'dashed' | 'peer', onDelete: () => void) {
-      const p  = getNodeRect(fromId)
-      const ch = getNodeRect(toId)
-      if (!p || !ch) return
-
-      const connKey = `${fromId}:${toId}`
-      const offset = lineOffsetsRef.current[connKey] ?? 0
-
-      let pathD: string, strokeColor: string
-      let handleX: number, handleY: number
-      const isPeer = style === 'peer'
-
-      if (isPeer) {
-        const left  = p.x < ch.x ? p  : ch
-        const right = p.x < ch.x ? ch : p
-        const y1 = left.y  + left.h  / 2
-        const y2 = right.y + right.h / 2
-        const x1 = left.x  + left.w
-        const x2 = right.x
-        const midX = (x1 + x2) / 2 + offset
-        pathD = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
-        strokeColor = '#f59e0b'
-        handleX = midX; handleY = (y1 + y2) / 2
-      } else {
-        const x1 = p.x  + p.w  / 2, y1 = p.y  + p.h
-        const x2 = ch.x + ch.w / 2, y2 = ch.y
-        const midY = (y1 + y2) / 2 + offset
-        pathD = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
-        strokeColor = style === 'dashed' ? '#8b5cf6' : '#cbd5e1'
-        handleX = (x1 + x2) / 2; handleY = midY
-      }
-
-      const visPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      visPath.setAttribute('d', pathD)
-      visPath.setAttribute('stroke', strokeColor)
-      visPath.setAttribute('stroke-width', '1.5')
-      visPath.setAttribute('fill', 'none')
-      visPath.setAttribute('stroke-linecap', 'round')
-      visPath.setAttribute('stroke-linejoin', 'round')
-      visPath.setAttribute('pointer-events', 'none')
-      if (style === 'dashed') visPath.setAttribute('stroke-dasharray', '5,4')
-      if (isPeer) visPath.setAttribute('stroke-dasharray', '6,3')
-      ;(svg as SVGSVGElement).appendChild(visPath)
-
-      const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
-      hitPath.setAttribute('d', pathD)
-      hitPath.setAttribute('stroke', 'transparent')
-      hitPath.setAttribute('stroke-width', '20')
-      hitPath.setAttribute('fill', 'none')
-      hitPath.setAttribute('pointer-events', 'stroke')
-      hitPath.style.cursor = 'pointer'
-
-      let downX = 0, downY = 0
-      hitPath.addEventListener('pointerdown', e => {
-        downX = e.clientX; downY = e.clientY
-        visPath.setAttribute('stroke', '#ef4444'); visPath.setAttribute('stroke-width', '2.5')
-      })
-      hitPath.addEventListener('pointerup', e => {
-        const moved = Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8
-        if (!moved) { e.stopPropagation(); if (confirm('Remove this connection?')) onDelete() }
-        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
-      })
-      hitPath.addEventListener('pointercancel', () => {
-        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
-      })
-      hitPath.addEventListener('mouseenter', () => {
-        visPath.setAttribute('stroke', '#ef4444'); visPath.setAttribute('stroke-width', '2.5')
-        handle.style.opacity = '1'
-      })
-      hitPath.addEventListener('mouseleave', () => {
-        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
-        handle.style.opacity = '0'
-      })
-      ;(svg as SVGSVGElement).appendChild(hitPath)
-
-      // Midpoint drag handle
-      const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-      handle.setAttribute('cx', String(handleX))
-      handle.setAttribute('cy', String(handleY))
-      handle.setAttribute('r', '6')
-      handle.setAttribute('fill', 'white')
-      handle.setAttribute('stroke', strokeColor)
-      handle.setAttribute('stroke-width', '1.5')
-      handle.style.cursor = isPeer ? 'ew-resize' : 'ns-resize'
-      handle.style.opacity = '0'
-      handle.style.transition = 'opacity 0.15s'
-      ;(svg as SVGSVGElement).appendChild(handle)
-
-      handle.addEventListener('mouseenter', () => { handle.style.opacity = '1' })
-      handle.addEventListener('mouseleave', () => { handle.style.opacity = '0' })
-
-      let dragStartCoord = 0, dragStartOffset = 0
-      handle.addEventListener('pointerdown', e => {
-        e.stopPropagation()
-        handle.setPointerCapture(e.pointerId)
-        dragStartCoord = isPeer ? e.clientX : e.clientY
-        dragStartOffset = lineOffsetsRef.current[connKey] ?? 0
-        handle.style.opacity = '1'
-      })
-      handle.addEventListener('pointermove', e => {
-        if (!handle.hasPointerCapture(e.pointerId)) return
-        const delta = (isPeer ? e.clientX : e.clientY) - dragStartCoord
-        lineOffsetsRef.current = { ...lineOffsetsRef.current, [connKey]: dragStartOffset + delta }
-        setLineOffsets({ ...lineOffsetsRef.current })
-      })
-      handle.addEventListener('pointerup', () => { handle.style.opacity = '0' })
+    function makePath(d: string, stroke: string, dash?: string) {
+      const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      p.setAttribute('d', d)
+      p.setAttribute('stroke', stroke)
+      p.setAttribute('stroke-width', '1.5')
+      p.setAttribute('fill', 'none')
+      p.setAttribute('stroke-linecap', 'square')
+      p.setAttribute('stroke-linejoin', 'miter')
+      p.setAttribute('pointer-events', 'none')
+      if (dash) p.setAttribute('stroke-dasharray', dash)
+      return p
     }
 
+    function makeHitPath(d: string, stroke: string, onDelete: () => void, visPaths: SVGPathElement[]) {
+      const hit = document.createElementNS('http://www.w3.org/2000/svg', 'path')
+      hit.setAttribute('d', d)
+      hit.setAttribute('stroke', 'transparent')
+      hit.setAttribute('stroke-width', '20')
+      hit.setAttribute('fill', 'none')
+      hit.setAttribute('pointer-events', 'stroke')
+      hit.style.cursor = 'pointer'
+      let downX = 0, downY = 0
+      hit.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; visPaths.forEach(p => { p.setAttribute('stroke', '#ef4444'); p.setAttribute('stroke-width', '2.5') }) })
+      hit.addEventListener('pointerup',   e => { const moved = Math.abs(e.clientX-downX)>8||Math.abs(e.clientY-downY)>8; if (!moved) { e.stopPropagation(); if (confirm('Remove this connection?')) onDelete() } visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', '1.5') }) })
+      hit.addEventListener('pointercancel', () => visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', '1.5') }))
+      return hit
+    }
+
+    // ── Peer / dotted lines: simple elbow ────────────────────────────────────
+    function drawElbow(fromId: string, toId: string, stroke: string, dash: string, onDelete: () => void) {
+      const a = getRect(fromId), b = getRect(toId)
+      if (!a || !b) return
+      const connKey = `${fromId}:${toId}`
+      const offset = lineOffsetsRef.current[connKey] ?? 0
+      const isPeer = a.x !== b.x  // horizontal layout
+      let d: string
+      if (isPeer) {
+        const left = a.x < b.x ? a : b, right = a.x < b.x ? b : a
+        const y1 = left.y + left.h/2, y2 = right.y + right.h/2
+        const x1 = left.x + left.w, x2 = right.x
+        const midX = (x1 + x2) / 2 + offset
+        d = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
+      } else {
+        const top = a.y < b.y ? a : b, bot = a.y < b.y ? b : a
+        const x1 = top.x + top.w/2, y1 = top.y + top.h
+        const x2 = bot.x + bot.w/2, y2 = bot.y
+        const midY = (y1 + y2) / 2 + offset
+        d = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
+      }
+      const vis = makePath(d, stroke, dash)
+      ;(svg as SVGSVGElement).appendChild(vis)
+      ;(svg as SVGSVGElement).appendChild(makeHitPath(d, stroke, onDelete, [vis]))
+    }
+
+    // ── Trunk+bus connectors for hierarchy lines ──────────────────────────────
+    // Group children by parent, draw one set of trunk lines per parent
+    const childrenByParent: Record<string, string[]> = {}
     contacts.forEach(c => {
       if (c.parentId && visibleIds.has(c.id) && visibleIds.has(c.parentId)) {
-        drawLine(c.parentId, c.id, 'solid', () => updateContact({ ...c, parentId: undefined }))
+        if (!childrenByParent[c.parentId]) childrenByParent[c.parentId] = []
+        childrenByParent[c.parentId].push(c.id)
       }
     })
-    dottedLines.forEach(dl => {
-      if (visibleIds.has(dl.fromId) && visibleIds.has(dl.toId)) {
-        drawLine(dl.fromId, dl.toId, 'dashed', () => removeDottedLine(dl.fromId, dl.toId))
+
+    Object.entries(childrenByParent).forEach(([parentId, childIds]) => {
+      const par = getRect(parentId)
+      if (!par) return
+
+      const effectiveStyle = nodeBranchStyles[parentId] ?? branchStyle
+
+      // Separate assistant children (title contains 'asst' or 'assistant') from regular
+      const isAssistant = (id: string) => {
+        const c = contacts.find(x => x.id === id)
+        return /^asst\.?$|assistant/i.test(c?.title ?? '') || /^asst\.?$|assistant/i.test(c?.name ?? '')
       }
+      const assistantIds = childIds.filter(isAssistant)
+      const regularIds   = childIds.filter(id => !isAssistant(id))
+
+      const deleteConn = (childId: string) => {
+        const c = contacts.find(x => x.id === childId)
+        if (c) updateContact({ ...c, parentId: undefined })
+      }
+
+      // ── Column styles: horizontal trunk from parent side, vertical stubs ──
+      if (effectiveStyle === 'right-column' || effectiveStyle === 'left-column') {
+        const isRight = effectiveStyle === 'right-column'
+        const trunkX  = isRight ? par.x + par.w : par.x
+        const parMidY = par.y + par.h / 2
+
+        regularIds.forEach(childId => {
+          const ch = getRect(childId)
+          if (!ch) return
+          const childMidY = ch.y + ch.h / 2
+          const childEdgeX = isRight ? ch.x : ch.x + ch.w
+          // Horizontal trunk from parent edge to child column edge, then stub to child
+          const paths: SVGPathElement[] = []
+          paths.push(makePath(`M ${trunkX} ${parMidY} L ${childEdgeX} ${parMidY} L ${childEdgeX} ${childMidY} L ${isRight ? ch.x : ch.x + ch.w} ${childMidY}`, LINE_COLOR))
+          paths.forEach(p => (svg as SVGSVGElement).appendChild(p))
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(paths[0].getAttribute('d')!, LINE_COLOR, () => deleteConn(childId), paths))
+        })
+
+        // Assistants connect horizontally off the parent center
+        assistantIds.forEach(childId => {
+          const ch = getRect(childId)
+          if (!ch) return
+          const d = `M ${isRight ? par.x + par.w : par.x} ${parMidY} L ${isRight ? ch.x : ch.x + ch.w} ${parMidY} L ${isRight ? ch.x : ch.x + ch.w} ${ch.y + ch.h/2} L ${isRight ? ch.x : ch.x+ch.w} ${ch.y + ch.h/2}`
+          const vis = makePath(d, LINE_COLOR)
+          ;(svg as SVGSVGElement).appendChild(vis)
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+        })
+        return
+      }
+
+      // ── Tree / Two-column / Staggered: vertical trunk + horizontal bus ─────
+      if (regularIds.length === 0 && assistantIds.length === 0) return
+
+      const parCX = par.x + par.w / 2
+      const trunkTop = par.y + par.h
+
+      // Find the child row Y (minimum child top among regular children)
+      const regularRects = regularIds.map(id => getRect(id)).filter(Boolean) as ReturnType<typeof getRect>[]
+      const childRowY = regularRects.length
+        ? Math.min(...regularRects.map(r => r!.y))
+        : trunkTop + vGap
+
+      const trunkBottom = childRowY  // trunk goes from parent bottom to child row top
+      const busY = childRowY         // horizontal bus at child row top
+
+      // Trunk: vertical line from parent bottom straight down to bus level
+      if (regularIds.length > 0) {
+        const trunk = makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, LINE_COLOR)
+        ;(svg as SVGSVGElement).appendChild(trunk)
+
+        // Bus: horizontal line spanning all regular children
+        const childCXs = regularRects.map(r => r!.x + r!.w / 2)
+        const busLeft  = Math.min(parCX, ...childCXs)
+        const busRight = Math.max(parCX, ...childCXs)
+        if (busLeft < busRight) {
+          const bus = makePath(`M ${busLeft} ${busY} L ${busRight} ${busY}`, LINE_COLOR)
+          ;(svg as SVGSVGElement).appendChild(bus)
+        }
+
+        // Stubs: short vertical lines from bus down to each child top
+        regularIds.forEach(childId => {
+          const ch = getRect(childId)
+          if (!ch) return
+          const cx = ch.x + ch.w / 2
+          const d = `M ${cx} ${busY} L ${cx} ${ch.y}`
+          const vis = makePath(d, LINE_COLOR)
+          ;(svg as SVGSVGElement).appendChild(vis)
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+        })
+      }
+
+      // Assistants: connect off trunk midpoint with a short horizontal line then stub
+      assistantIds.forEach(childId => {
+        const ch = getRect(childId)
+        if (!ch) return
+        // Tap point on trunk: midway between parent bottom and bus
+        const tapY = Math.round(trunkTop + (trunkBottom - trunkTop) * 0.5)
+        const chCX = ch.x + ch.w / 2
+        const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
+        const vis = makePath(d, LINE_COLOR)
+        ;(svg as SVGSVGElement).appendChild(vis)
+        ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+      })
+    })
+
+    // ── Dotted + peer lines ───────────────────────────────────────────────────
+    dottedLines.forEach(dl => {
+      if (visibleIds.has(dl.fromId) && visibleIds.has(dl.toId))
+        drawElbow(dl.fromId, dl.toId, DASH_COLOR, '5,4', () => removeDottedLine(dl.fromId, dl.toId))
     })
     peerLines.forEach(pl => {
-      if (visibleIds.has(pl.fromId) && visibleIds.has(pl.toId)) {
-        drawLine(pl.fromId, pl.toId, 'peer', () => removePeerLine(pl.fromId, pl.toId))
-      }
+      if (visibleIds.has(pl.fromId) && visibleIds.has(pl.toId))
+        drawElbow(pl.fromId, pl.toId, PEER_COLOR, '6,3', () => removePeerLine(pl.fromId, pl.toId))
     })
-  }, [visibleContacts, contacts, dottedLines, peerLines, lineOffsets, updateContact, removeDottedLine, removePeerLine])
+  }, [visibleContacts, contacts, dottedLines, peerLines, branchStyle, nodeBranchStyles, vGap, updateContact, removeDottedLine, removePeerLine])
 
   // Resize / redraw
   useEffect(() => {
@@ -492,7 +566,7 @@ export default function OrgChartPage() {
 
   // ─── Auto-layout ────────────────────────────────────────────────────────────
   const cleanupLayout = () => {
-    const fresh = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle)
+    const fresh = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle, nodeBranchStyles)
     setPositions({ ...positions, ...fresh })
     showToast('Layout applied', 'success')
   }
@@ -606,7 +680,7 @@ export default function OrgChartPage() {
     .sort((a, b) => a.name.localeCompare(b.name))
 
   // ─── Positions: fall back to auto-layout ────────────────────────────────────
-  const layoutFallback = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle)
+  const layoutFallback = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle, nodeBranchStyles)
   const getPos = (id: string): Position => positions[id] || layoutFallback[id] || { x: 20, y: 20 }
 
   // ─── Connection handles ──────────────────────────────────────────────────────
@@ -1074,7 +1148,9 @@ export default function OrgChartPage() {
                   onPointerUp={e => onNodePointerUp(e, c)}
                   onClick={e => {
                     if (nodeDrag.current?.moved) return
-                    if (connMode) { applyConn(c.id); e.stopPropagation() }
+                    if (connMode) { applyConn(c.id); e.stopPropagation(); return }
+                    e.stopPropagation()
+                    setSelectedNodeId(prev => prev === c.id ? null : c.id)
                   }}
                 >
                   {/* Card accent bar */}
@@ -1121,19 +1197,52 @@ export default function OrgChartPage() {
                   <div className={`absolute top-1 right-1 flex gap-0.5 transition-opacity ${isSelected ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-within:opacity-100'}`}>
                     <button data-action="edit"
                       onClick={e => { e.stopPropagation(); setDrawerContactId(c.id); setSelectedNodeId(null) }}
-                      className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-white hover:bg-white/20 bg-black/10 transition-colors">
+                      className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 transition-colors">
                       <svg width="10" height="10" viewBox="0 0 11 11" fill="none">
                         <path d="M8 1.5l1.5 1.5L3 9.5H1.5V8L8 1.5z" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
                       </svg>
                     </button>
                     <button data-action="remove"
                       onClick={e => { e.stopPropagation(); removeFromChart(c.id); setSelectedNodeId(null) }}
-                      className="w-6 h-6 flex items-center justify-center rounded text-white/70 hover:text-red-200 hover:bg-black/20 bg-black/10 transition-colors">
+                      className="w-6 h-6 flex items-center justify-center rounded text-slate-400 hover:text-red-500 hover:bg-red-50 transition-colors">
                       <svg width="9" height="9" viewBox="0 0 10 10" fill="none">
                         <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
                       </svg>
                     </button>
                   </div>
+
+                  {/* Per-node branch style picker — shown below node when selected */}
+                  {isSelected && !connMode && (
+                    <div data-action="branch-picker"
+                      className="absolute top-full left-1/2 -translate-x-1/2 mt-2 z-30 bg-white border border-slate-200 rounded-xl shadow-lg p-2 flex flex-col gap-1 min-w-[160px]"
+                      onClick={e => e.stopPropagation()}>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide px-1 mb-0.5">Children layout</p>
+                      {BRANCH_STYLES.map(bs => {
+                        const active = (nodeBranchStyles[c.id] ?? branchStyle) === bs.value
+                        return (
+                          <button key={bs.value} data-action="branch-picker"
+                            onClick={e => {
+                              e.stopPropagation()
+                              setNodeBranchStyles(prev => ({ ...prev, [c.id]: bs.value }))
+                            }}
+                            className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${active ? 'bg-blue-50 text-blue-700' : 'text-slate-600 hover:bg-slate-50'}`}>
+                            <span className={active ? 'text-blue-500' : 'text-slate-400'}>{bs.icon}</span>
+                            {bs.label}
+                            {nodeBranchStyles[c.id] === bs.value && (
+                              <span className="ml-auto text-[9px] text-blue-400 font-semibold">custom</span>
+                            )}
+                          </button>
+                        )
+                      })}
+                      {nodeBranchStyles[c.id] && (
+                        <button data-action="branch-picker"
+                          onClick={e => { e.stopPropagation(); setNodeBranchStyles(prev => { const n = {...prev}; delete n[c.id]; return n }) }}
+                          className="text-[10px] text-slate-400 hover:text-slate-600 text-center py-1 border-t border-slate-100 mt-0.5">
+                          Reset to default
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
               )
             })}
