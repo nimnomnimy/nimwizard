@@ -3,7 +3,7 @@ import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale
 import { uid } from '../../lib/utils'
 import {
   parseDate, formatDate, dateToPx, pxToDate, snapDate, getColumns,
-  PX_PER_DAY, addDays, getGroupLabel, getGroupKey,
+  PX_PER_DAY, addDays, getHeaderRows, diffDays,
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
 import SubTaskDrawer from '../tasks/SubTaskDrawer'
@@ -84,33 +84,20 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const viewStart = parseDate(timeline.startDate)
   const viewEnd   = parseDate(timeline.endDate)
   const yearMode  = timeline.yearMode ?? 'calendar'
-  const { major, minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
-  const totalWidthPx = major.reduce((s,c) => s + c.widthPx, 0)
+  const showWeekends = timeline.showWeekends ?? true
+  const weekLabels   = timeline.weekLabels   ?? 'range'
 
-  // For 'years' timescale the middle tick row shows quarters instead of bare years.
-  // For all other timescales tickCols === major.
-  const { major: tickCols } = timeline.timescale === 'years'
-    ? getColumns(viewStart, viewEnd, 'quarters', null, yearMode)
-    : { major }
+  // New header row system
+  const { topRow: dblGroups, midRow: tickCols, weekendCols } = getHeaderRows(
+    viewStart, viewEnd, timeline.timescale, yearMode,
+    { showWeekends, weekLabels },
+  )
 
-  // ── Top-row groups: bucket adjacent tick columns under a shared label ────────
-  interface HeaderGroup { label: string; widthPx: number }
-  const dblGroups: HeaderGroup[] = (() => {
-    if (!tickCols.length) return []
-    const groups: HeaderGroup[] = []
-    let curKey = ''; let curLabel = ''; let curWidth = 0
-    for (const col of tickCols) {
-      const key   = getGroupKey(col.startDate, timeline.timescale, yearMode)
-      const label = getGroupLabel(col.startDate, timeline.timescale, yearMode)
-      if (key !== curKey) {
-        if (curWidth > 0) groups.push({ label: curLabel, widthPx: curWidth })
-        curKey = key; curLabel = label; curWidth = 0
-      }
-      curWidth += col.widthPx
-    }
-    if (curWidth > 0) groups.push({ label: curLabel, widthPx: curWidth })
-    return groups
-  })()
+  // Sub-timescale minor row (unchanged)
+  const { minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
+
+  // Total canvas width: always based on full date range (weekends excluded from column rendering but not from width)
+  const totalWidthPx = diffDays(viewStart, viewEnd) * PX_PER_DAY[timeline.timescale]
 
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
@@ -605,6 +592,39 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           </div>
         )}
 
+        {/* Weekends toggle (days timescale only) */}
+        {timeline.timescale === 'days' && (
+          <button type="button"
+            onClick={() => update({ showWeekends: !showWeekends })}
+            className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors border ${
+              showWeekends
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'
+            }`}>
+            Weekends
+          </button>
+        )}
+
+        {/* Week label style toggle (weeks timescale only) */}
+        {timeline.timescale === 'weeks' && (
+          <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5">
+            <button type="button"
+              onClick={() => update({ weekLabels: 'range' })}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                weekLabels === 'range' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              Range
+            </button>
+            <button type="button"
+              onClick={() => update({ weekLabels: 'number' })}
+              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                weekLabels === 'number' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+              }`}>
+              W#
+            </button>
+          </div>
+        )}
+
         <div className="flex-1" />
 
         {/* Freeze period */}
@@ -673,12 +693,17 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                     width: Math.min(totalWidthPx,periodX2) - Math.max(0,periodX1),
                     backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
                 )}
-                {tickCols.map((col,i) => (
-                  <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx }}
-                    className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
-                    <span className="text-[11px] font-semibold text-slate-600 whitespace-nowrap">{col.label}</span>
-                  </div>
-                ))}
+                {tickCols.map((col,i) => {
+                  const isWeekendDay = timeline.timescale === 'days' && showWeekends &&
+                    (col.startDate.getDay() === 0 || col.startDate.getDay() === 6)
+                  return (
+                    <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx,
+                      backgroundColor: isWeekendDay ? 'rgb(248 250 252)' : undefined }}
+                      className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
+                      <span className="text-[11px] font-semibold text-slate-600 whitespace-nowrap">{col.label}</span>
+                    </div>
+                  )
+                })}
                 {todayPx>=0 && todayPx<=totalWidthPx && (
                   <div style={{ position:'absolute', left:todayPx, top:0, bottom:0, width:2, backgroundColor:'#6366f1', pointerEvents:'none', zIndex:5 }} />
                 )}
@@ -733,6 +758,15 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                 </marker>
               </defs>
             </svg>
+
+            {/* Weekend column tints (days timescale, showWeekends=true) */}
+            {timeline.timescale === 'days' && showWeekends && weekendCols && weekendCols.map((wc, i) => (
+              <div key={i} style={{
+                position: 'absolute', left: labelWidth + wc.startPx, top: 0, bottom: 0,
+                width: wc.widthPx, backgroundColor: 'rgb(248 250 252)', // slate-50
+                pointerEvents: 'none', zIndex: 0,
+              }} />
+            ))}
 
             {/* Today line */}
             {todayPx>=0 && todayPx<=totalWidthPx && (

@@ -170,6 +170,8 @@ export interface Timeline {
   yearMode?: YearMode
   labelWidth?: number   // resizable, default 140
   headerMode?: 'single' | 'double'   // double shows major period above minor ticks
+  showWeekends?: boolean              // days timescale: hide Sat/Sun columns when false, default true
+  weekLabels?: 'range' | 'number'    // weeks timescale: show date range or week number, default 'range'
   startDate: string
   endDate: string
   swimLanes: SwimLane[]

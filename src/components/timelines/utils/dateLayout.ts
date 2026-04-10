@@ -237,6 +237,364 @@ function isoWeek(d: Date): number {
   return Math.ceil(((d.getTime() - jan1.getTime()) / 86_400_000 + jan1.getDay() + 1) / 7)
 }
 
+// ─── New header row system ────────────────────────────────────────────────────
+
+export interface WeekendCol { startPx: number; widthPx: number }
+
+export interface HeaderRows {
+  topRow: DateColumn[]
+  midRow: DateColumn[]
+  weekendCols?: WeekendCol[]
+}
+
+const DAY_SHORT = ['SUN','MON','TUE','WED','THU','FRI','SAT']
+
+/** Format a date as "D MMM" e.g. "4 APR" */
+function fmtDMon(d: Date): string {
+  return `${d.getDate()} ${MONTH_SHORT[d.getMonth()].toUpperCase()}`
+}
+
+/**
+ * Build the two header rows (topRow + midRow) plus optional weekend columns
+ * for the given timescale, replacing the old major/tickCols/dblGroups system.
+ */
+export function getHeaderRows(
+  viewStart: Date,
+  viewEnd: Date,
+  timescale: Timescale,
+  yearMode: YearMode = 'calendar',
+  opts: { showWeekends?: boolean; weekLabels?: 'range' | 'number' } = {},
+): HeaderRows {
+  const showWeekends = opts.showWeekends ?? true
+  const weekLabels   = opts.weekLabels   ?? 'range'
+
+  switch (timescale) {
+
+    // ── Days ──────────────────────────────────────────────────────────────────
+    case 'days': {
+      const pxDay = PX_PER_DAY.days
+      const midRow: DateColumn[] = []
+      const weekendCols: WeekendCol[] = []
+
+      // Walk days in view
+      let cur = new Date(viewStart.getFullYear(), viewStart.getMonth(), viewStart.getDate())
+      let pxOffset = 0  // offset from viewStart in px (only counting visible columns)
+
+      while (cur < viewEnd) {
+        const dow = cur.getDay()  // 0=Sun,6=Sat
+        const isWeekend = dow === 0 || dow === 6
+
+        if (!showWeekends && isWeekend) {
+          cur = addDays(cur, 1)
+          continue
+        }
+
+        const dayPx = dateToPxRaw(cur, viewStart, pxDay)  // raw offset ignoring weekend hiding
+        if (isWeekend) {
+          weekendCols.push({ startPx: dayPx, widthPx: pxDay })
+        }
+
+        const next = addDays(cur, 1)
+        midRow.push({
+          label: `${DAY_SHORT[dow]} ${cur.getDate()}`,
+          startDate: new Date(cur),
+          endDate: next,
+          widthPx: pxDay,
+        })
+        pxOffset += pxDay
+        cur = next
+      }
+
+      // Build topRow: group consecutive days by month
+      const topRow = groupIntoMonths(midRow, yearMode, showWeekends, viewStart, viewEnd, pxDay)
+
+      return { topRow, midRow, weekendCols }
+    }
+
+    // ── Weeks ─────────────────────────────────────────────────────────────────
+    case 'weeks': {
+      const pxDay = PX_PER_DAY.weeks
+      const pxWeek = 7 * pxDay
+      const midRow: DateColumn[] = []
+
+      let cur = startOfWeek(viewStart)
+      while (cur < viewEnd) {
+        const weekEnd = addDays(cur, 7)
+        const dispStart = cur < viewStart ? viewStart : cur
+        const dispEnd   = weekEnd > viewEnd ? viewEnd : weekEnd
+
+        let label: string
+        if (weekLabels === 'number') {
+          label = `W${isoWeek(cur)}`
+        } else {
+          const rangeEnd = addDays(cur, 6)
+          label = `${fmtDMon(cur)} – ${fmtDMon(rangeEnd)}`
+        }
+
+        midRow.push({
+          label,
+          startDate: dispStart,
+          endDate: dispEnd,
+          widthPx: pxWeek,
+        })
+        cur = weekEnd
+      }
+
+      // topRow: group weeks by the month their start date falls in
+      const topRow = groupWeeksByMonth(midRow, yearMode)
+
+      return { topRow, midRow }
+    }
+
+    // ── Months ────────────────────────────────────────────────────────────────
+    case 'months': {
+      const pxDay = PX_PER_DAY.months
+      const pxWeek = 7 * pxDay
+      const midRow: DateColumn[] = []
+
+      // midRow: week start dates within the view
+      let cur = startOfWeek(viewStart)
+      while (cur < viewEnd) {
+        const weekEnd = addDays(cur, 7)
+        const dispStart = cur < viewStart ? viewStart : cur
+        const dispEnd   = weekEnd > viewEnd ? viewEnd : weekEnd
+        midRow.push({
+          label: fmtDMon(dispStart),
+          startDate: dispStart,
+          endDate: dispEnd,
+          widthPx: pxWeek,
+        })
+        cur = weekEnd
+      }
+
+      // topRow: one entry per month
+      const topRow = groupWeeksByMonth(midRow, yearMode)
+
+      return { topRow, midRow }
+    }
+
+    // ── Quarters ──────────────────────────────────────────────────────────────
+    case 'quarters': {
+      const pxDay = PX_PER_DAY.quarters
+      const midRow: DateColumn[] = []
+      const topRow: DateColumn[] = []
+
+      // midRow: months within view
+      let cur = startOfMonth(viewStart)
+      while (cur < viewEnd) {
+        const next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
+        const clampStart = cur < viewStart ? viewStart : cur
+        const clampEnd   = next > viewEnd ? viewEnd : next
+        midRow.push({
+          label: MONTH_SHORT[cur.getMonth()],
+          startDate: clampStart,
+          endDate: clampEnd,
+          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+        })
+        cur = next
+      }
+
+      // topRow: one entry per quarter
+      let qCur = startOfQuarter(viewStart)
+      while (qCur < viewEnd) {
+        const qNext = new Date(qCur.getFullYear(), qCur.getMonth() + 3, 1)
+        const clampStart = qCur < viewStart ? viewStart : qCur
+        const clampEnd   = qNext > viewEnd ? viewEnd : qNext
+
+        let label: string
+        if (yearMode === 'financial') {
+          const fyq = fyQuarter(qCur)
+          const fyqStarts = [6, 9, 0, 3]  // Jul,Oct,Jan,Apr
+          const fyqEnds   = [8, 11, 2, 5] // Sep,Dec,Mar,Jun
+          const sm = fyqStarts[fyq - 1]
+          const em = fyqEnds[fyq - 1]
+          label = `FYQ${fyq} (${MONTH_SHORT[sm]}–${MONTH_SHORT[em]})`
+        } else {
+          const q = Math.floor(qCur.getMonth() / 3)
+          const sm = q * 3; const em = sm + 2
+          label = `Q${q + 1} (${MONTH_SHORT[sm]}–${MONTH_SHORT[em]})`
+        }
+
+        topRow.push({
+          label,
+          startDate: clampStart,
+          endDate: clampEnd,
+          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+        })
+        qCur = qNext
+      }
+
+      return { topRow, midRow }
+    }
+
+    // ── Years ─────────────────────────────────────────────────────────────────
+    case 'years': {
+      const pxDay = PX_PER_DAY.years
+      const midRow: DateColumn[] = []
+      const topRow: DateColumn[] = []
+
+      // midRow: quarters within view
+      let cur = startOfQuarter(viewStart)
+      while (cur < viewEnd) {
+        const next = new Date(cur.getFullYear(), cur.getMonth() + 3, 1)
+        const clampStart = cur < viewStart ? viewStart : cur
+        const clampEnd   = next > viewEnd ? viewEnd : next
+
+        let label: string
+        if (yearMode === 'financial') {
+          const fyq = fyQuarter(cur)
+          const fyqStarts = [6, 9, 0, 3]
+          const fyqEnds   = [8, 11, 2, 5]
+          const sm = fyqStarts[fyq - 1]
+          const em = fyqEnds[fyq - 1]
+          label = `${MONTH_SHORT[sm]}–${MONTH_SHORT[em]}`
+        } else {
+          const sm = cur.getMonth()
+          const em = sm + 2
+          label = `${MONTH_SHORT[sm]}–${MONTH_SHORT[em]}`
+        }
+
+        midRow.push({
+          label,
+          startDate: clampStart,
+          endDate: clampEnd,
+          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+        })
+        cur = next
+      }
+
+      // topRow: one entry per year (calendar or fiscal)
+      if (yearMode === 'financial') {
+        // FY starts July 1. Group quarters by FY year.
+        const groups = new Map<number, { start: Date; end: Date; fy: number }>()
+        for (const col of midRow) {
+          const fy = fyYear(col.startDate)
+          const g = groups.get(fy)
+          if (!g) groups.set(fy, { start: col.startDate, end: col.endDate, fy })
+          else {
+            if (col.startDate < g.start) g.start = col.startDate
+            if (col.endDate > g.end) g.end = col.endDate
+          }
+        }
+        for (const [fy, g] of [...groups].sort((a, b) => a[0] - b[0])) {
+          topRow.push({
+            label: `FY${fy}`,
+            startDate: g.start,
+            endDate: g.end,
+            widthPx: diffDays(g.start, g.end) * pxDay,
+          })
+        }
+      } else {
+        const groups = new Map<number, { start: Date; end: Date }>()
+        for (const col of midRow) {
+          const yr = col.startDate.getFullYear()
+          const g = groups.get(yr)
+          if (!g) groups.set(yr, { start: col.startDate, end: col.endDate })
+          else {
+            if (col.startDate < g.start) g.start = col.startDate
+            if (col.endDate > g.end) g.end = col.endDate
+          }
+        }
+        for (const [yr, g] of [...groups].sort((a, b) => a[0] - b[0])) {
+          topRow.push({
+            label: String(yr),
+            startDate: g.start,
+            endDate: g.end,
+            widthPx: diffDays(g.start, g.end) * pxDay,
+          })
+        }
+      }
+
+      return { topRow, midRow }
+    }
+  }
+}
+
+/** Raw pixel offset from viewStart (not accounting for weekend hiding) */
+function dateToPxRaw(d: Date, viewStart: Date, pxPerDay: number): number {
+  return diffDays(viewStart, d) * pxPerDay
+}
+
+/** Group midRow (day columns) by month into topRow entries */
+function groupIntoMonths(
+  midRow: DateColumn[],
+  _yearMode: YearMode,
+  _showWeekends: boolean,
+  _viewStart: Date,
+  _viewEnd: Date,
+  _pxDay: number,
+): DateColumn[] {
+  if (!midRow.length) return []
+  const topRow: DateColumn[] = []
+  let curMonth = -1; let curYear = -1
+  let curStart: Date | null = null; let curWidth = 0
+
+  for (const col of midRow) {
+    const m = col.startDate.getMonth()
+    const y = col.startDate.getFullYear()
+    if (m !== curMonth || y !== curYear) {
+      if (curStart && curWidth > 0) {
+        topRow.push({
+          label: `${MONTH_LONG[curMonth]} ${curYear}`,
+          startDate: curStart,
+          endDate: col.startDate,
+          widthPx: curWidth,
+        })
+      }
+      curMonth = m; curYear = y; curStart = col.startDate; curWidth = 0
+    }
+    curWidth += col.widthPx
+  }
+  if (curStart && curWidth > 0) {
+    topRow.push({
+      label: `${MONTH_LONG[curMonth]} ${curYear}`,
+      startDate: curStart,
+      endDate: midRow[midRow.length - 1].endDate,
+      widthPx: curWidth,
+    })
+  }
+  return topRow
+}
+
+/** Group week columns (midRow) by the month their start date falls in */
+function groupWeeksByMonth(midRow: DateColumn[], yearMode: YearMode): DateColumn[] {
+  if (!midRow.length) return []
+  const topRow: DateColumn[] = []
+  let curKey = ''; let curStart: Date | null = null; let curWidth = 0
+  let curMonth = -1; let curYear = -1
+
+  for (const col of midRow) {
+    const m = col.startDate.getMonth()
+    const y = yearMode === 'financial' ? fyYear(col.startDate) : col.startDate.getFullYear()
+    const key = `${y}-${m}`
+    if (key !== curKey) {
+      if (curStart && curWidth > 0) {
+        topRow.push({
+          label: `${MONTH_LONG[curMonth]} ${curYear}`,
+          startDate: curStart,
+          endDate: col.startDate,
+          widthPx: curWidth,
+        })
+      }
+      curKey = key
+      curStart = col.startDate
+      curMonth = col.startDate.getMonth()
+      curYear = col.startDate.getFullYear()
+      curWidth = 0
+    }
+    curWidth += col.widthPx
+  }
+  if (curStart && curWidth > 0) {
+    topRow.push({
+      label: `${MONTH_LONG[curMonth]} ${curYear}`,
+      startDate: curStart,
+      endDate: midRow[midRow.length - 1].endDate,
+      widthPx: curWidth,
+    })
+  }
+  return topRow
+}
+
 // ─── Position helpers ─────────────────────────────────────────────────────────
 
 /** Convert a date to an x pixel offset from the view start */
