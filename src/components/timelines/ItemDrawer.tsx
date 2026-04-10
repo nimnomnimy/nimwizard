@@ -120,11 +120,17 @@ export default function ItemDrawer({
     }
     onSaveItem(savedItem)
 
-    // Sync progress back to linked task
+    // Sync dates + progress back to linked task so updateTask doesn't
+    // overwrite the new timeline dates with the task's old due/startDate
     if (taskId) {
       const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(t => ({ task: t, bucketId: b.id }))).find(x => x.task.id === taskId)
       if (bucketEntry) {
-        updateTask(bucketEntry.bucketId, { ...bucketEntry.task, progress })
+        updateTask(bucketEntry.bucketId, {
+          ...bucketEntry.task,
+          progress,
+          startDate: startDate || bucketEntry.task.startDate,
+          due: (itemType !== 'milestone' ? endDate : startDate) || bucketEntry.task.due,
+        })
       }
     }
   }
