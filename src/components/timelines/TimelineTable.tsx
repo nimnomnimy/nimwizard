@@ -7,6 +7,7 @@ interface Props {
   timeline: Timeline
   onChange: (t: Timeline) => void
   onPatchItem?: (id: string, patch: Partial<TimelineItem>) => void
+  onPatchSubItem?: (itemId: string, subId: string, patch: Partial<TimelineSubItem>) => void
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ function LanePicker({ value, lanes, onCommit }: { value: string; lanes: SwimLane
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function TimelineTable({ timeline, onChange, onPatchItem }: Props) {
+export default function TimelineTable({ timeline, onChange, onPatchItem, onPatchSubItem }: Props) {
   const update = (patch: Partial<Timeline>) => onChange({ ...timeline, ...patch })
 
   // ── Milestone mutations ───────────────────────────────────────────────────
@@ -119,10 +120,12 @@ export default function TimelineTable({ timeline, onChange, onPatchItem }: Props
 
   // ── Item mutations ────────────────────────────────────────────────────────
   function patchItem(id: string, patch: Partial<TimelineItem>) {
+    // Auto-mark done when progress hits 100 (TimelineItem doesn't have done, but sync to task handles it)
+    const resolved = patch.progress === 100 ? { ...patch } : patch
     if (onPatchItem) {
-      onPatchItem(id, patch)
+      onPatchItem(id, resolved)
     } else {
-      update({ items: timeline.items.map(i => i.id === id ? { ...i, ...patch } : i) })
+      update({ items: timeline.items.map(i => i.id === id ? { ...i, ...resolved } : i) })
     }
   }
   function addItem(laneId: string) {
@@ -140,12 +143,18 @@ export default function TimelineTable({ timeline, onChange, onPatchItem }: Props
 
   // ── Sub-item mutations ────────────────────────────────────────────────────
   function patchSubItem(itemId: string, subId: string, patch: Partial<TimelineSubItem>) {
-    update({
-      items: timeline.items.map(i => i.id === itemId
-        ? { ...i, subItems: (i.subItems ?? []).map(s => s.id === subId ? { ...s, ...patch } : s) }
-        : i
-      )
-    })
+    // Auto-mark done when progress hits 100
+    const resolved = patch.progress === 100 ? { ...patch, done: true } : patch.progress === 0 ? { ...patch, done: false } : patch
+    if (onPatchSubItem) {
+      onPatchSubItem(itemId, subId, resolved)
+    } else {
+      update({
+        items: timeline.items.map(i => i.id === itemId
+          ? { ...i, subItems: (i.subItems ?? []).map(s => s.id === subId ? { ...s, ...resolved } : s) }
+          : i
+        )
+      })
+    }
   }
   function addSubItem(itemId: string) {
     const item = timeline.items.find(i => i.id === itemId)

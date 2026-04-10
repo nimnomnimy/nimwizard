@@ -212,20 +212,58 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     if (!existing) return
     const updated = { ...existing, ...patch }
     onChange({ ...t, items: t.items.map(i => i.id === id ? updated : i) })
-    // Sync to linked task
+    // Sync to linked task — auto-done when progress=100
     if (updated.taskId) {
       const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(tk => ({ task: tk, bucketId: b.id }))).find(x => x.task.id === updated.taskId)
       if (bucketEntry) {
+        const newProgress = updated.progress !== undefined ? updated.progress : bucketEntry.task.progress
         const syncedTask = {
           ...bucketEntry.task,
           text: updated.label || bucketEntry.task.text,
           due: updated.endDate || bucketEntry.task.due,
-          progress: updated.progress !== undefined ? updated.progress : bucketEntry.task.progress,
+          progress: newProgress,
+          // mark done when 100%, unmark when dropped below
+          ...(patch.progress !== undefined ? { done: newProgress >= 100 } : {}),
         }
         updateTask(bucketEntry.bucketId, syncedTask)
       }
     }
   }, [onChange, taskBuckets, updateTask])
+
+  // Update a timeline sub-item and sync to linked SubTask if present
+  const patchTimelineSubItem = useCallback((itemId: string, subId: string, patch: Partial<import('../../types').TimelineSubItem>) => {
+    const t = timelineRef.current
+    const item = t.items.find(i => i.id === itemId)
+    if (!item) return
+    const existingSub = (item.subItems ?? []).find(s => s.id === subId)
+    if (!existingSub) return
+    const updatedSub = { ...existingSub, ...patch }
+    // Auto-done when progress=100
+    if (patch.progress !== undefined) updatedSub.done = updatedSub.progress >= 100
+    const newItems = t.items.map(i => i.id === itemId
+      ? { ...i, subItems: (i.subItems ?? []).map(s => s.id === subId ? updatedSub : s) }
+      : i
+    )
+    onChange({ ...t, items: newItems })
+    // Sync to linked SubTask via store action
+    if (updatedSub.subTaskId && item.taskId) {
+      const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(tk => ({ task: tk, bucketId: b.id }))).find(x => x.task.id === item.taskId)
+      if (bucketEntry) {
+        const existingSubTask = (bucketEntry.task.subTasks ?? []).find(st => st.id === updatedSub.subTaskId)
+        if (existingSubTask) {
+          const syncedSubTask: import('../../types').SubTask = {
+            ...existingSubTask,
+            text: updatedSub.label || existingSubTask.text,
+            progress: updatedSub.progress,
+            done: updatedSub.done,
+            due: updatedSub.endDate || existingSubTask.due,
+            startDate: updatedSub.startDate || existingSubTask.startDate,
+          }
+          saveSubTaskWithTimelineSync(bucketEntry.bucketId, item.taskId, syncedSubTask, subId)
+        }
+      }
+    }
+  }, [onChange, taskBuckets, saveSubTaskWithTimelineSync])
 
   // ── Global pointer listeners for drag (works on mobile with pointer capture removed) ──
   useEffect(() => {
@@ -1259,7 +1297,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       {/* ── Table view panel ─────────────────────────────────────────────── */}
       {showTable && (
         <div className="flex-shrink-0 overflow-auto border-t border-slate-200" style={{ maxHeight: '40vh' }}>
-          <TimelineTable timeline={timeline} onChange={onChange} onPatchItem={patchTimelineItem} />
+          <TimelineTable timeline={timeline} onChange={onChange} onPatchItem={patchTimelineItem} onPatchSubItem={patchTimelineSubItem} />
         </div>
       )}
 
