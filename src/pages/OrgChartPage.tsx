@@ -189,15 +189,32 @@ export default function OrgChartPage() {
       const hitPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
       hitPath.setAttribute('d', pathD)
       hitPath.setAttribute('stroke', 'transparent')
-      hitPath.setAttribute('stroke-width', '16')
+      hitPath.setAttribute('stroke-width', '20')
       hitPath.setAttribute('fill', 'none')
-      hitPath.setAttribute('cursor', 'pointer')
       hitPath.setAttribute('pointer-events', 'stroke')
       hitPath.style.cursor = 'pointer'
-      hitPath.addEventListener('click', e => {
-        e.stopPropagation()
-        if (confirm('Remove this connection?')) { onDelete() }
+
+      // Track pointerdown position to distinguish tap from scroll
+      let downX = 0, downY = 0
+      hitPath.addEventListener('pointerdown', e => {
+        downX = e.clientX; downY = e.clientY
+        visPath.setAttribute('stroke', '#ef4444')
+        visPath.setAttribute('stroke-width', '2.5')
       })
+      hitPath.addEventListener('pointerup', e => {
+        const moved = Math.abs(e.clientX - downX) > 8 || Math.abs(e.clientY - downY) > 8
+        if (!moved) {
+          e.stopPropagation()
+          if (confirm('Remove this connection?')) { onDelete() }
+        }
+        visPath.setAttribute('stroke', strokeColor)
+        visPath.setAttribute('stroke-width', '1.5')
+      })
+      hitPath.addEventListener('pointercancel', () => {
+        visPath.setAttribute('stroke', strokeColor)
+        visPath.setAttribute('stroke-width', '1.5')
+      })
+      // Desktop hover highlight
       hitPath.addEventListener('mouseenter', () => {
         visPath.setAttribute('stroke', '#ef4444')
         visPath.setAttribute('stroke-width', '2.5')

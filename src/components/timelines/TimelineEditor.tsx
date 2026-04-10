@@ -158,6 +158,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const [ghost,    setGhost]    = useState<Ghost | null>(null)
   const [dragging, setDragging] = useState(false)
 
+  // Stable refs so window listeners always call latest handler
+  const onPointerMoveRef = useRef<(e: PointerEvent) => void>(() => {})
+  const onPointerUpRef   = useRef<(e: PointerEvent) => void>(() => {})
+
   // Tap popover (bar vs milestone choice)
   interface TapPopover { x: number; y: number; laneId: string; date: Date }
   const [tapPopover, setTapPopover] = useState<TapPopover | null>(null)
@@ -169,6 +173,19 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const periodX2 = dateToPx(periodBounds.end,   viewStart, timeline.timescale)
 
   const update = useCallback((patch: Partial<Timeline>) => { onChange({ ...timeline, ...patch }) }, [timeline, onChange])
+
+  // ── Global pointer listeners for drag (works on mobile with pointer capture removed) ──
+  useEffect(() => {
+    if (!dragging) return
+    const move = (e: PointerEvent) => onPointerMoveRef.current(e)
+    const up   = (e: PointerEvent) => onPointerUpRef.current(e)
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup',   up)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup',   up)
+    }
+  }, [dragging])
 
   // ── Coordinate helpers ────────────────────────────────────────────────────
   function clientXToCanvasX(clientX: number) {
@@ -185,7 +202,6 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // ── Bar drag ──────────────────────────────────────────────────────────────
   function startBarDrag(e: React.PointerEvent, item: TimelineItem | TimelineSubItem, kind: BarDrag['kind'], parentId?: string, laneId?: string) {
     e.stopPropagation(); e.preventDefault()
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     dragRef.current = {
       kind, itemId: parentId ?? item.id, subId: parentId ? item.id : undefined,
       origLaneId: laneId ?? '',
@@ -199,7 +215,6 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   function startDraw(e: React.PointerEvent, laneId: string) {
     if (e.pointerType === 'mouse' && e.button !== 0) return
     e.stopPropagation(); e.preventDefault()
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     setDragging(true)
     const canvasX = clientXToCanvasX(e.clientX)
     const anchorDate = snapDate(canvasXToDate(canvasX), timeline.timescale)
@@ -210,7 +225,6 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   // ── Label resize ──────────────────────────────────────────────────────────
   function startLabelResize(e: React.PointerEvent) {
     e.stopPropagation(); e.preventDefault()
-    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     dragRef.current = { kind: 'label-resize', startClientX: e.clientX, startWidth: labelWidth }
     setDragging(true)
   }
@@ -246,11 +260,13 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
     // Cross-lane: detect which lane the pointer is over (only for 'move')
     if (drag.kind === 'move' && !drag.subId) {
+      // canvasRef is the inner content div — its getBoundingClientRect().top reflects
+      // scroll (it moves up as user scrolls). The ruler is sticky so always at the
+      // top of the viewport; lane bounds are relative to the swim-lanes container
+      // which starts immediately after the ruler in the content flow.
       const canvasTop = canvasRef.current?.getBoundingClientRect().top ?? 0
-      const scrollTop = scrollRef.current?.scrollTop ?? 0
-      // canvasY relative to the scrollable content (not viewport)
       const rulerH = DBL_MAJOR_H + DBL_MINOR_H + (minor ? SUB_RULER_H : 0)
-      const canvasY = e.clientY - canvasTop + scrollTop - rulerH
+      const canvasY = e.clientY - canvasTop - rulerH
       let targetId: string | null = null
       for (const [lid, bounds] of laneBoundsRef.current) {
         if (canvasY >= bounds.top && canvasY < bounds.bottom) { targetId = lid; break }
@@ -536,6 +552,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     return timeline.swimLanes.slice(0, laneIdx).reduce((s, l) => s + laneH(l.id), 0)
   }
 
+  // Keep window listener refs in sync with latest render's handlers
+  onPointerMoveRef.current = onPointerMove as unknown as (e: PointerEvent) => void
+  onPointerUpRef.current   = onPointerUp   as unknown as (e: PointerEvent) => void
+
   return (
     <div className="flex flex-col h-full overflow-hidden relative">
 
@@ -601,8 +621,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       {/* ── Scrollable canvas ─────────────────────────────────────────────── */}
       <div ref={scrollRef}
         className="flex-1 overflow-auto scroll-touch select-none"
-        style={{ touchAction: dragging ? 'none' : 'pan-x pan-y' }}
-        onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
+        style={{ touchAction: dragging ? 'none' : 'pan-x pan-y' }}>
         <div ref={canvasRef} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
 
           {/* ── Ruler (always double-row: group label above + major ticks below) ── */}
