@@ -226,7 +226,6 @@ const TL_RULER_H = 44   // header area height
 const TL_LANE_H  = 36   // height per lane row
 const TL_BAR_H   = 22
 const TL_PAD_L   = 0
-const TL_COL_LABEL = '#94a3b8'
 const TL_COL_BORDER = '#e2e8f0'
 const TL_COL_BG    = '#ffffff'
 const TL_COL_TODAY = '#6366f1'

@@ -147,9 +147,9 @@ export default function ContactsPage() {
             </button>
             <ExportMenu
               onCSV={() => { exportContactsCSV(filtered); showToast('Contacts exported as CSV', 'success') }}
-              onXLSX={() => { exportContactsXLSX(filtered); showToast('Contacts exported as Excel', 'success') }}
-              onPDF={() => { exportContactsPDF(filtered); showToast('Contacts exported as PDF', 'success') }}
-              onPPTX={() => { exportContactsPPTX(filtered); showToast('Contacts exported as PowerPoint', 'success') }}
+              onXLSX={() => { exportContactsXLSX(filtered, { contacts: [], positions: {}, dottedLines: [], peerLines: [] }).then(() => showToast('Contacts exported as Excel', 'success')).catch(() => showToast('Export failed')) }}
+              onPDF={() => { exportContactsPDF(filtered, { contacts: [], positions: {}, dottedLines: [], peerLines: [] }).then(() => showToast('Contacts exported as PDF', 'success')).catch(() => showToast('Export failed')) }}
+              onPPTX={() => { exportContactsPPTX(filtered, { contacts: [], positions: {}, dottedLines: [], peerLines: [] }).then(() => showToast('Contacts exported as PowerPoint', 'success')).catch(() => showToast('Export failed')) }}
             />
             <button onClick={handleExportJSON}
               className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 min-h-[44px] transition-colors">
