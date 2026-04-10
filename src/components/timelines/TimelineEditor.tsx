@@ -38,7 +38,11 @@ const TIMESCALE_LIST: Timescale[] = ['days', 'weeks', 'months', 'quarters', 'yea
 const TIMESCALE_LABELS: Record<Timescale, string> = { days:'Days', weeks:'Weeks', months:'Months', quarters:'Quarters', years:'Years' }
 const LANE_COLORS = ['#6366f1','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#ec4899','#14b8a6']
 
-interface Props { timeline: Timeline; onChange: (t: Timeline) => void }
+interface Props {
+  timeline: Timeline
+  onChange: (t: Timeline) => void
+  ganttRef?: React.RefObject<HTMLDivElement | null>
+}
 
 interface BarDrag {
   kind: 'move' | 'resize-left' | 'resize-right'
@@ -73,7 +77,7 @@ function currentPeriodBounds(timescale: Timescale): { start: Date; end: Date } {
   }
 }
 
-export default function TimelineEditor({ timeline, onChange }: Props) {
+export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) {
   const scrollRef  = useRef<HTMLDivElement>(null)
   const canvasRef  = useRef<HTMLDivElement>(null)
   const dragRef    = useRef<ActiveDrag | null>(null)
@@ -666,7 +670,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       <div ref={scrollRef}
         className="flex-1 min-h-0 overflow-auto scroll-touch select-none"
         style={{ touchAction: dragging ? 'none' : 'pan-x pan-y' }}>
-        <div ref={canvasRef} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
+        <div ref={el => { (canvasRef as React.MutableRefObject<HTMLDivElement | null>).current = el; if (ganttRef) (ganttRef as React.MutableRefObject<HTMLDivElement | null>).current = el }} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
 
           {/* ── Ruler (always double-row: group label above + major ticks below) ── */}
           <div className="sticky top-0 z-20 bg-white border-b border-slate-200">

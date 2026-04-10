@@ -16,10 +16,11 @@ import { showToast } from '../components/ui/Toast'
 type ExportMode = 'gantt' | 'table' | 'both'
 
 // Two-step export popover: pick mode then format
-function TimelineExportMenu({ timeline }: { timeline: Timeline }) {
+function TimelineExportMenu({ timeline, ganttRef }: { timeline: Timeline; ganttRef: React.RefObject<HTMLDivElement | null> }) {
   const [open, setOpen] = useState(false)
   const [step, setStep] = useState<'mode' | 'format'>('mode')
   const [mode, setMode] = useState<ExportMode>('both')
+  const [busy, setBusy] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -34,23 +35,30 @@ function TimelineExportMenu({ timeline }: { timeline: Timeline }) {
   }, [open])
 
   function close() { setOpen(false); setStep('mode') }
-
   function pickMode(m: ExportMode) { setMode(m); setStep('format') }
 
-  function doExport(fmt: 'csv' | 'xlsx' | 'pdf' | 'pptx') {
+  async function doExport(fmt: 'csv' | 'xlsx' | 'pdf' | 'pptx') {
     close()
-    if (fmt === 'csv') exportTimelineCSV(timeline, mode)
-    else if (fmt === 'xlsx') exportTimelineXLSX(timeline, mode)
-    else if (fmt === 'pdf') exportTimelinePDF(timeline, mode)
-    else exportTimelinePPTX(timeline, mode)
-    showToast(`Exported as ${fmt.toUpperCase()}`, 'success')
+    setBusy(true)
+    try {
+      const el = ganttRef.current
+      if (fmt === 'csv') exportTimelineCSV(timeline, mode)
+      else if (fmt === 'xlsx') await exportTimelineXLSX(timeline, mode, el)
+      else if (fmt === 'pdf') await exportTimelinePDF(timeline, mode, el)
+      else await exportTimelinePPTX(timeline, mode, el)
+      showToast(`Exported as ${fmt.toUpperCase()}`, 'success')
+    } catch {
+      showToast('Export failed')
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div ref={ref} className="relative">
       <button
-        onClick={() => { setOpen(o => !o); setStep('mode') }}
-        className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 active:bg-slate-100 transition-colors"
+        onClick={() => { if (!busy) { setOpen(o => !o); setStep('mode') } }}
+        className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 text-sm font-medium transition-colors ${busy ? 'text-slate-400 cursor-wait' : 'text-slate-600 hover:bg-slate-50 active:bg-slate-100'}`}
       >
         <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
           <path d="M7 9L2.5 4.5M7 9l4.5-4.5M7 9V1M1 13h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -107,6 +115,7 @@ export default function TimelineEditorPage() {
   const timelines = useAppStore(s => s.timelines)
   const updateTimeline = useAppStore(s => s.updateTimeline)
   const navigate = useNavigate()
+  const ganttRef = useRef<HTMLDivElement | null>(null)
 
   const timeline = timelines.find(t => t.id === id)
 
@@ -191,7 +200,7 @@ export default function TimelineEditorPage() {
         </button>
 
         {/* Export menu */}
-        <TimelineExportMenu timeline={timeline} />
+        <TimelineExportMenu timeline={timeline} ganttRef={ganttRef} />
       </div>
 
       {/* Mobile date range */}
@@ -207,7 +216,7 @@ export default function TimelineEditorPage() {
 
       {/* Editor */}
       <div className="flex-1 overflow-hidden">
-        <TimelineEditor timeline={timeline} onChange={handleChange} />
+        <TimelineEditor timeline={timeline} onChange={handleChange} ganttRef={ganttRef} />
       </div>
     </div>
   )

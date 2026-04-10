@@ -4,7 +4,7 @@
     "target": "es2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "module": "esnext",
-    "types": ["vite/client", "jspdf", "jspdf-autotable", "pptxgenjs"],
+    "types": ["vite/client", "jspdf", "jspdf-autotable", "pptxgenjs", "html2canvas"],
     "skipLibCheck": true,
 
     /* Bundler mode */
