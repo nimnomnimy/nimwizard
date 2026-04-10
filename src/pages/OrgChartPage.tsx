@@ -468,7 +468,53 @@ export default function OrgChartPage() {
         return
       }
 
-      // ── Tree / Two-column / Staggered: bottom-center trunk → fixed bus Y in the v-gap → stubs to child tops ──
+      // ── Two-column: vertical center bus with horizontal stubs left/right to each pair ──
+      if (effectiveStyle === 'two-column' && regularIds.length > 0) {
+        const parCX    = par.x + par.w / 2
+        const trunkTop = par.y + par.h
+        const busOffset = busOffsetsRef.current[parentId] ?? 0
+        const busY      = trunkTop + vGap / 2 + busOffset
+
+        // Trunk: parent bottom-center → horizontal bus Y
+        ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, lineColor))
+
+        const regularRects = regularIds.map(id => ({ id, r: getRect(id) })).filter(x => x.r) as { id: string; r: NonNullable<ReturnType<typeof getRect>> }[]
+
+        // Vertical center bus: from busY down to mid-Y of the last row's cards
+        const childMidYs = regularRects.map(x => x.r.y + x.r.h / 2)
+        const busBottom  = Math.max(...childMidYs)
+        if (busY < busBottom) {
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${busY} L ${parCX} ${busBottom}`, lineColor))
+        }
+
+        // Horizontal stubs: center bus → each child side-center
+        // Even index (left col) → stub goes right from left-edge; odd (right col) → stub goes left from right-edge
+        regularRects.forEach(({ id: childId, r: ch }, i) => {
+          const childMidY  = ch.y + ch.h / 2
+          const isLeftCol  = i % 2 === 0
+          const childEdgeX = isLeftCol ? ch.x + ch.w : ch.x  // right edge of left card, left edge of right card
+          const d = `M ${parCX} ${childMidY} L ${childEdgeX} ${childMidY}`
+          const vis = makePath(d, lineColor)
+          ;(svg as SVGSVGElement).appendChild(vis)
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+        })
+        // (bus handle rendered as React div — see busHandles below)
+
+        // Assistants tap off the trunk
+        assistantIds.forEach(childId => {
+          const ch = getRect(childId)
+          if (!ch) return
+          const tapY = Math.round(trunkTop + (busY - trunkTop) * 0.5)
+          const chCX = ch.x + ch.w / 2
+          const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
+          const vis = makePath(d, lineColor)
+          ;(svg as SVGSVGElement).appendChild(vis)
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+        })
+        return
+      }
+
+      // ── Tree / Staggered: bottom-center trunk → fixed bus Y in the v-gap → stubs to child tops ──
       if (regularIds.length === 0 && assistantIds.length === 0) return
 
       const parCX    = par.x + par.w / 2
@@ -778,6 +824,7 @@ export default function OrgChartPage() {
         const baseBusX = isRight ? parExitX + hGap / 2 : parExitX - hGap / 2
         handles.push({ parentId, x: baseBusX + busOffset, y: parMidY, axis: 'x' })
       } else {
+        // tree, staggered, two-column — all use vertical trunk + bus Y handle
         const parCX    = par.x + NODE_W / 2
         const trunkTop = par.y + NODE_H
         handles.push({ parentId, x: parCX, y: trunkTop + vGap / 2 + busOffset, axis: 'y' })
