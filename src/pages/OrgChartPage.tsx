@@ -8,9 +8,10 @@ import { exportContactsCSV, exportContactsXLSX, exportContactsPDF, exportContact
 import type { Contact, Position, Level } from '../types'
 
 // ─── Constants ───────────────────────────────────────────────────────────────
-const NODE_W = 200
-const NODE_H = 88
-const SNAP = 20
+const NODE_W  = 200
+const NODE_H  = 88
+const SNAP    = 20
+const MIN_STUB = 18  // minimum px of horizontal/vertical stub from bus to child
 
 // ─── Branch styles ───────────────────────────────────────────────────────────
 type BranchStyle = 'tree' | 'staggered' | 'right-column' | 'left-column' | 'two-column'
@@ -227,6 +228,8 @@ export default function OrgChartPage() {
   const [shapeFormat, setShapeFormat] = useState<ShapeFormat>('rounded')
   const [hGap, setHGap] = useState(54)
   const [vGap, setVGap] = useState(60)
+  const [lineColor, setLineColor] = useState('#94a3b8')
+  const [lineWidth, setLineWidth] = useState(1.5)
   const [useThemeColors, setUseThemeColors] = useState(false)
   const [accentColors, setAccentColors] = useState<string[]>(PRESET_THEMES[0].colors)
   const [editingColorDepth, setEditingColorDepth] = useState<number | null>(null)
@@ -298,7 +301,7 @@ export default function OrgChartPage() {
     svg.innerHTML = ''
 
     const visibleIds = new Set(visibleContacts.map(c => c.id))
-    const LINE_COLOR = '#cbd5e1'
+    const LW        = String(lineWidth)
     const DASH_COLOR = '#8b5cf6'
     const PEER_COLOR = '#f59e0b'
 
@@ -313,11 +316,11 @@ export default function OrgChartPage() {
       }
     }
 
-    function makePath(d: string, stroke: string, dash?: string) {
+    function makePath(d: string, stroke: string, dash?: string, w?: string) {
       const p = document.createElementNS('http://www.w3.org/2000/svg', 'path')
       p.setAttribute('d', d)
       p.setAttribute('stroke', stroke)
-      p.setAttribute('stroke-width', '1.5')
+      p.setAttribute('stroke-width', w ?? LW)
       p.setAttribute('fill', 'none')
       p.setAttribute('stroke-linecap', 'square')
       p.setAttribute('stroke-linejoin', 'miter')
@@ -336,8 +339,8 @@ export default function OrgChartPage() {
       hit.style.cursor = 'pointer'
       let downX = 0, downY = 0
       hit.addEventListener('pointerdown', e => { downX = e.clientX; downY = e.clientY; visPaths.forEach(p => { p.setAttribute('stroke', '#ef4444'); p.setAttribute('stroke-width', '2.5') }) })
-      hit.addEventListener('pointerup',   e => { const moved = Math.abs(e.clientX-downX)>8||Math.abs(e.clientY-downY)>8; if (!moved) { e.stopPropagation(); if (confirm('Remove this connection?')) onDelete() } visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', '1.5') }) })
-      hit.addEventListener('pointercancel', () => visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', '1.5') }))
+      hit.addEventListener('pointerup',   e => { const moved = Math.abs(e.clientX-downX)>8||Math.abs(e.clientY-downY)>8; if (!moved) { e.stopPropagation(); if (confirm('Remove this connection?')) onDelete() } visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', LW) }) })
+      hit.addEventListener('pointercancel', () => visPaths.forEach(p => { p.setAttribute('stroke', stroke); p.setAttribute('stroke-width', LW) }))
       return hit
     }
 
@@ -399,96 +402,92 @@ export default function OrgChartPage() {
       // ── Column styles: exit parent side-center, vertical bus, stubs to child side-centers ──
       if (effectiveStyle === 'right-column' || effectiveStyle === 'left-column') {
         const isRight  = effectiveStyle === 'right-column'
-        // Parent exits from right or left edge, vertically centered
         const parExitX = isRight ? par.x + par.w : par.x
         const parMidY  = par.y + par.h / 2
 
         const childRects = regularIds.map(id => ({ id, r: getRect(id) })).filter(x => x.r) as { id: string; r: NonNullable<ReturnType<typeof getRect>> }[]
 
         if (childRects.length > 0) {
-          // Bus X: fixed column edge (inner edge of child column)
-          const busX = isRight ? childRects[0].r.x : childRects[0].r.x + childRects[0].r.w
+          // Bus X is MIN_STUB away from the nearest child edge
+          const nearestChildEdgeX = isRight
+            ? Math.min(...childRects.map(x => x.r.x))
+            : Math.max(...childRects.map(x => x.r.x + x.r.w))
+          const busX = isRight ? nearestChildEdgeX - MIN_STUB : nearestChildEdgeX + MIN_STUB
 
           // Horizontal trunk: parent exit → bus column
-          const trunkPath = makePath(`M ${parExitX} ${parMidY} L ${busX} ${parMidY}`, LINE_COLOR)
-          ;(svg as SVGSVGElement).appendChild(trunkPath)
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${parExitX} ${parMidY} L ${busX} ${parMidY}`, lineColor))
 
-          // Vertical bus along busX spanning all children mid-Y
+          // Vertical bus spanning all children mid-Y
           const childMidYs = childRects.map(x => x.r.y + x.r.h / 2)
           const busTop    = Math.min(parMidY, ...childMidYs)
           const busBottom = Math.max(parMidY, ...childMidYs)
           if (busTop < busBottom) {
-            const busPath = makePath(`M ${busX} ${busTop} L ${busX} ${busBottom}`, LINE_COLOR)
-            ;(svg as SVGSVGElement).appendChild(busPath)
+            ;(svg as SVGSVGElement).appendChild(makePath(`M ${busX} ${busTop} L ${busX} ${busBottom}`, lineColor))
           }
 
-          // Stubs: horizontal from busX to each child's near edge, entering at mid-Y
+          // Stubs: busX → child near-edge at mid-Y (always at least MIN_STUB long)
           childRects.forEach(({ id: childId, r: ch }) => {
             const childMidY  = ch.y + ch.h / 2
             const childEdgeX = isRight ? ch.x : ch.x + ch.w
             const d = `M ${busX} ${childMidY} L ${childEdgeX} ${childMidY}`
-            const vis = makePath(d, LINE_COLOR)
+            const vis = makePath(d, lineColor)
             ;(svg as SVGSVGElement).appendChild(vis)
-            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
           })
         }
 
-        // Assistants: horizontal off parent side at mid-Y, then stub down to child top-center
+        // Assistants: horizontal off parent side, then stub down to child top-center
         assistantIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const chCX = ch.x + ch.w / 2
           const d = `M ${parExitX} ${parMidY} L ${chCX} ${parMidY} L ${chCX} ${ch.y}`
-          const vis = makePath(d, LINE_COLOR)
+          const vis = makePath(d, lineColor)
           ;(svg as SVGSVGElement).appendChild(vis)
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
         })
         return
       }
 
-      // ── Tree / Two-column / Staggered: exit parent bottom-center, vertical trunk, horizontal bus, stubs into child top-centers ─────
+      // ── Tree / Two-column / Staggered: bottom-center trunk + horizontal bus + stubs ──
       if (regularIds.length === 0 && assistantIds.length === 0) return
 
-      // Parent exits bottom-center
       const parCX    = par.x + par.w / 2
       const trunkTop = par.y + par.h
 
-      // Find bus Y = top of the highest regular child
       const regularRects = regularIds.map(id => getRect(id)).filter(Boolean) as NonNullable<ReturnType<typeof getRect>>[]
-      const busY = regularRects.length
-        ? Math.min(...regularRects.map(r => r.y))
-        : trunkTop + vGap
+
+      // Bus Y is MIN_STUB above the top of the highest child
+      const rawBusY = regularRects.length ? Math.min(...regularRects.map(r => r.y)) : trunkTop + vGap
+      const busY    = Math.min(rawBusY, trunkTop + (rawBusY - trunkTop) * 1)  // keep as-is, MIN_STUB enforced via stubs below
 
       if (regularIds.length > 0) {
-        // Trunk: vertical from parent bottom-center down to bus Y
-        const trunk = makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, LINE_COLOR)
-        ;(svg as SVGSVGElement).appendChild(trunk)
+        // Trunk: parent bottom-center down to bus
+        ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, lineColor))
 
-        // Bus: horizontal spanning from leftmost to rightmost child top-center
+        // Bus: spans all child top-centers
         const childCXs = regularRects.map(r => r.x + r.w / 2)
         const busLeft  = Math.min(parCX, ...childCXs)
         const busRight = Math.max(parCX, ...childCXs)
         if (busLeft < busRight) {
-          const bus = makePath(`M ${busLeft} ${busY} L ${busRight} ${busY}`, LINE_COLOR)
-          ;(svg as SVGSVGElement).appendChild(bus)
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${busLeft} ${busY} L ${busRight} ${busY}`, lineColor))
         }
 
-        // Stubs: vertical from bus Y down into each child's top-center
+        // Stubs: bus → child top-center. Always draw the stub (ensures hit target + min length)
         regularIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const cx = ch.x + ch.w / 2
-          // stub only needed if child isn't already touching the bus
-          if (ch.y > busY) {
-            const d = `M ${cx} ${busY} L ${cx} ${ch.y}`
-            const vis = makePath(d, LINE_COLOR)
-            ;(svg as SVGSVGElement).appendChild(vis)
-            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
-          }
+          // If child is sitting right on the bus, push it down by MIN_STUB visually via the hit path
+          const stubTop = Math.min(busY, ch.y - MIN_STUB)
+          const d = `M ${cx} ${stubTop} L ${cx} ${ch.y}`
+          const vis = makePath(d, lineColor)
+          ;(svg as SVGSVGElement).appendChild(vis)
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
         })
       }
 
-      // Assistants: tap off trunk at midpoint, horizontal to child top-center, stub down
+      // Assistants: tap off trunk midpoint
       const trunkBottom = busY
       assistantIds.forEach(childId => {
         const ch = getRect(childId)
@@ -496,9 +495,9 @@ export default function OrgChartPage() {
         const tapY = Math.round(trunkTop + (trunkBottom - trunkTop) * 0.5)
         const chCX = ch.x + ch.w / 2
         const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
-        const vis = makePath(d, LINE_COLOR)
+        const vis = makePath(d, lineColor)
         ;(svg as SVGSVGElement).appendChild(vis)
-        ;(svg as SVGSVGElement).appendChild(makeHitPath(d, LINE_COLOR, () => deleteConn(childId), [vis]))
+        ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
       })
     })
 
@@ -511,7 +510,7 @@ export default function OrgChartPage() {
       if (visibleIds.has(pl.fromId) && visibleIds.has(pl.toId))
         drawElbow(pl.fromId, pl.toId, PEER_COLOR, '6,3', () => removePeerLine(pl.fromId, pl.toId))
     })
-  }, [visibleContacts, contacts, dottedLines, peerLines, branchStyle, nodeBranchStyles, vGap, updateContact, removeDottedLine, removePeerLine])
+  }, [visibleContacts, contacts, dottedLines, peerLines, lineColor, lineWidth, branchStyle, nodeBranchStyles, vGap, updateContact, removeDottedLine, removePeerLine])
 
   // Resize / redraw
   useEffect(() => {
@@ -920,6 +919,26 @@ export default function OrgChartPage() {
                   className="mt-2 w-full py-2 rounded-lg bg-slate-100 text-slate-600 text-xs font-semibold hover:bg-slate-200 transition-colors">
                   Apply layout
                 </button>
+              </div>
+
+              {/* Line Style */}
+              <div>
+                <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mb-2">Connection Lines</p>
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-slate-500">Colour</label>
+                    <input type="color" value={lineColor} onChange={e => setLineColor(e.target.value)}
+                      className="w-8 h-7 rounded border border-slate-200 cursor-pointer p-0.5" />
+                  </div>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs text-slate-500">Thickness</label>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => setLineWidth(w => Math.max(0.5, Math.round((w - 0.5) * 2) / 2))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">−</button>
+                      <span className="w-8 text-center text-sm font-semibold text-slate-700">{lineWidth}</span>
+                      <button onClick={() => setLineWidth(w => Math.min(6, Math.round((w + 0.5) * 2) / 2))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">+</button>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               {/* Color Themes */}
