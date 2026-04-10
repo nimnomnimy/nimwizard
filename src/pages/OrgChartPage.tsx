@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { avatarColor, initials, uid, LEVEL_LABELS, downloadJSON, pickFile, readFileText } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
@@ -250,8 +250,9 @@ export default function OrgChartPage() {
   const svgRef    = useRef<SVGSVGElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
-  const nodeDrag    = useRef<{ id: string; origX: number; origY: number; startCX: number; startCY: number; moved: boolean } | null>(null)
-  const connModeRef = useRef<ConnMode | null>(null)
+  const nodeDrag      = useRef<{ id: string; origX: number; origY: number; startCX: number; startCY: number; moved: boolean } | null>(null)
+  const busHandleDrag = useRef<{ parentId: string; axis: 'x' | 'y'; startCoord: number; startOffset: number } | null>(null)
+  const connModeRef   = useRef<ConnMode | null>(null)
 
   useEffect(() => { connModeRef.current = connMode }, [connMode])
 
@@ -437,27 +438,7 @@ export default function OrgChartPage() {
             ;(svg as SVGSVGElement).appendChild(vis)
             ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
           })
-
-          // Draggable bus handle on the trunk (horizontal drag shifts busX)
-          const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-          handle.setAttribute('cx', String(busX))
-          handle.setAttribute('cy', String(parMidY))
-          handle.setAttribute('r', '5')
-          handle.setAttribute('fill', 'white')
-          handle.setAttribute('stroke', lineColor)
-          handle.setAttribute('stroke-width', LW)
-          handle.style.cursor = 'ew-resize'
-          ;(svg as SVGSVGElement).appendChild(handle)
-          let dragStart = 0, startOffset = 0
-          handle.addEventListener('pointerdown', e => {
-            e.stopPropagation(); handle.setPointerCapture(e.pointerId)
-            dragStart = e.clientX; startOffset = busOffsetsRef.current[parentId] ?? 0
-          })
-          handle.addEventListener('pointermove', e => {
-            if (!handle.hasPointerCapture(e.pointerId)) return
-            busOffsetsRef.current = { ...busOffsetsRef.current, [parentId]: startOffset + e.clientX - dragStart }
-            setBusOffsets({ ...busOffsetsRef.current })
-          })
+          // (bus handle rendered as React div — see busHandles below)
         }
 
         // Assistants: horizontal off parent side, then stub down to child top-center
@@ -508,27 +489,7 @@ export default function OrgChartPage() {
           ;(svg as SVGSVGElement).appendChild(vis)
           ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
         })
-
-        // Draggable bus handle on the trunk (vertical drag shifts busY)
-        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
-        handle.setAttribute('cx', String(parCX))
-        handle.setAttribute('cy', String(busY))
-        handle.setAttribute('r', '5')
-        handle.setAttribute('fill', 'white')
-        handle.setAttribute('stroke', lineColor)
-        handle.setAttribute('stroke-width', LW)
-        handle.style.cursor = 'ns-resize'
-        ;(svg as SVGSVGElement).appendChild(handle)
-        let dragStart = 0, startOffset = 0
-        handle.addEventListener('pointerdown', e => {
-          e.stopPropagation(); handle.setPointerCapture(e.pointerId)
-          dragStart = e.clientY; startOffset = busOffsetsRef.current[parentId] ?? 0
-        })
-        handle.addEventListener('pointermove', e => {
-          if (!handle.hasPointerCapture(e.pointerId)) return
-          busOffsetsRef.current = { ...busOffsetsRef.current, [parentId]: startOffset + e.clientY - dragStart }
-          setBusOffsets({ ...busOffsetsRef.current })
-        })
+        // (bus handle rendered as React div — see busHandles below)
       }
 
       // Assistants: tap off trunk at the bus Y level
@@ -710,9 +671,33 @@ export default function OrgChartPage() {
     const dy = e.clientY - d.startCY
     if (!d.moved && (Math.abs(dx) > 5 || Math.abs(dy) > 5)) d.moved = true
     if (d.moved) {
+      let newX = Math.max(0, d.origX + dx)
+      let newY = Math.max(0, d.origY + dy)
+
+      // ── Collision clamping: keep MIN_STUB clearance from every other card ──
+      const minH = NODE_H + MIN_STUB * 2  // vertical clearance
+      visibleContacts.forEach(other => {
+        if (other.id === c.id) return
+        const op = getPos(other.id)
+        const overlapX = newX < op.x + NODE_W + MIN_STUB && newX + NODE_W + MIN_STUB > op.x
+        const overlapY = newY < op.y + minH && newY + minH > op.y
+        if (overlapX && overlapY) {
+          // Push out whichever axis has less penetration
+          const pushRight = op.x + NODE_W + MIN_STUB - newX
+          const pushLeft  = newX + NODE_W + MIN_STUB - op.x
+          const pushDown  = op.y + minH - newY
+          const pushUp    = newY + minH - op.y
+          const minPush   = Math.min(pushRight, pushLeft, pushDown, pushUp)
+          if (minPush === pushRight) newX = op.x + NODE_W + MIN_STUB
+          else if (minPush === pushLeft) newX = op.x - NODE_W - MIN_STUB
+          else if (minPush === pushDown) newY = op.y + minH
+          else newY = op.y - minH
+        }
+      })
+
       const el = e.currentTarget as HTMLElement
-      el.style.left = Math.max(0, d.origX + dx) + 'px'
-      el.style.top  = Math.max(0, d.origY + dy) + 'px'
+      el.style.left = newX + 'px'
+      el.style.top  = newY + 'px'
       drawConnections()
     }
   }
@@ -747,6 +732,46 @@ export default function OrgChartPage() {
   // ─── Positions: fall back to auto-layout ────────────────────────────────────
   const layoutFallback = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle, nodeBranchStyles)
   const getPos = (id: string): Position => positions[id] || layoutFallback[id] || { x: 20, y: 20 }
+
+  // ─── Bus handles: one per parent that has visible children ──────────────────
+  // Each handle is a React div — stable across SVG redraws, so pointer capture never breaks
+  const busHandles = useMemo(() => {
+    const handles: { parentId: string; x: number; y: number; axis: 'x' | 'y' }[] = []
+    const visibleIds = new Set(visibleContacts.map(c => c.id))
+    const childrenByParent: Record<string, string[]> = {}
+    contacts.forEach(c => {
+      if (c.parentId && visibleIds.has(c.id) && visibleIds.has(c.parentId)) {
+        if (!childrenByParent[c.parentId]) childrenByParent[c.parentId] = []
+        childrenByParent[c.parentId].push(c.id)
+      }
+    })
+    Object.entries(childrenByParent).forEach(([parentId, childIds]) => {
+      const par = getPos(parentId)
+      const style = nodeBranchStyles[parentId] ?? branchStyle
+      const isAssistant = (id: string) => {
+        const c = contacts.find(x => x.id === id)
+        return /^asst\.?$|assistant/i.test(c?.title ?? '') || /^asst\.?$|assistant/i.test(c?.name ?? '')
+      }
+      const regularIds = childIds.filter(id => !isAssistant(id))
+      if (regularIds.length === 0) return
+
+      const busOffset = busOffsets[parentId] ?? 0
+
+      if (style === 'right-column' || style === 'left-column') {
+        const isRight  = style === 'right-column'
+        const parExitX = isRight ? par.x + NODE_W : par.x
+        const parMidY  = par.y + NODE_H / 2
+        const baseBusX = isRight ? parExitX + hGap / 2 : parExitX - hGap / 2
+        handles.push({ parentId, x: baseBusX + busOffset, y: parMidY, axis: 'x' })
+      } else {
+        const parCX    = par.x + NODE_W / 2
+        const trunkTop = par.y + NODE_H
+        handles.push({ parentId, x: parCX, y: trunkTop + vGap / 2 + busOffset, axis: 'y' })
+      }
+    })
+    return handles
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleContacts, contacts, positions, nodeBranchStyles, branchStyle, hGap, vGap, busOffsets])
 
   // ─── Connection handles ──────────────────────────────────────────────────────
   const CONN_LABELS: Record<ConnDir, (name: string) => string> = {
@@ -1331,6 +1356,46 @@ export default function OrgChartPage() {
                 </div>
               )
             })}
+
+            {/* Bus handles — React divs so pointer capture survives SVG redraws */}
+            {busHandles.map(bh => (
+              <div key={bh.parentId}
+                data-action="bus-handle"
+                style={{
+                  position: 'absolute',
+                  left: bh.x - 7,
+                  top:  bh.y - 7,
+                  width: 14, height: 14,
+                  borderRadius: '50%',
+                  background: 'white',
+                  border: `${lineWidth}px solid ${lineColor}`,
+                  cursor: bh.axis === 'y' ? 'ns-resize' : 'ew-resize',
+                  zIndex: 25,
+                  touchAction: 'none',
+                }}
+                onPointerDown={e => {
+                  e.stopPropagation()
+                  const el = e.currentTarget as HTMLElement
+                  el.setPointerCapture(e.pointerId)
+                  busHandleDrag.current = {
+                    parentId: bh.parentId,
+                    axis: bh.axis,
+                    startCoord: bh.axis === 'y' ? e.clientY : e.clientX,
+                    startOffset: busOffsets[bh.parentId] ?? 0,
+                  }
+                }}
+                onPointerMove={e => {
+                  const drag = busHandleDrag.current
+                  if (!drag || drag.parentId !== bh.parentId) return
+                  const delta = (bh.axis === 'y' ? e.clientY : e.clientX) - drag.startCoord
+                  const next = drag.startOffset + delta
+                  busOffsetsRef.current = { ...busOffsetsRef.current, [bh.parentId]: next }
+                  setBusOffsets({ ...busOffsetsRef.current })
+                }}
+                onPointerUp={() => { busHandleDrag.current = null }}
+                onPointerCancel={() => { busHandleDrag.current = null }}
+              />
+            ))}
           </div>
 
           {/* Zoom controls */}
