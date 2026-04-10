@@ -87,13 +87,19 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const { major, minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
   const totalWidthPx = major.reduce((s,c) => s + c.widthPx, 0)
 
-  // ── Top-row groups: bucket adjacent major columns under a shared label ──────
+  // For 'years' timescale the middle tick row shows quarters instead of bare years.
+  // For all other timescales tickCols === major.
+  const { major: tickCols } = timeline.timescale === 'years'
+    ? getColumns(viewStart, viewEnd, 'quarters', null, yearMode)
+    : { major }
+
+  // ── Top-row groups: bucket adjacent tick columns under a shared label ────────
   interface HeaderGroup { label: string; widthPx: number }
   const dblGroups: HeaderGroup[] = (() => {
-    if (!major.length) return []
+    if (!tickCols.length) return []
     const groups: HeaderGroup[] = []
     let curKey = ''; let curLabel = ''; let curWidth = 0
-    for (const col of major) {
+    for (const col of tickCols) {
       const key   = getGroupKey(col.startDate, timeline.timescale, yearMode)
       const label = getGroupLabel(col.startDate, timeline.timescale, yearMode)
       if (key !== curKey) {
@@ -667,7 +673,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                     width: Math.min(totalWidthPx,periodX2) - Math.max(0,periodX1),
                     backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
                 )}
-                {major.map((col,i) => (
+                {tickCols.map((col,i) => (
                   <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx }}
                     className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
                     <span className="text-[11px] font-semibold text-slate-600 whitespace-nowrap">{col.label}</span>
@@ -893,9 +899,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       startDraw(e, lane.id)
                     }}>
 
-                    {/* Grid lines */}
-                    {major.map((_,i) => {
-                      const lx = major.slice(0,i).reduce((s,c)=>s+c.widthPx,0)
+                    {/* Grid lines — use tickCols so lines align with the middle header row */}
+                    {tickCols.map((_,i) => {
+                      const lx = tickCols.slice(0,i).reduce((s,c)=>s+c.widthPx,0)
                       return <div key={i} style={{ position:'absolute', left:lx, top:0, bottom:0, width:1, backgroundColor:'#f1f5f9', pointerEvents:'none' }} />
                     })}
 
