@@ -216,7 +216,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     if (updated.taskId) {
       const bucketEntry = taskBuckets.flatMap(b => b.tasks.map(tk => ({ task: tk, bucketId: b.id }))).find(x => x.task.id === updated.taskId)
       if (bucketEntry) {
-        const newProgress = updated.progress !== undefined ? updated.progress : bucketEntry.task.progress
+        const newProgress = updated.progress !== undefined ? updated.progress : (bucketEntry.task.progress ?? 0)
         const syncedTask = {
           ...bucketEntry.task,
           text: updated.label || bucketEntry.task.text,

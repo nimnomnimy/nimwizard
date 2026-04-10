@@ -4,7 +4,7 @@ import ExcelJS from 'exceljs'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import PptxGenJS from 'pptxgenjs'
-import { parseDate, PX_PER_DAY, diffDays } from '../components/timelines/utils/dateLayout'
+import { parseDate, diffDays } from '../components/timelines/utils/dateLayout'
 
 // ─── Org chart data type ──────────────────────────────────────────────────────
 
@@ -536,7 +536,7 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     const lineProps = {
       color: style === 'peer' ? 'f59e0b' : style === 'dashed' ? '8b5cf6' : 'cbd5e1',
       width: 0.75,
-      dashType: (style !== 'solid' ? 'dash' : 'solid') as PptxGenJS.DashType,
+      dashType: (style !== 'solid' ? 'dash' : 'solid') as 'dash' | 'solid',
     }
     if (style === 'peer') {
       const left  = fp.x < tp.x ? fp : tp
@@ -746,7 +746,7 @@ export async function exportTimelinePPTX(timeline: Timeline, mode: 'gantt' | 'ta
           body.push([{ text: `  └ ${sub.label}`, options: { italic: true, color: '64748b' } }, { text: sub.startDate }, { text: sub.endDate }, { text: String(sub.progress) }, { text: '' }])
         }
       }
-      slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [3, 1.2, 1.2, 1.0, 2.6], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true, headerRowCnt: 1 })
+      slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [3, 1.2, 1.2, 1.0, 2.6], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true })
     }
   }
 
@@ -829,7 +829,7 @@ export async function exportContactsPPTX(contacts: Contact[], orgData: OrgChartD
     { text: c.parentId ? (idToName[c.parentId] ?? '') : '' },
     { text: c.email ?? '' }, { text: c.phone ?? '' },
   ])
-  slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [1.5, 1.5, 1.1, 1.0, 1.5, 1.5, 0.9], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true, headerRowCnt: 1 })
+  slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [1.5, 1.5, 1.1, 1.0, 1.5, 1.5, 0.9], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true })
   await pptx.writeFile({ fileName: 'org-chart.pptx' })
 }
 
@@ -905,7 +905,7 @@ export async function exportTasksPPTX(taskBuckets: TaskBucket[]): Promise<void> 
         body.push([{ text: `  └ ${sub.text}`, options: { italic: true, color: '64748b' } }, { text: '' }, { text: '' }, { text: sub.due ?? '' }, { text: String(sub.progress ?? 0) }, { text: sub.done ? 'Yes' : '' }, { text: sub.notes ?? '' }])
       }
     }
-    slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [2.5, 0.9, 1.0, 1.0, 1.0, 0.7, 1.9], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true, headerRowCnt: 1 })
+    slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [2.5, 0.9, 1.0, 1.0, 1.0, 0.7, 1.9], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true })
   }
   await pptx.writeFile({ fileName: 'tasks.pptx' })
 }
