@@ -172,6 +172,8 @@ export interface Timeline {
   headerMode?: 'single' | 'double'   // double shows major period above minor ticks
   showWeekends?: boolean              // days timescale: hide Sat/Sun columns when false, default true
   weekLabels?: 'range' | 'number'    // weeks timescale: show date range or week number, default 'range'
+  colWidth?: number                  // uniform px-per-day override (null = use PX_PER_DAY default)
+  colWidthMap?: Record<string, number> // per-column override keyed by YYYY-MM-DD of column start
   startDate: string
   endDate: string
   swimLanes: SwimLane[]

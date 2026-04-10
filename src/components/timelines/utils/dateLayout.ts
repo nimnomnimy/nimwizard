@@ -53,6 +53,7 @@ export function diffDays(a: Date, b: Date): number {
 
 export interface DateColumn {
   label: string
+  subLabel?: string   // second line (e.g. day number below day name)
   startDate: Date
   endDate: Date   // exclusive
   widthPx: number
@@ -263,16 +264,28 @@ export function getHeaderRows(
   viewEnd: Date,
   timescale: Timescale,
   yearMode: YearMode = 'calendar',
-  opts: { showWeekends?: boolean; weekLabels?: 'range' | 'number' } = {},
+  opts: {
+    showWeekends?: boolean
+    weekLabels?: 'range' | 'number'
+    pxPerDayOverride?: number        // uniform column-width override (replaces PX_PER_DAY default)
+    colWidthMap?: Record<string, number>  // per-column override keyed by YYYY-MM-DD
+  } = {},
 ): HeaderRows {
   const showWeekends = opts.showWeekends ?? true
   const weekLabels   = opts.weekLabels   ?? 'range'
+  const colWidthMap  = opts.colWidthMap  ?? {}
+
+  // Helper: resolve width for a specific column (individual override > uniform override > default)
+  function colPx(defaultPxPerDay: number, dateKey?: string): number {
+    if (dateKey && colWidthMap[dateKey] != null) return colWidthMap[dateKey]
+    return opts.pxPerDayOverride ?? defaultPxPerDay
+  }
 
   switch (timescale) {
 
     // ── Days ──────────────────────────────────────────────────────────────────
     case 'days': {
-      const pxDay = PX_PER_DAY.days
+      const pxDay = opts.pxPerDayOverride ?? PX_PER_DAY.days
       const midRow: DateColumn[] = []
       const weekendCols: WeekendCol[] = []
 
@@ -289,19 +302,22 @@ export function getHeaderRows(
           continue
         }
 
-        const dayPx = dateToPxRaw(cur, viewStart, pxDay)  // raw offset ignoring weekend hiding
+        const dateKey = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`
+        const thisPx = colPx(pxDay, dateKey)
+        const dayPx0 = dateToPxRaw(cur, viewStart, pxDay)  // raw offset ignoring weekend hiding
         if (isWeekend) {
-          weekendCols.push({ startPx: dayPx, widthPx: pxDay })
+          weekendCols.push({ startPx: dayPx0, widthPx: thisPx })
         }
 
         const next = addDays(cur, 1)
         midRow.push({
-          label: `${DAY_SHORT[dow]} ${cur.getDate()}`,
+          label: DAY_SHORT[dow],
+          subLabel: String(cur.getDate()),
           startDate: new Date(cur),
           endDate: next,
-          widthPx: pxDay,
+          widthPx: thisPx,
         })
-        pxOffset += pxDay
+        pxOffset += thisPx
         cur = next
       }
 
@@ -313,8 +329,7 @@ export function getHeaderRows(
 
     // ── Weeks ─────────────────────────────────────────────────────────────────
     case 'weeks': {
-      const pxDay = PX_PER_DAY.weeks
-      const pxWeek = 7 * pxDay
+      const pxDayDefault = PX_PER_DAY.weeks
       const midRow: DateColumn[] = []
 
       let cur = startOfWeek(viewStart)
@@ -322,6 +337,8 @@ export function getHeaderRows(
         const weekEnd = addDays(cur, 7)
         const dispStart = cur < viewStart ? viewStart : cur
         const dispEnd   = weekEnd > viewEnd ? viewEnd : weekEnd
+        const dateKey = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`
+        const thisPx = colPx(pxDayDefault * 7, dateKey)
 
         let label: string
         if (weekLabels === 'number') {
@@ -335,7 +352,7 @@ export function getHeaderRows(
           label,
           startDate: dispStart,
           endDate: dispEnd,
-          widthPx: pxWeek,
+          widthPx: thisPx,
         })
         cur = weekEnd
       }
@@ -348,8 +365,7 @@ export function getHeaderRows(
 
     // ── Months ────────────────────────────────────────────────────────────────
     case 'months': {
-      const pxDay = PX_PER_DAY.months
-      const pxWeek = 7 * pxDay
+      const pxDayDefault = PX_PER_DAY.months
       const midRow: DateColumn[] = []
 
       // midRow: week start dates within the view
@@ -358,11 +374,13 @@ export function getHeaderRows(
         const weekEnd = addDays(cur, 7)
         const dispStart = cur < viewStart ? viewStart : cur
         const dispEnd   = weekEnd > viewEnd ? viewEnd : weekEnd
+        const dateKey = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`
+        const thisPx = colPx(pxDayDefault * 7, dateKey)
         midRow.push({
           label: fmtDMon(dispStart),
           startDate: dispStart,
           endDate: dispEnd,
-          widthPx: pxWeek,
+          widthPx: thisPx,
         })
         cur = weekEnd
       }
@@ -375,7 +393,7 @@ export function getHeaderRows(
 
     // ── Quarters ──────────────────────────────────────────────────────────────
     case 'quarters': {
-      const pxDay = PX_PER_DAY.quarters
+      const pxDayDefault = PX_PER_DAY.quarters
       const midRow: DateColumn[] = []
       const topRow: DateColumn[] = []
 
@@ -385,27 +403,30 @@ export function getHeaderRows(
         const next = new Date(cur.getFullYear(), cur.getMonth() + 1, 1)
         const clampStart = cur < viewStart ? viewStart : cur
         const clampEnd   = next > viewEnd ? viewEnd : next
+        const dateKey = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-01`
+        const thisPxPerDay = (colWidthMap[dateKey] != null ? colWidthMap[dateKey] / diffDays(clampStart, clampEnd) : (opts.pxPerDayOverride ?? pxDayDefault))
         midRow.push({
           label: MONTH_SHORT[cur.getMonth()],
           startDate: clampStart,
           endDate: clampEnd,
-          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+          widthPx: diffDays(clampStart, clampEnd) * thisPxPerDay,
         })
         cur = next
       }
 
-      // topRow: one entry per quarter
+      // topRow: one entry per quarter — sum up midRow widths
       let qCur = startOfQuarter(viewStart)
       while (qCur < viewEnd) {
         const qNext = new Date(qCur.getFullYear(), qCur.getMonth() + 3, 1)
         const clampStart = qCur < viewStart ? viewStart : qCur
         const clampEnd   = qNext > viewEnd ? viewEnd : qNext
+        const qWidth = midRow.filter(c => c.startDate >= clampStart && c.startDate < clampEnd).reduce((s,c) => s + c.widthPx, 0) || diffDays(clampStart, clampEnd) * (opts.pxPerDayOverride ?? pxDayDefault)
 
         let label: string
         if (yearMode === 'financial') {
           const fyq = fyQuarter(qCur)
-          const fyqStarts = [6, 9, 0, 3]  // Jul,Oct,Jan,Apr
-          const fyqEnds   = [8, 11, 2, 5] // Sep,Dec,Mar,Jun
+          const fyqStarts = [6, 9, 0, 3]
+          const fyqEnds   = [8, 11, 2, 5]
           const sm = fyqStarts[fyq - 1]
           const em = fyqEnds[fyq - 1]
           label = `FYQ${fyq} (${MONTH_SHORT[sm]}–${MONTH_SHORT[em]})`
@@ -419,7 +440,7 @@ export function getHeaderRows(
           label,
           startDate: clampStart,
           endDate: clampEnd,
-          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+          widthPx: qWidth,
         })
         qCur = qNext
       }
@@ -429,7 +450,7 @@ export function getHeaderRows(
 
     // ── Years ─────────────────────────────────────────────────────────────────
     case 'years': {
-      const pxDay = PX_PER_DAY.years
+      const pxDayDefault = PX_PER_DAY.years
       const midRow: DateColumn[] = []
       const topRow: DateColumn[] = []
 
@@ -439,6 +460,8 @@ export function getHeaderRows(
         const next = new Date(cur.getFullYear(), cur.getMonth() + 3, 1)
         const clampStart = cur < viewStart ? viewStart : cur
         const clampEnd   = next > viewEnd ? viewEnd : next
+        const dateKey = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-01`
+        const thisPxPerDay = (colWidthMap[dateKey] != null ? colWidthMap[dateKey] / diffDays(clampStart, clampEnd) : (opts.pxPerDayOverride ?? pxDayDefault))
 
         let label: string
         if (yearMode === 'financial') {
@@ -458,7 +481,7 @@ export function getHeaderRows(
           label,
           startDate: clampStart,
           endDate: clampEnd,
-          widthPx: diffDays(clampStart, clampEnd) * pxDay,
+          widthPx: diffDays(clampStart, clampEnd) * thisPxPerDay,
         })
         cur = next
       }
@@ -477,11 +500,12 @@ export function getHeaderRows(
           }
         }
         for (const [fy, g] of [...groups].sort((a, b) => a[0] - b[0])) {
+          const fyWidth = midRow.filter(c => fyYear(c.startDate) === fy).reduce((s,c) => s + c.widthPx, 0)
           topRow.push({
             label: `FY${fy}`,
             startDate: g.start,
             endDate: g.end,
-            widthPx: diffDays(g.start, g.end) * pxDay,
+            widthPx: fyWidth || diffDays(g.start, g.end) * pxDayDefault,
           })
         }
       } else {
@@ -496,11 +520,12 @@ export function getHeaderRows(
           }
         }
         for (const [yr, g] of [...groups].sort((a, b) => a[0] - b[0])) {
+          const yrWidth = midRow.filter(c => c.startDate.getFullYear() === yr).reduce((s,c) => s + c.widthPx, 0)
           topRow.push({
             label: String(yr),
             startDate: g.start,
             endDate: g.end,
-            widthPx: diffDays(g.start, g.end) * pxDay,
+            widthPx: yrWidth || diffDays(g.start, g.end) * pxDayDefault,
           })
         }
       }

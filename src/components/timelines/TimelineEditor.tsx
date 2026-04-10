@@ -2,7 +2,7 @@ import { useRef, useState, useCallback, useEffect } from 'react'
 import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale, YearMode, TimelineSubItem, FreezePeriod } from '../../types'
 import { uid } from '../../lib/utils'
 import {
-  parseDate, formatDate, dateToPx, pxToDate, snapDate, getColumns,
+  parseDate, formatDate, snapDate, getColumns,
   PX_PER_DAY, addDays, getHeaderRows, diffDays,
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
@@ -22,7 +22,7 @@ const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
 const SUB_RULER_H    = 24   // sub-timescale row height (below major ticks)
 const DBL_MAJOR_H    = 22   // top group row (always shown)
-const DBL_MINOR_H    = 26   // major tick row (always shown below group row)
+const DBL_MINOR_H    = 36   // major tick row (tall enough for two-line day labels)
 const MILESTONE_R    = 7
 const MIN_BAR_W      = 4
 const MIN_DRAW_PX    = 4
@@ -91,18 +91,19 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
   const yearMode  = timeline.yearMode ?? 'calendar'
   const showWeekends = timeline.showWeekends ?? true
   const weekLabels   = timeline.weekLabels   ?? 'range'
+  const colWidthMap  = timeline.colWidthMap  ?? {}
 
   // New header row system
   const { topRow: dblGroups, midRow: tickCols, weekendCols } = getHeaderRows(
     viewStart, viewEnd, timeline.timescale, yearMode,
-    { showWeekends, weekLabels },
+    { showWeekends, weekLabels, pxPerDayOverride: timeline.colWidth, colWidthMap },
   )
 
   // Sub-timescale minor row (unchanged)
   const { minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
 
-  // Total canvas width: always based on full date range (weekends excluded from column rendering but not from width)
-  const totalWidthPx = diffDays(viewStart, viewEnd) * PX_PER_DAY[timeline.timescale]
+  // Total canvas width: sum of all mid-row column widths (respects per-column and uniform overrides)
+  const totalWidthPx = tickCols.reduce((s, c) => s + c.widthPx, 0) || diffDays(viewStart, viewEnd) * PX_PER_DAY[timeline.timescale]
 
   // Task buckets for linking
   const taskBuckets = useAppStore(s => s.taskBuckets)
@@ -158,6 +159,9 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
   // Table view
   const [showTable, setShowTable] = useState(false)
 
+  // Column resize drag (individual column width)
+  const colResizeDragRef = useRef<{ dateKey: string; startX: number; startWidth: number } | null>(null)
+
   // Stable refs so window listeners always call latest handler
   const onPointerMoveRef = useRef<(e: PointerEvent) => void>(() => {})
   const onPointerUpRef   = useRef<(e: PointerEvent) => void>(() => {})
@@ -167,10 +171,10 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
   const [tapPopover, setTapPopover] = useState<TapPopover | null>(null)
 
   const todayDate = new Date()
-  const todayPx   = dateToPx(todayDate, viewStart, timeline.timescale)
+  const todayPx   = dateToPxVar(todayDate)
   const periodBounds = currentPeriodBounds(timeline.timescale)
-  const periodX1 = dateToPx(periodBounds.start, viewStart, timeline.timescale)
-  const periodX2 = dateToPx(periodBounds.end,   viewStart, timeline.timescale)
+  const periodX1 = dateToPxVar(periodBounds.start)
+  const periodX2 = dateToPxVar(periodBounds.end)
 
   const update = useCallback((patch: Partial<Timeline>) => { onChange({ ...timeline, ...patch }) }, [timeline, onChange])
 
@@ -187,16 +191,41 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
     }
   }, [dragging])
 
+  // ── Column-aware px ↔ date (respects variable column widths) ─────────────
+  // Build cumulative px offsets from tickCols for O(n) lookup
+  function dateToPxVar(date: Date): number {
+    let px = 0
+    for (const col of tickCols) {
+      if (date <= col.startDate) break
+      if (date >= col.endDate) { px += col.widthPx; continue }
+      // date is within this column — interpolate
+      const frac = diffDays(col.startDate, date) / diffDays(col.startDate, col.endDate)
+      px += frac * col.widthPx
+      break
+    }
+    return px
+  }
+  function pxToDateVar(px: number): Date {
+    let remaining = px
+    for (const col of tickCols) {
+      if (remaining <= col.widthPx) {
+        const frac = remaining / col.widthPx
+        const days = Math.round(frac * diffDays(col.startDate, col.endDate))
+        return addDays(col.startDate, days)
+      }
+      remaining -= col.widthPx
+    }
+    return viewEnd
+  }
+
   // ── Coordinate helpers ────────────────────────────────────────────────────
   function clientXToCanvasX(clientX: number) {
-    // getBoundingClientRect().left already reflects current scroll position (visual coords),
-    // so do NOT add scrollLeft — that would double-count horizontal scroll offset
     return clientX - (canvasRef.current?.getBoundingClientRect().left ?? 0)
   }
-  function canvasXToDate(canvasX: number) { return pxToDate(canvasX - labelWidth, viewStart, timeline.timescale) }
-  function itemX(item: TimelineItem | TimelineSubItem) { return dateToPx(parseDate(item.startDate), viewStart, timeline.timescale) }
+  function canvasXToDate(canvasX: number) { return pxToDateVar(canvasX - labelWidth) }
+  function itemX(item: TimelineItem | TimelineSubItem) { return dateToPxVar(parseDate(item.startDate)) }
   function itemW(item: TimelineItem | TimelineSubItem) {
-    return Math.max(dateToPx(parseDate(item.endDate), viewStart, timeline.timescale) - dateToPx(parseDate(item.startDate), viewStart, timeline.timescale), MIN_BAR_W)
+    return Math.max(dateToPxVar(parseDate(item.endDate)) - dateToPxVar(parseDate(item.startDate)), MIN_BAR_W)
   }
 
   // ── Bar drag ──────────────────────────────────────────────────────────────
@@ -243,8 +272,8 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
     if (drag.kind === 'draw') {
       const canvasX = clientXToCanvasX(e.clientX)
       const curDate  = snapDate(canvasXToDate(canvasX), timeline.timescale)
-      const anchorPx = dateToPx(drag.anchorDate, viewStart, timeline.timescale)
-      const curPx    = dateToPx(curDate, viewStart, timeline.timescale)
+      const anchorPx = dateToPxVar(drag.anchorDate)
+      const curPx    = dateToPxVar(curDate)
       const left  = Math.min(anchorPx, curPx)
       const right = Math.max(anchorPx, curPx)
       setGhost({ laneId: drag.laneId, left, width: right - left,
@@ -254,9 +283,10 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
       return
     }
 
-    // Bar / sub drag
-    const pxPerDay = PX_PER_DAY[timeline.timescale]
-    const daysDelta = Math.round((e.clientX - drag.startClientX) / pxPerDay)
+    // Bar / sub drag — derive effective px-per-day at drag origin for delta conversion
+    const origPx = dateToPxVar(drag.origStart)
+    const oneDayPx = dateToPxVar(addDays(drag.origStart, 1)) - origPx || PX_PER_DAY[timeline.timescale]
+    const daysDelta = Math.round((e.clientX - drag.startClientX) / oneDayPx)
 
     // Cross-lane: detect which lane the pointer is over (only for 'move')
     if (drag.kind === 'move' && !drag.subId) {
@@ -633,6 +663,33 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
           </div>
         )}
 
+        {/* Column width slider (uniform) */}
+        <div className="flex items-center gap-1.5 border border-slate-200 rounded-lg px-2 py-1 bg-white">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none" className="text-slate-400 flex-shrink-0">
+            <rect x="0" y="3" width="10" height="4" rx="1" fill="currentColor" opacity="0.4"/>
+            <rect x="2" y="1" width="6" height="8" rx="1" stroke="currentColor" strokeWidth="1.2"/>
+          </svg>
+          <input
+            type="range"
+            min={Math.round(PX_PER_DAY[timeline.timescale] * 0.25)}
+            max={Math.round(PX_PER_DAY[timeline.timescale] * 4)}
+            step={1}
+            value={timeline.colWidth ?? PX_PER_DAY[timeline.timescale]}
+            onChange={e => update({ colWidth: Number(e.target.value), colWidthMap: {} })}
+            className="w-20 accent-indigo-500 cursor-pointer"
+            title="Column width"
+          />
+          {timeline.colWidth != null && (
+            <button
+              type="button"
+              onClick={() => update({ colWidth: undefined, colWidthMap: {} })}
+              className="text-[10px] text-slate-400 hover:text-slate-600 transition-colors"
+              title="Reset column widths">
+              ↺
+            </button>
+          )}
+        </div>
+
         <div className="flex-1" />
 
         {/* Freeze period */}
@@ -719,11 +776,39 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
                 {tickCols.map((col,i) => {
                   const isWeekendDay = timeline.timescale === 'days' && showWeekends &&
                     (col.startDate.getDay() === 0 || col.startDate.getDay() === 6)
+                  const dateKey = formatDate(col.startDate)
+                  const isDays = timeline.timescale === 'days'
                   return (
-                    <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx,
+                    <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx, position:'relative',
                       backgroundColor: isWeekendDay ? 'rgb(248 250 252)' : undefined }}
-                      className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
-                      <span className="text-[11px] font-semibold text-slate-600 whitespace-nowrap">{col.label}</span>
+                      className="flex-shrink-0 border-r border-slate-100 overflow-hidden">
+                      {/* Label — two-line for days, single-line otherwise */}
+                      <div className={`flex ${isDays ? 'flex-col items-center justify-center' : 'items-center px-1.5'} h-full`}>
+                        <span className={`${isDays ? 'text-[9px]' : 'text-[11px]'} font-semibold text-slate-500 whitespace-nowrap leading-tight`}>{col.label}</span>
+                        {col.subLabel && <span className="text-[11px] font-bold text-slate-700 whitespace-nowrap leading-tight">{col.subLabel}</span>}
+                      </div>
+                      {/* Per-column resize handle */}
+                      <div
+                        style={{ position:'absolute', right:0, top:0, bottom:0, width:5, cursor:'col-resize', touchAction:'none', zIndex:10 }}
+                        className="hover:bg-indigo-400/30 active:bg-indigo-400/50 transition-colors"
+                        onPointerDown={e => {
+                          e.stopPropagation(); e.preventDefault()
+                          colResizeDragRef.current = { dateKey, startX: e.clientX, startWidth: col.widthPx }
+                          const onMove = (me: PointerEvent) => {
+                            const drag = colResizeDragRef.current
+                            if (!drag) return
+                            const newW = Math.max(12, drag.startWidth + (me.clientX - drag.startX))
+                            update({ colWidthMap: { ...colWidthMap, [drag.dateKey]: Math.round(newW) } })
+                          }
+                          const onUp = () => {
+                            colResizeDragRef.current = null
+                            window.removeEventListener('pointermove', onMove)
+                            window.removeEventListener('pointerup', onUp)
+                          }
+                          window.addEventListener('pointermove', onMove)
+                          window.addEventListener('pointerup', onUp)
+                        }}
+                      />
                     </div>
                   )
                 })}
@@ -763,8 +848,8 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
                   if (predLaneIdx < 0 || itemLaneIdx < 0) return null
                   const predY = laneYOffset(predLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
                   const itemY = laneYOffset(itemLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
-                  const x1 = labelWidth + dateToPx(parseDate(pred.endDate), viewStart, timeline.timescale)
-                  const x2 = labelWidth + dateToPx(parseDate(item.startDate), viewStart, timeline.timescale)
+                  const x1 = labelWidth + dateToPxVar(parseDate(pred.endDate))
+                  const x2 = labelWidth + dateToPxVar(parseDate(item.startDate))
                   const mx = x1 + Math.max(8, (x2 - x1) * 0.5)
                   return (
                     <g key={`${predId}->${item.id}`}>
@@ -806,8 +891,8 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
 
             {/* Freeze periods */}
             {freezePeriods.map(fp => {
-              const fx1 = labelWidth + dateToPx(parseDate(fp.startDate), viewStart, timeline.timescale)
-              const fx2 = labelWidth + dateToPx(parseDate(fp.endDate),   viewStart, timeline.timescale)
+              const fx1 = labelWidth + dateToPxVar(parseDate(fp.startDate))
+              const fx2 = labelWidth + dateToPxVar(parseDate(fp.endDate))
               if (fx2 <= labelWidth || fx1 >= labelWidth + totalWidthPx) return null
               const left  = Math.max(labelWidth, fx1)
               const right = Math.min(labelWidth + totalWidthPx, fx2)
@@ -832,7 +917,7 @@ export default function TimelineEditor({ timeline, onChange, ganttRef }: Props) 
 
             {/* Milestones */}
             {timeline.milestones.map(m => {
-              const mx = labelWidth + dateToPx(parseDate(m.date), viewStart, timeline.timescale)
+              const mx = labelWidth + dateToPxVar(parseDate(m.date))
               return (
                 <div key={m.id} style={{ position:'absolute', left:mx-MILESTONE_R, top:0, width:MILESTONE_R*2, height:totalCanvasH, zIndex:10, pointerEvents:'none' }}>
                   <div style={{ position:'absolute', left:MILESTONE_R-0.5, top:0, bottom:0, width:1, backgroundColor:m.color, opacity:0.35 }} />
