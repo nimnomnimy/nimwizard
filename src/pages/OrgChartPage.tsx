@@ -192,6 +192,7 @@ export default function OrgChartPage() {
       hitPath.setAttribute('stroke-width', '16')
       hitPath.setAttribute('fill', 'none')
       hitPath.setAttribute('cursor', 'pointer')
+      hitPath.setAttribute('pointer-events', 'stroke')
       hitPath.style.cursor = 'pointer'
       hitPath.addEventListener('click', e => {
         e.stopPropagation()
@@ -625,9 +626,8 @@ export default function OrgChartPage() {
             {/* Dot grid canvas */}
             <canvas ref={canvasRef} className="absolute inset-0 pointer-events-none" />
 
-            {/* SVG connections layer */}
-            <svg ref={svgRef} className="absolute inset-0 pointer-events-none overflow-visible"
-              style={{ pointerEvents: 'none' }} />
+            {/* SVG connections layer — pointer-events on so hit paths are clickable */}
+            <svg ref={svgRef} className="absolute inset-0 overflow-visible" />
 
             {/* Empty state */}
             {visibleContacts.length === 0 && (
