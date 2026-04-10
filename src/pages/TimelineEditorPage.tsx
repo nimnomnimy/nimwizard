@@ -134,7 +134,7 @@ export default function TimelineEditorPage() {
       let result: { items: typeof timeline.items; milestones: typeof timeline.milestones }
       if (file.name.endsWith('.xlsx')) {
         const buffer = await file.arrayBuffer()
-        result = importTimelineFromXLSX(buffer, timeline.swimLanes)
+        result = await importTimelineFromXLSX(buffer, timeline.swimLanes)
       } else {
         const text = await readFileText(file)
         result = importTimelineFromCSV(text, timeline.swimLanes)
