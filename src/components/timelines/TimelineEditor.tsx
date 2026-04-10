@@ -3,7 +3,7 @@ import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale
 import { uid } from '../../lib/utils'
 import {
   parseDate, formatDate, dateToPx, pxToDate, snapDate, getColumns,
-  PX_PER_DAY, addDays, fyYear,
+  PX_PER_DAY, addDays, getGroupLabel, getGroupKey,
 } from './utils/dateLayout'
 import ItemDrawer from './ItemDrawer'
 import SubTaskDrawer from '../tasks/SubTaskDrawer'
@@ -19,10 +19,10 @@ const LANE_HEIGHT    = LANE_HEADER_H
 const DEFAULT_LABEL_W = 180
 const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
-const RULER_H        = 36
-const SUB_RULER_H    = 24
-const DBL_MAJOR_H    = 22   // major row height when headerMode='double'
-const DBL_MINOR_H    = 24   // minor row height when headerMode='double'
+const RULER_H        = 36   // minor tick row height
+const SUB_RULER_H    = 24   // sub-timescale row height (below major ticks)
+const DBL_MAJOR_H    = 22   // top group row (always shown)
+const DBL_MINOR_H    = 26   // major tick row (always shown below group row)
 const MILESTONE_R    = 7
 const MIN_BAR_W      = 4
 const MIN_DRAW_PX    = 4
@@ -43,7 +43,8 @@ interface Props { timeline: Timeline; onChange: (t: Timeline) => void }
 interface BarDrag {
   kind: 'move' | 'resize-left' | 'resize-right'
   itemId: string; subId?: string
-  startClientX: number; origStart: Date; origEnd: Date
+  origLaneId: string
+  startClientX: number; startClientY: number; origStart: Date; origEnd: Date
 }
 interface DrawDrag {
   kind: 'draw'
@@ -76,6 +77,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const scrollRef  = useRef<HTMLDivElement>(null)
   const canvasRef  = useRef<HTMLDivElement>(null)
   const dragRef    = useRef<ActiveDrag | null>(null)
+  // Maps laneId → canvas-relative Y bounds (top inclusive, bottom exclusive)
+  const laneBoundsRef = useRef<Map<string, { top: number; bottom: number }>>(new Map())
 
   const labelWidth = timeline.labelWidth ?? DEFAULT_LABEL_W
 
@@ -85,36 +88,18 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   const { major, minor } = getColumns(viewStart, viewEnd, timeline.timescale, timeline.subTimescale, yearMode)
   const totalWidthPx = major.reduce((s,c) => s + c.widthPx, 0)
 
-  // ── Double-header: group major columns under a parent label ───────────────
-  // weeks → group by "Month Year"; months → group by "Year"; quarters → group by "Year"
-  // days → group by "Month Year"; years → no grouping (show nothing above)
-  const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December']
+  // ── Top-row groups: bucket adjacent major columns under a shared label ──────
   interface HeaderGroup { label: string; widthPx: number }
   const dblGroups: HeaderGroup[] = (() => {
     if (!major.length) return []
-    const getGroupKey = (col: { startDate: Date }): string => {
-      const d = col.startDate
-      switch (timeline.timescale) {
-        case 'days':
-        case 'weeks':
-          return `${MONTH_NAMES[d.getMonth()]} ${d.getFullYear()}`
-        case 'months':
-          return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
-        case 'quarters':
-          return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
-        case 'years':
-          return ''  // no grouping for years
-      }
-    }
     const groups: HeaderGroup[] = []
-    let curKey = ''
-    let curLabel = ''
-    let curWidth = 0
+    let curKey = ''; let curLabel = ''; let curWidth = 0
     for (const col of major) {
-      const key = getGroupKey(col)
+      const key   = getGroupKey(col.startDate, timeline.timescale, yearMode)
+      const label = getGroupLabel(col.startDate, timeline.timescale, yearMode)
       if (key !== curKey) {
         if (curWidth > 0) groups.push({ label: curLabel, widthPx: curWidth })
-        curKey = key; curLabel = key; curWidth = 0
+        curKey = key; curLabel = label; curWidth = 0
       }
       curWidth += col.widthPx
     }
@@ -156,8 +141,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     })
   }
 
-  // Header mode
-  const headerMode = timeline.headerMode ?? 'single'
+  // Cross-lane drag target
+  const [dragTargetLaneId, setDragTargetLaneId] = useState<string | null>(null)
 
   // Drawer
   const [drawerOpen,       setDrawerOpen]       = useState(false)
@@ -198,12 +183,14 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   }
 
   // ── Bar drag ──────────────────────────────────────────────────────────────
-  function startBarDrag(e: React.PointerEvent, item: TimelineItem | TimelineSubItem, kind: BarDrag['kind'], parentId?: string) {
+  function startBarDrag(e: React.PointerEvent, item: TimelineItem | TimelineSubItem, kind: BarDrag['kind'], parentId?: string, laneId?: string) {
     e.stopPropagation(); e.preventDefault()
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     dragRef.current = {
       kind, itemId: parentId ?? item.id, subId: parentId ? item.id : undefined,
-      startClientX: e.clientX, origStart: parseDate(item.startDate), origEnd: parseDate(item.endDate),
+      origLaneId: laneId ?? '',
+      startClientX: e.clientX, startClientY: e.clientY,
+      origStart: parseDate(item.startDate), origEnd: parseDate(item.endDate),
     }
     setDragging(true)
   }
@@ -257,6 +244,20 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     const pxPerDay = PX_PER_DAY[timeline.timescale]
     const daysDelta = Math.round((e.clientX - drag.startClientX) / pxPerDay)
 
+    // Cross-lane: detect which lane the pointer is over (only for 'move')
+    if (drag.kind === 'move' && !drag.subId) {
+      const canvasTop = canvasRef.current?.getBoundingClientRect().top ?? 0
+      const scrollTop = scrollRef.current?.scrollTop ?? 0
+      // canvasY relative to the scrollable content (not viewport)
+      const rulerH = DBL_MAJOR_H + DBL_MINOR_H + (minor ? SUB_RULER_H : 0)
+      const canvasY = e.clientY - canvasTop + scrollTop - rulerH
+      let targetId: string | null = null
+      for (const [lid, bounds] of laneBoundsRef.current) {
+        if (canvasY >= bounds.top && canvasY < bounds.bottom) { targetId = lid; break }
+      }
+      setDragTargetLaneId(targetId)
+    }
+
     if (drag.subId) {
       const items = timeline.items.map(it => {
         if (it.id !== drag.itemId) return it
@@ -303,6 +304,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     const drag = dragRef.current
     dragRef.current = null
     setDragging(false)
+    const finalTargetLaneId = dragTargetLaneId
+    setDragTargetLaneId(null)
 
     if (drag?.kind === 'draw' && ghost) {
       setGhost(null)
@@ -330,6 +333,14 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
       }
     } else {
       setGhost(null)
+      // Cross-lane drop: reassign item to target lane
+      if (drag?.kind === 'move' && !drag.subId && finalTargetLaneId && finalTargetLaneId !== drag.origLaneId) {
+        update({
+          items: timeline.items.map(it =>
+            it.id === drag.itemId ? { ...it, swimLaneId: finalTargetLaneId } : it
+          )
+        })
+      }
     }
   }
 
@@ -571,19 +582,6 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
         <div className="flex-1" />
 
-        {/* Header mode toggle */}
-        <div className="flex items-center gap-0.5 bg-slate-100 rounded-lg p-0.5" title="Toggle date header rows">
-          {(['single','double'] as const).map(m => (
-            <button key={m} type="button"
-              onClick={() => update({ headerMode: m })}
-              className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                headerMode===m ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-              }`}>
-              {m==='single' ? '—' : '≡'}
-            </button>
-          ))}
-        </div>
-
         {/* Freeze period */}
         <button
           onClick={addFreezeperiod}
@@ -607,80 +605,64 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
         onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
         <div ref={canvasRef} style={{ width: labelWidth + totalWidthPx, minWidth: '100%' }}>
 
-          {/* ── Ruler ───────────────────────────────────────────────────── */}
+          {/* ── Ruler (always double-row: group label above + major ticks below) ── */}
           <div className="sticky top-0 z-20 bg-white border-b border-slate-200">
 
-            {/* Double-header: top row groups major columns by parent period */}
-            {headerMode === 'double' && dblGroups.length > 0 && (
-              <div className="flex border-b border-slate-200">
-                <div style={{ width: labelWidth, height: DBL_MAJOR_H, flexShrink: 0 }}
-                  className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
-                  <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Lanes</span>
-                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
-                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
-                    onPointerDown={startLabelResize} />
-                </div>
-                <div className="flex relative overflow-hidden" style={{ height: DBL_MAJOR_H }}>
-                  {periodX1 < totalWidthPx && periodX2 > 0 && (
-                    <div style={{ position:'absolute', left: Math.max(0,periodX1), top:0, bottom:0,
-                      width: Math.min(totalWidthPx,periodX2)-Math.max(0,periodX1),
-                      backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
-                  )}
-                  {dblGroups.map((g,i) => (
-                    <div key={i} style={{ width: g.widthPx, minWidth: g.widthPx }}
-                      className="flex-shrink-0 border-r border-slate-200 flex items-center px-2 overflow-hidden bg-slate-50">
-                      <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap">{g.label}</span>
-                    </div>
-                  ))}
-                  {todayPx>=0 && todayPx<=totalWidthPx && (
-                    <div style={{ position:'absolute', left:todayPx, top:0, bottom:0, width:2, backgroundColor:'#6366f1', pointerEvents:'none', zIndex:5 }} />
-                  )}
-                </div>
+            {/* Top row: period group labels */}
+            <div className="flex border-b border-slate-100">
+              <div style={{ width: labelWidth, height: DBL_MAJOR_H, flexShrink: 0 }}
+                className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
+                <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
+                  className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
+                  onPointerDown={startLabelResize} />
               </div>
-            )}
-
-            {/* Major ticks row (single-header: also has Lanes label; double-header: just the tick labels) */}
-            <div className="flex">
-              {headerMode === 'single' && (
-                <div style={{ width: labelWidth, height: RULER_H, flexShrink: 0 }}
-                  className="border-r border-slate-200 bg-slate-50 flex items-center px-3 relative">
-                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Lanes</span>
-                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
-                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
-                    onPointerDown={startLabelResize} />
-                </div>
-              )}
-              {headerMode === 'double' && (
-                <div style={{ width: labelWidth, height: DBL_MINOR_H, flexShrink: 0 }}
-                  className="border-r border-slate-200 bg-slate-50 relative">
-                  <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
-                    className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
-                    onPointerDown={startLabelResize} />
-                </div>
-              )}
-              {/* Major ticks */}
-              <div className="flex relative" style={{ height: headerMode === 'double' ? DBL_MINOR_H : RULER_H }}>
-                {/* Current period highlight */}
+              <div className="flex relative overflow-hidden" style={{ height: DBL_MAJOR_H }}>
                 {periodX1 < totalWidthPx && periodX2 > 0 && (
                   <div style={{ position:'absolute', left: Math.max(0,periodX1), top:0, bottom:0,
-                    width: Math.min(totalWidthPx,periodX2) - Math.max(0,periodX1),
+                    width: Math.min(totalWidthPx,periodX2)-Math.max(0,periodX1),
                     backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
                 )}
-                {major.map((col,i) => (
-                  <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx, position:'relative' }}
-                    className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
-                    <span className={`whitespace-nowrap relative z-10 ${headerMode==='double' ? 'text-[10px] text-slate-400' : 'text-[11px] font-semibold text-slate-500'}`}>{col.label}</span>
+                {dblGroups.map((g,i) => (
+                  <div key={i} style={{ width: g.widthPx, minWidth: g.widthPx }}
+                    className="flex-shrink-0 border-r border-slate-200 flex items-center px-2 overflow-hidden bg-slate-50">
+                    <span className="text-[10px] font-bold text-slate-500 whitespace-nowrap">{g.label}</span>
                   </div>
                 ))}
-                {/* Today line on ruler */}
                 {todayPx>=0 && todayPx<=totalWidthPx && (
                   <div style={{ position:'absolute', left:todayPx, top:0, bottom:0, width:2, backgroundColor:'#6366f1', pointerEvents:'none', zIndex:5 }} />
                 )}
               </div>
             </div>
 
-            {/* Minor ticks (only in single-header mode; double-header uses major as the minor row) */}
-            {minor && headerMode === 'single' && (
+            {/* Middle row: major ticks */}
+            <div className="flex">
+              <div style={{ width: labelWidth, height: DBL_MINOR_H, flexShrink: 0 }}
+                className="border-r border-slate-200 bg-slate-50 relative">
+                <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide absolute inset-0 flex items-center px-3">Lanes</span>
+                <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
+                  className="hover:bg-blue-300/40 active:bg-blue-400/40 transition-colors"
+                  onPointerDown={startLabelResize} />
+              </div>
+              <div className="flex relative" style={{ height: DBL_MINOR_H }}>
+                {periodX1 < totalWidthPx && periodX2 > 0 && (
+                  <div style={{ position:'absolute', left: Math.max(0,periodX1), top:0, bottom:0,
+                    width: Math.min(totalWidthPx,periodX2) - Math.max(0,periodX1),
+                    backgroundColor:'rgba(99,102,241,0.08)', pointerEvents:'none', zIndex:0 }} />
+                )}
+                {major.map((col,i) => (
+                  <div key={i} style={{ width:col.widthPx, minWidth:col.widthPx }}
+                    className="flex-shrink-0 border-r border-slate-100 flex items-center px-1.5 overflow-hidden">
+                    <span className="text-[11px] font-semibold text-slate-600 whitespace-nowrap">{col.label}</span>
+                  </div>
+                ))}
+                {todayPx>=0 && todayPx<=totalWidthPx && (
+                  <div style={{ position:'absolute', left:todayPx, top:0, bottom:0, width:2, backgroundColor:'#6366f1', pointerEvents:'none', zIndex:5 }} />
+                )}
+              </div>
+            </div>
+
+            {/* Bottom row: minor ticks (optional sub-timescale) */}
+            {minor && (
               <div className="flex border-t border-slate-100">
                 <div style={{ width:labelWidth, height:SUB_RULER_H, flexShrink:0 }} className="border-r border-slate-200 bg-slate-50" />
                 <div className="flex">
@@ -789,6 +771,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
               const laneItems  = timeline.items.filter(i => i.swimLaneId===lane.id)
               const laneGhost  = ghost?.laneId===lane.id ? ghost : null
               const collapsed  = lane.collapsed
+              const isDropTarget = dragTargetLaneId === lane.id
+
+              // Register lane bounds for cross-lane hit detection
+              laneBoundsRef.current.set(lane.id, { top: laneY, bottom: laneY + laneHeight })
 
               const barItems = laneItems.filter(i => i.type === 'bar')
 
@@ -882,7 +868,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
                   {/* ── Canvas area ─────────────────────────────────────── */}
                   <div style={{ flex:1, position:'relative', cursor:'crosshair', touchAction:'none' }}
-                    className="border-b border-slate-100 bg-white"
+                    className={`border-b border-slate-100 transition-colors ${isDropTarget ? 'bg-blue-50' : 'bg-white'}`}
                     onPointerDown={e => {
                       // Auto-expand collapsed lane when user starts drawing
                       if (collapsed) toggleLane(lane.id)
@@ -934,11 +920,11 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                 borderRadius:6, backgroundColor:item.color, opacity:0.9,
                                 cursor:'grab', display:'flex', alignItems:'center', overflow:'hidden', zIndex:2,
                                 boxShadow:'0 1px 3px rgba(0,0,0,0.15)', touchAction:'none' }}
-                                onPointerDown={e=>startBarDrag(e,item,'move')}
+                                onPointerDown={e=>startBarDrag(e,item,'move',undefined,lane.id)}
                                 onClick={e=>{ e.stopPropagation(); setEditingItem(item); setEditingMilestone(null); setAddingForLane(lane.id); setDrawerOpen(true) }}>
                                 <div style={{ width:8, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                   className="hover:bg-black/10"
-                                  onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-left') }} />
+                                  onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-left',undefined,lane.id) }} />
                                 {item.progress>0 && (
                                   <div style={{ position:'absolute', left:0, top:0, bottom:0, width:`${item.progress}%`,
                                     backgroundColor:'rgba(0,0,0,0.18)', borderRadius:6, pointerEvents:'none' }} />
@@ -953,7 +939,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                                 </span>
                                 <div style={{ width:8, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
                                   className="hover:bg-black/10"
-                                  onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-right') }} />
+                                  onPointerDown={e=>{ e.stopPropagation(); startBarDrag(e,item,'resize-right',undefined,lane.id) }} />
                               </div>
 
                               {/* Sub-item bars — each on its own row */}

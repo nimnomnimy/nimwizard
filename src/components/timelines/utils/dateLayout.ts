@@ -156,6 +156,68 @@ export function fyQuarter(d: Date): number {
   return 4
 }
 
+/** Top-row group label for a given major column's start date.
+ *  days   → "Jan 2025"  (shown above individual day numbers)
+ *  weeks  → "January 2025"  (shown above week columns)
+ *  months → "Q1 · Jan–Mar" / "FYQ1 · Jul–Sep"
+ *  quarters → "2025" / "FY2025"
+ *  years  → "Jan–Dec 2025" / "Jul–Jun FY2025"
+ */
+export function getGroupLabel(
+  d: Date,
+  timescale: Timescale,
+  yearMode: YearMode = 'calendar',
+): string {
+  switch (timescale) {
+    case 'days':
+      return `${MONTH_SHORT[d.getMonth()]} ${d.getFullYear()}`
+    case 'weeks':
+      return `${MONTH_LONG[d.getMonth()]} ${d.getFullYear()}`
+    case 'months': {
+      const q = Math.floor(d.getMonth() / 3)
+      const fyq = fyQuarter(d)
+      const qStart = yearMode === 'financial'
+        ? [6, 9, 0, 3][fyq - 1]   // Jul,Oct,Jan,Apr (0-indexed months)
+        : q * 3
+      const qEnd = (qStart + 2 + 12) % 12
+      if (yearMode === 'financial') {
+        return `FYQ${fyq} · ${MONTH_SHORT[qStart]}–${MONTH_SHORT[qEnd]}`
+      }
+      const qLabel = `Q${q + 1}`
+      const startM = q * 3
+      const endM   = startM + 2
+      return `${qLabel} · ${MONTH_SHORT[startM]}–${MONTH_SHORT[endM]}`
+    }
+    case 'quarters':
+      return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
+    case 'years': {
+      if (yearMode === 'financial') {
+        const fy = fyYear(d)
+        return `FY${fy} · Jul–Jun`
+      }
+      return `${d.getFullYear()} · Jan–Dec`
+    }
+  }
+}
+
+/** Group key used to bucket adjacent major columns under the same top-row label */
+export function getGroupKey(d: Date, timescale: Timescale, yearMode: YearMode = 'calendar'): string {
+  switch (timescale) {
+    case 'days':
+    case 'weeks':
+      return `${d.getFullYear()}-${d.getMonth()}`
+    case 'months': {
+      const q = Math.floor(d.getMonth() / 3)
+      if (yearMode === 'financial') return `${fyYear(d)}-${fyQuarter(d)}`
+      return `${d.getFullYear()}-Q${q}`
+    }
+    case 'quarters':
+      return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
+    case 'years':
+      return yearMode === 'financial' ? `FY${fyYear(d)}` : String(d.getFullYear())
+  }
+}
+
 function formatLabel(d: Date, scale: Timescale | NonNullable<SubTimescale>, yearMode: YearMode = 'calendar'): string {
   switch (scale) {
     case 'days':     return String(d.getDate())
