@@ -97,7 +97,13 @@ function computeTreeLayout(
     }
     if (style === 'two-column') {
       const rows = Math.ceil(node.children.length / 2)
-      return NODE_H + vGap + rows * (NODE_H + vGap) - vGap
+      let totalChildH = 0
+      for (let r = 0; r < rows; r++) {
+        const pair = node.children.slice(r * 2, r * 2 + 2)
+        const rowH = Math.max(...pair.map((c: any) => subtreeHeight(c)))
+        totalChildH += rowH + (r < rows - 1 ? vGap : 0)
+      }
+      return NODE_H + vGap + totalChildH
     }
     // tree / staggered — height is parent + gap + tallest child subtree
     const maxChildH = Math.max(...node.children.map((c: any) => subtreeHeight(c)))
@@ -133,18 +139,26 @@ function computeTreeLayout(
       // Two columns of children below parent, children pair up left-right
       const totalW = NODE_W * 2 + hGap
       const startX = centerX - totalW / 2 + NODE_W / 2
-      node.children.forEach((child: any, i: number) => {
-        const col = i % 2
-        const row = Math.floor(i / 2)
-        const cx = startX + col * (NODE_W + hGap)
-        layout(child, cx, childY + row * (NODE_H + vGap))
-      })
+      const rows = Math.ceil(node.children.length / 2)
+      let rowY = childY
+      for (let r = 0; r < rows; r++) {
+        const pair = node.children.slice(r * 2, r * 2 + 2)
+        pair.forEach((child: any, col: number) => {
+          const cx = startX + col * (NODE_W + hGap)
+          layout(child, cx, rowY)
+        })
+        const rowH = Math.max(...pair.map((c: any) => subtreeHeight(c)))
+        rowY += rowH + vGap
+      }
     } else if (style === 'staggered') {
+      // Only stagger if ALL children are leaves; otherwise fall back to tree to avoid
+      // siblings appearing at the same Y as another sibling's children.
+      const anyHasChildren = node.children.some((c: any) => c.children.length > 0)
       const totalW = node.children.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (node.children.length - 1)
       let cx = centerX - totalW / 2
       node.children.forEach((child: any, i: number) => {
         const sw = subtreeWidth(child)
-        const staggerY = childY + (i % 2) * Math.round(NODE_H * 0.4 + vGap * 0.3)
+        const staggerY = anyHasChildren ? childY : childY + (i % 2) * Math.round(NODE_H * 0.4 + vGap * 0.3)
         layout(child, cx + sw / 2, staggerY)
         cx += sw + hGap
       })
