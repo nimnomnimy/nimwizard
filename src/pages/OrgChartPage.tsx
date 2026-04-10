@@ -239,6 +239,10 @@ export default function OrgChartPage() {
 
   // Per-connection midpoint offsets (peer/dotted lines only)
   const lineOffsetsRef = useRef<Record<string, number>>({})
+  // Per-parent bus offsets — user can drag to shift the horizontal/vertical bus arm
+  const [busOffsets, setBusOffsets] = useState<Record<string, number>>({})
+  const busOffsetsRef = useRef<Record<string, number>>({})
+  useEffect(() => { busOffsetsRef.current = busOffsets }, [busOffsets])
 
   // Drag refs
   const areaRef   = useRef<HTMLDivElement>(null)
@@ -399,7 +403,7 @@ export default function OrgChartPage() {
         if (c) updateContact({ ...c, parentId: undefined })
       }
 
-      // ── Column styles: exit parent side-center, vertical bus, stubs to child side-centers ──
+      // ── Column styles: exit parent side-center → fixed bus X in the h-gap → stubs to child side-centers ──
       if (effectiveStyle === 'right-column' || effectiveStyle === 'left-column') {
         const isRight  = effectiveStyle === 'right-column'
         const parExitX = isRight ? par.x + par.w : par.x
@@ -408,16 +412,15 @@ export default function OrgChartPage() {
         const childRects = regularIds.map(id => ({ id, r: getRect(id) })).filter(x => x.r) as { id: string; r: NonNullable<ReturnType<typeof getRect>> }[]
 
         if (childRects.length > 0) {
-          // Bus X is MIN_STUB away from the nearest child edge
-          const nearestChildEdgeX = isRight
-            ? Math.min(...childRects.map(x => x.r.x))
-            : Math.max(...childRects.map(x => x.r.x + x.r.w))
-          const busX = isRight ? nearestChildEdgeX - MIN_STUB : nearestChildEdgeX + MIN_STUB
+          // Bus X sits at midpoint of the horizontal gap (hGap/2 from parent edge), user-adjustable
+          const busOffset = busOffsetsRef.current[parentId] ?? 0
+          const baseBusX  = isRight ? parExitX + hGap / 2 : parExitX - hGap / 2
+          const busX      = baseBusX + busOffset
 
-          // Horizontal trunk: parent exit → bus column
+          // Horizontal trunk: parent exit → bus X
           ;(svg as SVGSVGElement).appendChild(makePath(`M ${parExitX} ${parMidY} L ${busX} ${parMidY}`, lineColor))
 
-          // Vertical bus spanning all children mid-Y
+          // Vertical bus: spans all child mid-Y values
           const childMidYs = childRects.map(x => x.r.y + x.r.h / 2)
           const busTop    = Math.min(parMidY, ...childMidYs)
           const busBottom = Math.max(parMidY, ...childMidYs)
@@ -425,7 +428,7 @@ export default function OrgChartPage() {
             ;(svg as SVGSVGElement).appendChild(makePath(`M ${busX} ${busTop} L ${busX} ${busBottom}`, lineColor))
           }
 
-          // Stubs: busX → child near-edge at mid-Y (always at least MIN_STUB long)
+          // Stubs: busX → each child near-edge at mid-Y
           childRects.forEach(({ id: childId, r: ch }) => {
             const childMidY  = ch.y + ch.h / 2
             const childEdgeX = isRight ? ch.x : ch.x + ch.w
@@ -433,6 +436,27 @@ export default function OrgChartPage() {
             const vis = makePath(d, lineColor)
             ;(svg as SVGSVGElement).appendChild(vis)
             ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+          })
+
+          // Draggable bus handle on the trunk (horizontal drag shifts busX)
+          const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          handle.setAttribute('cx', String(busX))
+          handle.setAttribute('cy', String(parMidY))
+          handle.setAttribute('r', '5')
+          handle.setAttribute('fill', 'white')
+          handle.setAttribute('stroke', lineColor)
+          handle.setAttribute('stroke-width', LW)
+          handle.style.cursor = 'ew-resize'
+          ;(svg as SVGSVGElement).appendChild(handle)
+          let dragStart = 0, startOffset = 0
+          handle.addEventListener('pointerdown', e => {
+            e.stopPropagation(); handle.setPointerCapture(e.pointerId)
+            dragStart = e.clientX; startOffset = busOffsetsRef.current[parentId] ?? 0
+          })
+          handle.addEventListener('pointermove', e => {
+            if (!handle.hasPointerCapture(e.pointerId)) return
+            busOffsetsRef.current = { ...busOffsetsRef.current, [parentId]: startOffset + e.clientX - dragStart }
+            setBusOffsets({ ...busOffsetsRef.current })
           })
         }
 
@@ -449,7 +473,7 @@ export default function OrgChartPage() {
         return
       }
 
-      // ── Tree / Two-column / Staggered: bottom-center trunk + horizontal bus + stubs ──
+      // ── Tree / Two-column / Staggered: bottom-center trunk → fixed bus Y in the v-gap → stubs to child tops ──
       if (regularIds.length === 0 && assistantIds.length === 0) return
 
       const parCX    = par.x + par.w / 2
@@ -457,15 +481,15 @@ export default function OrgChartPage() {
 
       const regularRects = regularIds.map(id => getRect(id)).filter(Boolean) as NonNullable<ReturnType<typeof getRect>>[]
 
-      // Bus Y is MIN_STUB above the top of the highest child
-      const rawBusY = regularRects.length ? Math.min(...regularRects.map(r => r.y)) : trunkTop + vGap
-      const busY    = Math.min(rawBusY, trunkTop + (rawBusY - trunkTop) * 1)  // keep as-is, MIN_STUB enforced via stubs below
+      // Bus Y sits at midpoint of the vertical gap — fixed, user-adjustable, independent of child positions
+      const busOffset = busOffsetsRef.current[parentId] ?? 0
+      const busY      = trunkTop + vGap / 2 + busOffset
 
       if (regularIds.length > 0) {
-        // Trunk: parent bottom-center down to bus
+        // Trunk: parent bottom-center straight down to bus Y
         ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, lineColor))
 
-        // Bus: spans all child top-centers
+        // Bus: spans from leftmost to rightmost child top-center
         const childCXs = regularRects.map(r => r.x + r.w / 2)
         const busLeft  = Math.min(parCX, ...childCXs)
         const busRight = Math.max(parCX, ...childCXs)
@@ -473,26 +497,45 @@ export default function OrgChartPage() {
           ;(svg as SVGSVGElement).appendChild(makePath(`M ${busLeft} ${busY} L ${busRight} ${busY}`, lineColor))
         }
 
-        // Stubs: bus → child top-center. Always draw the stub (ensures hit target + min length)
+        // Stubs: bus Y → each child top-center (always visible even if child is dragged close)
         regularIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const cx = ch.x + ch.w / 2
-          // If child is sitting right on the bus, push it down by MIN_STUB visually via the hit path
           const stubTop = Math.min(busY, ch.y - MIN_STUB)
           const d = `M ${cx} ${stubTop} L ${cx} ${ch.y}`
           const vis = makePath(d, lineColor)
           ;(svg as SVGSVGElement).appendChild(vis)
           ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
         })
+
+        // Draggable bus handle on the trunk (vertical drag shifts busY)
+        const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        handle.setAttribute('cx', String(parCX))
+        handle.setAttribute('cy', String(busY))
+        handle.setAttribute('r', '5')
+        handle.setAttribute('fill', 'white')
+        handle.setAttribute('stroke', lineColor)
+        handle.setAttribute('stroke-width', LW)
+        handle.style.cursor = 'ns-resize'
+        ;(svg as SVGSVGElement).appendChild(handle)
+        let dragStart = 0, startOffset = 0
+        handle.addEventListener('pointerdown', e => {
+          e.stopPropagation(); handle.setPointerCapture(e.pointerId)
+          dragStart = e.clientY; startOffset = busOffsetsRef.current[parentId] ?? 0
+        })
+        handle.addEventListener('pointermove', e => {
+          if (!handle.hasPointerCapture(e.pointerId)) return
+          busOffsetsRef.current = { ...busOffsetsRef.current, [parentId]: startOffset + e.clientY - dragStart }
+          setBusOffsets({ ...busOffsetsRef.current })
+        })
       }
 
-      // Assistants: tap off trunk midpoint
-      const trunkBottom = busY
+      // Assistants: tap off trunk at the bus Y level
       assistantIds.forEach(childId => {
         const ch = getRect(childId)
         if (!ch) return
-        const tapY = Math.round(trunkTop + (trunkBottom - trunkTop) * 0.5)
+        const tapY = Math.round(trunkTop + (busY - trunkTop) * 0.5)
         const chCX = ch.x + ch.w / 2
         const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
         const vis = makePath(d, lineColor)
@@ -510,7 +553,7 @@ export default function OrgChartPage() {
       if (visibleIds.has(pl.fromId) && visibleIds.has(pl.toId))
         drawElbow(pl.fromId, pl.toId, PEER_COLOR, '6,3', () => removePeerLine(pl.fromId, pl.toId))
     })
-  }, [visibleContacts, contacts, dottedLines, peerLines, lineColor, lineWidth, branchStyle, nodeBranchStyles, vGap, updateContact, removeDottedLine, removePeerLine])
+  }, [visibleContacts, contacts, dottedLines, peerLines, lineColor, lineWidth, branchStyle, nodeBranchStyles, hGap, vGap, busOffsets, updateContact, removeDottedLine, removePeerLine])
 
   // Resize / redraw
   useEffect(() => {
@@ -588,6 +631,8 @@ export default function OrgChartPage() {
   const cleanupLayout = () => {
     const fresh = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle, nodeBranchStyles)
     setPositions({ ...positions, ...fresh })
+    setBusOffsets({})
+    busOffsetsRef.current = {}
     showToast('Layout applied', 'success')
   }
 
