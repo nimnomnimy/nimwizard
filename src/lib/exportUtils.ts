@@ -100,14 +100,15 @@ function buildTimelineRows(timeline: Timeline): string[][] {
 // ─── Gantt PDF renderer ───────────────────────────────────────────────────────
 
 function addGanttToPDF(doc: jsPDF, timeline: Timeline) {
+  // Use full page dimensions — caller creates doc as A3 landscape
   const pageW = doc.internal.pageSize.getWidth()   // mm
   const pageH = doc.internal.pageSize.getHeight()
-  const margin = 8
-  const labelW = 42   // mm for task label column
-  const rulerH = 10
-  const rowH   = 8
+  const margin = 10
+  const labelW = 55   // mm for task label column
+  const rulerH = 14
+  const rowH   = 12   // tall enough to read at normal zoom
   const usableW = pageW - margin * 2 - labelW
-  const usableH = pageH - margin - 28  // leave space for title
+  const usableH = pageH - margin - 26
 
   // Compute date range and scale
   const start    = parseDate(timeline.startDate)
@@ -126,10 +127,12 @@ function addGanttToPDF(doc: jsPDF, timeline: Timeline) {
     cur.setMonth(cur.getMonth() + 1)
   }
 
-  // Title
-  doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+  // Title + date range
+  doc.setFontSize(16); doc.setFont('helvetica', 'bold')
   doc.setTextColor(30, 41, 59)
-  doc.text(timeline.name, margin, margin + 6)
+  doc.text(timeline.name, margin, margin + 7)
+  doc.setFontSize(9); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
+  doc.text(`${timeline.startDate} – ${timeline.endDate}`, margin, margin + 14)
 
   // Count rows
   const allRows: Array<{ type: 'lane' | 'bar'; label: string; color: string; start?: string; end?: string; progress?: number }> = []
@@ -140,40 +143,63 @@ function addGanttToPDF(doc: jsPDF, timeline: Timeline) {
     }
   }
 
-  const totalH = rulerH + allRows.length * rowH
-  // Scale so everything fits on page — or use natural scale if it fits
-  const scaleY = Math.min(1, (usableH - rulerH) / Math.max(1, allRows.length * rowH))
-  const rH = rowH * scaleY
+  // Scale rows to fit if needed
+  const availH = usableH - rulerH
+  const rH = allRows.length > 0 ? Math.max(7, Math.min(rowH, availH / allRows.length)) : rowH
   const rRulerH = rulerH
+  const chartH = rRulerH + allRows.length * rH
 
-  const chartTop = margin + 14
+  const chartTop = margin + 20
   const chartLeft = margin
   const barAreaLeft = chartLeft + labelW
+  const mmPerDay = usableW / totalDays
 
   // Background
   doc.setFillColor(248, 250, 252)
-  doc.rect(chartLeft, chartTop, labelW + usableW, rRulerH + allRows.length * rH, 'F')
+  doc.rect(chartLeft, chartTop, labelW + usableW, chartH, 'F')
 
   // Ruler — month columns
-  const mmPerDay = usableW / totalDays
   for (const g of groups) {
     const gx = barAreaLeft + g.startDay * mmPerDay
     const gw = g.days * mmPerDay
-    doc.setFillColor(241, 245, 249)
+    doc.setFillColor(225, 230, 240)
     doc.rect(gx, chartTop, gw, rRulerH, 'F')
-    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2)
+    doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3)
     doc.rect(gx, chartTop, gw, rRulerH, 'S')
-    doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.setTextColor(71, 85, 105)
-    doc.text(g.label, gx + 1, chartTop + rRulerH * 0.65, { maxWidth: gw - 2 })
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(51, 65, 85)
+    doc.text(g.label, gx + 2, chartTop + rRulerH * 0.68, { maxWidth: gw - 3 })
+  }
+
+  // Freeze periods — drawn before bars so they appear as background overlays
+  for (const fp of timeline.freezePeriods ?? []) {
+    const fx = barAreaLeft + dateToPx(start, fp.startDate, mmPerDay)
+    const fw = Math.max(0.5, dateToPx(start, fp.endDate, mmPerDay) - dateToPx(start, fp.startDate, mmPerDay))
+    if (fx > barAreaLeft + usableW || fx + fw < barAreaLeft) continue
+    const [fr, fg, fb] = hexToRgb(fp.color)
+    doc.setFillColor(fr, fg, fb)
+    doc.setGState(new (doc as any).GState({ opacity: 0.12 }))
+    doc.rect(Math.max(fx, barAreaLeft), chartTop + rRulerH, Math.min(fw, barAreaLeft + usableW - Math.max(fx, barAreaLeft)), allRows.length * rH, 'F')
+    doc.setGState(new (doc as any).GState({ opacity: 1 }))
+    // Border line
+    doc.setDrawColor(fr, fg, fb); doc.setLineWidth(0.5)
+    doc.setLineDashPattern([1.5, 1.5], 0)
+    if (fx >= barAreaLeft) doc.line(fx, chartTop + rRulerH, fx, chartTop + chartH)
+    if (fx + fw <= barAreaLeft + usableW) doc.line(fx + fw, chartTop + rRulerH, fx + fw, chartTop + chartH)
+    doc.setLineDashPattern([], 0)
+    // Label
+    if (fw > 6) {
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(fr, fg, fb)
+      doc.text(fp.label, Math.max(fx, barAreaLeft) + 1.5, chartTop + rRulerH + 5, { maxWidth: fw - 3 })
+    }
   }
 
   // Today line
   const todayDays = diffDays(start, new Date())
   if (todayDays > 0 && todayDays < totalDays) {
     const tx = barAreaLeft + todayDays * mmPerDay
-    doc.setDrawColor(99, 102, 241); doc.setLineWidth(0.4)
-    doc.setLineDashPattern([1, 1], 0)
-    doc.line(tx, chartTop, tx, chartTop + rRulerH + allRows.length * rH)
+    doc.setDrawColor(99, 102, 241); doc.setLineWidth(0.5)
+    doc.setLineDashPattern([1.5, 1], 0)
+    doc.line(tx, chartTop, tx, chartTop + chartH)
     doc.setLineDashPattern([], 0)
   }
 
@@ -183,73 +209,71 @@ function addGanttToPDF(doc: jsPDF, timeline: Timeline) {
     if (row.type === 'lane') {
       // Lane header
       const [r, g, b] = hexToRgb(row.color)
-      doc.setFillColor(r, g, b, 0.08)
-      doc.setFillColor(248, 250, 252)
+      doc.setFillColor(r, g, b)
+      doc.setGState(new (doc as any).GState({ opacity: 0.12 }))
       doc.rect(chartLeft, y, labelW + usableW, rH, 'F')
-      doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.15)
+      doc.setGState(new (doc as any).GState({ opacity: 1 }))
+      doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.2)
       doc.rect(chartLeft, y, labelW + usableW, rH, 'S')
       // Color dot
-      doc.setFillColor(...hexToRgb(row.color))
-      doc.circle(chartLeft + 3, y + rH / 2, 1.2, 'F')
-      doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.setTextColor(...hexToRgb(row.color))
-      doc.text(row.label.toUpperCase(), chartLeft + 6, y + rH * 0.65, { maxWidth: labelW - 8 })
+      doc.setFillColor(r, g, b)
+      doc.circle(chartLeft + 4, y + rH / 2, 1.8, 'F')
+      doc.setFontSize(8.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+      doc.text(row.label.toUpperCase(), chartLeft + 8, y + rH * 0.65, { maxWidth: labelW - 10 })
     } else {
       // Task row
       doc.setFillColor(255, 255, 255)
       doc.rect(chartLeft, y, labelW + usableW, rH, 'F')
-      doc.setDrawColor(241, 245, 249); doc.setLineWidth(0.1)
+      doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.15)
       doc.rect(chartLeft, y, labelW + usableW, rH, 'S')
       // Label
-      doc.setFontSize(5.5); doc.setFont('helvetica', 'normal'); doc.setTextColor(71, 85, 105)
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(51, 65, 85)
       doc.text(pdfFitText(doc, row.label, labelW - 8), chartLeft + 4, y + rH * 0.65, { maxWidth: labelW - 6 })
       // Bar
       if (row.start && row.end) {
         const bx = barAreaLeft + dateToPx(start, row.start, mmPerDay)
-        const bw = Math.max(0.5, dateToPx(start, row.end, mmPerDay) - dateToPx(start, row.start, mmPerDay))
-        const bh = rH * 0.62
+        const bw = Math.max(1, dateToPx(start, row.end, mmPerDay) - dateToPx(start, row.start, mmPerDay))
+        const bh = rH * 0.6
         const by = y + (rH - bh) / 2
         const [r, g, b] = hexToRgb(row.color)
         doc.setFillColor(r, g, b); doc.setDrawColor(r, g, b); doc.setLineWidth(0)
-        pdfRoundRect(doc, bx, by, bw, bh, 1, true, false)
-        // Progress overlay
-        if ((row.progress ?? 0) > 0 && bw > 1) {
+        pdfRoundRect(doc, bx, by, bw, bh, 1.5, true, false)
+        // Progress overlay (darker fill for done portion)
+        if ((row.progress ?? 0) > 0 && bw > 2) {
           doc.setFillColor(0, 0, 0)
-          doc.setGState(new (doc as any).GState({ opacity: 0.2 }))
-          pdfRoundRect(doc, bx, by, bw * (row.progress! / 100), bh, 1, true, false)
+          doc.setGState(new (doc as any).GState({ opacity: 0.22 }))
+          pdfRoundRect(doc, bx, by, bw * (row.progress! / 100), bh, 1.5, true, false)
           doc.setGState(new (doc as any).GState({ opacity: 1 }))
         }
         // Bar label
-        if (bw > 8) {
-          doc.setFontSize(4.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
-          doc.text(pdfFitText(doc, row.label, bw - 2), bx + 1, by + bh * 0.68, { maxWidth: bw - 2 })
+        if (bw > 12) {
+          doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
+          doc.text(pdfFitText(doc, row.label, bw - 3), bx + 1.5, by + bh * 0.70, { maxWidth: bw - 3 })
         }
       }
     }
-    // Vertical separator at label edge
-    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2)
-    doc.line(barAreaLeft, chartTop, barAreaLeft, chartTop + rRulerH + allRows.length * rH)
     y += rH
   }
 
-  // Milestones
+  // Vertical separator at label edge
+  doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.4)
+  doc.line(barAreaLeft, chartTop, barAreaLeft, chartTop + chartH)
+
+  // Milestones (drawn on top)
   for (const m of timeline.milestones) {
     const mx = barAreaLeft + dateToPx(start, m.date, mmPerDay)
     if (mx < barAreaLeft || mx > barAreaLeft + usableW) continue
     const [r, g, b] = hexToRgb(m.color)
     doc.setFillColor(r, g, b)
-    // Diamond
-    const mr = 2
+    const mr = 2.5
     doc.lines([[mr, mr], [mr, -mr], [-mr, -mr], [-mr, mr]], mx, chartTop + rRulerH / 2, [1, 1], 'F', true)
-    doc.setFontSize(4); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
-    doc.text(m.label, mx, chartTop + 3, { align: 'center' })
+    doc.setFontSize(6.5); doc.setFont('helvetica', 'bold'); doc.setTextColor(r, g, b)
+    doc.text(m.label, mx, chartTop + 4, { align: 'center' })
   }
 
   // Outer border
-  doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3)
-  doc.rect(chartLeft, chartTop, labelW + usableW, rRulerH + allRows.length * rH, 'S')
-
-  // Adjust page height note — add new page marker if too tall (handled by caller)
-  void totalH
+  doc.setDrawColor(148, 163, 184); doc.setLineWidth(0.4)
+  doc.rect(chartLeft, chartTop, labelW + usableW, chartH, 'S')
 }
 
 // ─── Gantt PPTX renderer ──────────────────────────────────────────────────────
@@ -298,6 +322,36 @@ function addGanttToPPTX(pptx: PptxGenJS, timeline: Timeline) {
 
   // Label column header
   slide.addShape(pptx.ShapeType.rect, { x: chartLeft, y: chartTop, w: labelW, h: rulerH, fill: { color: 'e2e8f0' }, line: { color: 'cbd5e1', width: 0.3 } })
+
+  // Freeze periods
+  const allRowCount = timeline.swimLanes.length + timeline.items.filter(i => i.type === 'bar').length
+  for (const fp of timeline.freezePeriods ?? []) {
+    const fx = chartLeft + labelW + diffDays(start, parseDate(fp.startDate)) * inPerDay
+    const fw = Math.max(0.01, diffDays(parseDate(fp.startDate), parseDate(fp.endDate)) * inPerDay)
+    if (fx > chartLeft + chartW || fx + fw < chartLeft + labelW) continue
+    const fpColor = pc(fp.color)
+    // Shaded background over all rows
+    slide.addShape(pptx.ShapeType.rect, {
+      x: Math.max(fx, chartLeft + labelW),
+      y: chartTop + rulerH,
+      w: Math.min(fw, chartLeft + chartW - Math.max(fx, chartLeft + labelW)),
+      h: allRowCount * rowH,
+      fill: { color: fpColor, transparency: 88 },
+      line: { color: fpColor, width: 0 },
+    })
+    // Left border dashed line
+    if (fx >= chartLeft + labelW && fx <= chartLeft + chartW) {
+      slide.addShape(pptx.ShapeType.line, { x: fx, y: chartTop + rulerH, w: 0, h: allRowCount * rowH, line: { color: fpColor, width: 0.6, dashType: 'dash' } })
+    }
+    // Right border dashed line
+    if (fx + fw >= chartLeft + labelW && fx + fw <= chartLeft + chartW) {
+      slide.addShape(pptx.ShapeType.line, { x: fx + fw, y: chartTop + rulerH, w: 0, h: allRowCount * rowH, line: { color: fpColor, width: 0.6, dashType: 'dash' } })
+    }
+    // Label
+    if (fw > 0.2) {
+      slide.addText(fp.label, { x: Math.max(fx, chartLeft + labelW) + 0.02, y: chartTop + rulerH + 0.02, w: Math.min(fw, 1.5), h: 0.14, fontSize: 5, bold: true, color: fpColor })
+    }
+  }
 
   // Today line
   const todayDays = diffDays(start, new Date())
@@ -703,7 +757,7 @@ export async function exportTimelineXLSX(timeline: Timeline, mode: 'gantt' | 'ta
 }
 
 export async function exportTimelinePDF(timeline: Timeline, mode: 'gantt' | 'table' | 'both'): Promise<void> {
-  const doc = new jsPDF({ orientation: 'landscape' })
+  const doc = new jsPDF({ orientation: 'landscape', format: 'a3' })
 
   if (mode === 'gantt' || mode === 'both') {
     addGanttToPDF(doc, timeline)

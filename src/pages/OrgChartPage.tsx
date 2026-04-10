@@ -94,6 +94,11 @@ export default function OrgChartPage() {
   // Connection mode
   const [connMode, setConnMode] = useState<ConnMode | null>(null)
 
+  // Per-connection midpoint offsets: key = `${fromId}:${toId}`, value = offset px (horizontal for peer, vertical for reporting)
+  const [lineOffsets, setLineOffsets] = useState<Record<string, number>>({})
+  const lineOffsetsRef = useRef<Record<string, number>>({})
+  useEffect(() => { lineOffsetsRef.current = lineOffsets }, [lineOffsets])
+
   // Drag refs (avoid re-renders during drag)
   const areaRef   = useRef<HTMLDivElement>(null)
   const treeRef   = useRef<HTMLDivElement>(null)
@@ -158,23 +163,34 @@ export default function OrgChartPage() {
       const ch = getNodeRect(toId)
       if (!p || !ch) return
 
+      const connKey = `${fromId}:${toId}`
+      const offset = lineOffsetsRef.current[connKey] ?? 0
+
       let pathD: string, strokeColor: string
+      let handleX: number, handleY: number   // midpoint handle position
+      let isPeer = false
+
       if (style === 'peer') {
+        isPeer = true
         const left  = p.x < ch.x ? p  : ch
         const right = p.x < ch.x ? ch : p
         const y1 = left.y  + left.h  / 2
         const y2 = right.y + right.h / 2
         const x1 = left.x  + left.w
         const x2 = right.x
-        const midX = (x1 + x2) / 2
+        // midX can be dragged left/right
+        const midX = (x1 + x2) / 2 + offset
         pathD = `M ${x1} ${y1} L ${midX} ${y1} L ${midX} ${y2} L ${x2} ${y2}`
         strokeColor = '#f59e0b'
+        handleX = midX; handleY = (y1 + y2) / 2
       } else {
         const x1 = p.x  + p.w  / 2, y1 = p.y  + p.h
         const x2 = ch.x + ch.w / 2, y2 = ch.y
-        const midY = (y1 + y2) / 2
+        // midY can be dragged up/down
+        const midY = (y1 + y2) / 2 + offset
         pathD = `M ${x1} ${y1} L ${x1} ${midY} L ${x2} ${midY} L ${x2} ${y2}`
         strokeColor = style === 'dashed' ? '#8b5cf6' : '#cbd5e1'
+        handleX = (x1 + x2) / 2; handleY = midY
       }
 
       const visPath = document.createElementNS('http://www.w3.org/2000/svg', 'path')
@@ -197,7 +213,6 @@ export default function OrgChartPage() {
       hitPath.setAttribute('pointer-events', 'stroke')
       hitPath.style.cursor = 'pointer'
 
-      // Track pointerdown position to distinguish tap from scroll
       let downX = 0, downY = 0
       hitPath.addEventListener('pointerdown', e => {
         downX = e.clientX; downY = e.clientY
@@ -214,19 +229,54 @@ export default function OrgChartPage() {
         visPath.setAttribute('stroke-width', '1.5')
       })
       hitPath.addEventListener('pointercancel', () => {
-        visPath.setAttribute('stroke', strokeColor)
-        visPath.setAttribute('stroke-width', '1.5')
+        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
       })
-      // Desktop hover highlight
       hitPath.addEventListener('mouseenter', () => {
-        visPath.setAttribute('stroke', '#ef4444')
-        visPath.setAttribute('stroke-width', '2.5')
+        visPath.setAttribute('stroke', '#ef4444'); visPath.setAttribute('stroke-width', '2.5')
       })
       hitPath.addEventListener('mouseleave', () => {
-        visPath.setAttribute('stroke', strokeColor)
-        visPath.setAttribute('stroke-width', '1.5')
+        visPath.setAttribute('stroke', strokeColor); visPath.setAttribute('stroke-width', '1.5')
       })
       ;(svg as SVGSVGElement).appendChild(hitPath)
+
+      // ── Midpoint drag handle ──
+      const handle = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+      handle.setAttribute('cx', String(handleX))
+      handle.setAttribute('cy', String(handleY))
+      handle.setAttribute('r', '6')
+      handle.setAttribute('fill', 'white')
+      handle.setAttribute('stroke', strokeColor)
+      handle.setAttribute('stroke-width', '1.5')
+      handle.style.cursor = isPeer ? 'ew-resize' : 'ns-resize'
+      handle.style.opacity = '0'
+      handle.style.transition = 'opacity 0.15s'
+      ;(svg as SVGSVGElement).appendChild(handle)
+
+      // Show handle on hover of hit path
+      hitPath.addEventListener('mouseenter', () => { handle.style.opacity = '1' })
+      hitPath.addEventListener('mouseleave', () => { handle.style.opacity = '0' })
+      handle.addEventListener('mouseenter', () => { handle.style.opacity = '1' })
+      handle.addEventListener('mouseleave', () => { handle.style.opacity = '0' })
+
+      // Drag handle
+      let dragStartCoord = 0, dragStartOffset = 0
+      handle.addEventListener('pointerdown', e => {
+        e.stopPropagation()
+        handle.setPointerCapture(e.pointerId)
+        dragStartCoord = isPeer ? e.clientX : e.clientY
+        dragStartOffset = lineOffsetsRef.current[connKey] ?? 0
+        handle.style.opacity = '1'
+      })
+      handle.addEventListener('pointermove', e => {
+        if (!handle.hasPointerCapture(e.pointerId)) return
+        const delta = (isPeer ? e.clientX : e.clientY) - dragStartCoord
+        const newOffset = dragStartOffset + delta
+        lineOffsetsRef.current = { ...lineOffsetsRef.current, [connKey]: newOffset }
+        setLineOffsets({ ...lineOffsetsRef.current })
+      })
+      handle.addEventListener('pointerup', () => {
+        handle.style.opacity = '0'
+      })
     }
 
     // Solid reporting lines
@@ -249,7 +299,7 @@ export default function OrgChartPage() {
         drawLine(pl.fromId, pl.toId, 'peer', () => removePeerLine(pl.fromId, pl.toId))
       }
     })
-  }, [visibleContacts, contacts, dottedLines, peerLines, updateContact, removeDottedLine, removePeerLine])
+  }, [visibleContacts, contacts, dottedLines, peerLines, lineOffsets, updateContact, removeDottedLine, removePeerLine])
 
   // Resize / redraw after render
   useEffect(() => {
