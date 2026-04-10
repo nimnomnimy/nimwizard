@@ -19,7 +19,6 @@ const LANE_HEIGHT    = LANE_HEADER_H
 const DEFAULT_LABEL_W = 180
 const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
-const RULER_H        = 36   // minor tick row height
 const SUB_RULER_H    = 24   // sub-timescale row height (below major ticks)
 const DBL_MAJOR_H    = 22   // top group row (always shown)
 const DBL_MINOR_H    = 26   // major tick row (always shown below group row)
