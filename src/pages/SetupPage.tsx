@@ -16,9 +16,9 @@ function BinIcon() {
 declare const __APP_VERSION__: string
 
 export default function SetupPage() {
-  const uid_user     = useAppStore(s => s.uid)
-  const loadDemoData = useAppStore(s => s.loadDemoData)
-  const clearDemoData = useAppStore(s => s.clearDemoData)
+  const uid_user       = useAppStore(s => s.uid)
+  const loadDemoData   = useAppStore(s => s.loadDemoData)
+  const clearDemoData  = useAppStore(s => s.clearDemoData)
   const [demoLoading, setDemoLoading] = useState(false)
 
   const user = auth.currentUser
