@@ -41,6 +41,7 @@ export default function TasksPage() {
   const taskBuckets = useAppStore(s => s.taskBuckets)
   const setTaskBuckets = useAppStore(s => s.setTaskBuckets)
   const moveTaskStore = useAppStore(s => s.moveTask)
+  const deleteTaskStore = useAppStore(s => s.deleteTask)
   const saveSubTaskWithTimelineSync = useAppStore(s => s.saveSubTaskWithTimelineSync)
   const deleteSubTaskWithTimelineSync = useAppStore(s => s.deleteSubTaskWithTimelineSync)
   const timelines = useAppStore(s => s.timelines)
@@ -211,12 +212,9 @@ export default function TasksPage() {
     showToast('Task moved', 'success')
   }
 
-  const deleteTask = (taskId: string, bucketId: string) => {
+  const deleteTask = (taskId: string, _bucketId: string) => {
     if (!confirm('Delete this task?')) return
-    const newBuckets = taskBuckets.map((b: TaskBucket) =>
-      b.id === bucketId ? { ...b, tasks: b.tasks.filter(t => t.id !== taskId) } : b
-    )
-    setTaskBuckets(newBuckets)
+    deleteTaskStore(taskId)
     showToast('Task deleted')
   }
 

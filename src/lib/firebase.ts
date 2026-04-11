@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
-import { getFirestore } from 'firebase/firestore'
+import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore'
 
 const firebaseConfig = {
   apiKey: 'AIzaSyBfplg36UT63r1oJzCPNKWakK6r3e7cv_o',
@@ -16,3 +16,15 @@ const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const googleProvider = new GoogleAuthProvider()
+
+// Enable offline persistence so writes are queued when the user is offline
+// and replayed when connectivity returns. Errors here are non-fatal.
+enableIndexedDbPersistence(db).catch(err => {
+  if (err.code === 'failed-precondition') {
+    // Multiple tabs open — persistence only works in one tab at a time
+    console.warn('[firebase] Offline persistence unavailable: multiple tabs open')
+  } else if (err.code === 'unimplemented') {
+    // Browser doesn't support persistence
+    console.warn('[firebase] Offline persistence not supported in this browser')
+  }
+})

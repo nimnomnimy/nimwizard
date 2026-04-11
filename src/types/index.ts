@@ -33,7 +33,7 @@ export interface SavedChart {
   id: string
   name: string
   savedAt: string
-  contacts: Contact[]
+  contactIds: string[]   // IDs only — resolved against live contacts[] at render time
   dottedLines: DottedLine[]
   peerLines: PeerLine[]
   chartContacts: string[]

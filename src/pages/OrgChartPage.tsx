@@ -664,7 +664,7 @@ export default function OrgChartPage() {
     saveChart({
       id: uid(), name,
       savedAt: new Date().toISOString(),
-      contacts: contacts.map(c => ({ ...c })),
+      contactIds: [...chartContacts],    // store IDs only — live contacts[] is the source of truth
       dottedLines: dottedLines.map(d => ({ ...d })),
       peerLines:   peerLines.map(d => ({ ...d })),
       chartContacts: [...chartContacts],
@@ -697,7 +697,9 @@ export default function OrgChartPage() {
       let added = 0
       for (const ch of charts) {
         if (typeof ch !== 'object' || !ch?.name) continue
-        saveChart({ ...ch, id: uid(), savedAt: new Date().toISOString() })
+        // Migrate legacy format: if contacts[] present, convert to contactIds[]
+        const contactIds: string[] = ch.contactIds ?? (ch.contacts ?? []).map((c: Contact) => c.id)
+        saveChart({ ...ch, id: uid(), savedAt: new Date().toISOString(), contactIds, contacts: undefined })
         added++
       }
       showToast(`${added} chart${added !== 1 ? 's' : ''} imported`, 'success')
@@ -1215,9 +1217,13 @@ export default function OrgChartPage() {
                               onClick={() => {
                                 if (!confirm(`Load "${ch.name}"? This replaces current chart data.`)) return
                                 const store = useAppStore.getState()
-                                ch.contacts.forEach(c => {
-                                  if (!store.contacts.find((x: Contact) => x.id === c.id)) store.addContact(c)
-                                })
+                                // contactIds are resolved against live contacts — no duplicating contact data
+                                const missingIds = (ch.contactIds ?? ch.chartContacts).filter(
+                                  (id: string) => !store.contacts.find((x: Contact) => x.id === id)
+                                )
+                                if (missingIds.length > 0) {
+                                  showToast(`${missingIds.length} contact(s) from this chart no longer exist`, 'error')
+                                }
                                 store.setChartContacts(ch.chartContacts)
                                 store.setPositions(ch.positions)
                                 ch.dottedLines.forEach((d: { fromId: string; toId: string }) => store.addDottedLine(d))

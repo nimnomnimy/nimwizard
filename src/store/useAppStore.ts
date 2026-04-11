@@ -18,11 +18,13 @@ import { uid } from '../lib/utils'
 //   users/{uid}/meetings/{meetingId}
 //   users/{uid}/tasks/{taskId}          (includes bucketId field)
 //   users/{uid}/timelines/{timelineId}
-//   users/{uid}/settings/app            (buckets, org chart, email, saved charts)
+//   users/{uid}/settings/app            (buckets, email, saved charts)
+//   users/{uid}/orgchart/state          (positions, lines, chartContacts, savedCharts)
 
-const colRef  = (uid: string, sub: string) => collection(db, 'users', uid, sub)
-const docRef  = (uid: string, sub: string, id: string) => doc(db, 'users', uid, sub, id)
+const colRef      = (uid: string, sub: string) => collection(db, 'users', uid, sub)
+const docRef      = (uid: string, sub: string, id: string) => doc(db, 'users', uid, sub, id)
 const settingsRef = (uid: string) => doc(db, 'users', uid, 'settings', 'app')
+const orgchartRef = (uid: string) => doc(db, 'users', uid, 'orgchart', 'state')
 
 // ─── Default bucket definitions (no tasks — tasks live in their own docs) ─────
 export const DEFAULT_BUCKET_DEFS: Omit<TaskBucket, 'tasks'>[] = [
@@ -35,13 +37,17 @@ export const DEFAULT_BUCKET_DEFS: Omit<TaskBucket, 'tasks'>[] = [
 // ─── Settings document shape (stored at users/{uid}/settings/app) ─────────────
 interface SettingsDoc {
   bucketDefs: Omit<TaskBucket, 'tasks'>[]
+  emailSettings: EmailSettings
+}
+
+// ─── Org chart document shape (stored at users/{uid}/orgchart/state) ──────────
+interface OrgchartDoc {
   dottedLines: DottedLine[]
   peerLines: PeerLine[]
   chartContacts: string[]
   positions: Record<string, Position>
   activeChartOrg: string | null
   savedCharts: SavedChart[]
-  emailSettings: EmailSettings
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -59,12 +65,16 @@ function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: strin
 // ─── In-memory loading state (not reactive, just coordination flags) ──────────
 // These are module-level so they survive re-renders but reset on page reload
 let collectionsLoaded = 0   // count of subcollections that have fired at least once
-const TOTAL_COLLECTIONS = 4 // contacts, meetings, tasks, timelines (+settings fires separately)
+const TOTAL_COLLECTIONS = 4 // contacts, meetings, tasks, timelines (+settings+orgchart fire separately)
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 interface StoreState extends AppState {
   uid: string | null
-  loading: boolean
+  loading: boolean          // true until ALL collections have fired once
+  contactsReady: boolean
+  meetingsReady: boolean
+  tasksReady: boolean
+  timelinesReady: boolean
   syncing: boolean
 
   setUid: (uid: string | null) => void
@@ -77,6 +87,7 @@ interface StoreState extends AppState {
   addContact: (contact: Contact) => void
   updateContact: (contact: Contact) => void
   deleteContact: (id: string) => void
+  importContacts: (contacts: Contact[]) => void  // batch-add, single Firestore write
 
   // Org chart
   setPositions: (positions: Record<string, Position>) => void
@@ -99,6 +110,7 @@ interface StoreState extends AppState {
   setTaskBuckets: (buckets: TaskBucket[]) => void
   addTask: (bucketId: string, task: Task) => void
   updateTask: (bucketId: string, task: Task) => void
+  deleteTask: (taskId: string) => void
   moveTask: (taskId: string, fromBucketId: string, toBucketId: string) => void
 
   // Settings
@@ -122,51 +134,48 @@ interface StoreState extends AppState {
 
 // ─── Firestore write helpers ──────────────────────────────────────────────────
 // Each helper fires a specific write and never touches unrelated data.
-
-function writeContact(userUid: string, contact: Contact) {
-  setDoc(docRef(userUid, 'contacts', contact.id), contact).catch(e =>
-    console.error('[writeContact]', e))
-}
-
-function removeContact(userUid: string, id: string) {
-  deleteDoc(docRef(userUid, 'contacts', id)).catch(e =>
-    console.error('[removeContact]', e))
-}
-
-function writeMeeting(userUid: string, meeting: Meeting) {
-  setDoc(docRef(userUid, 'meetings', meeting.id), meeting).catch(e =>
-    console.error('[writeMeeting]', e))
-}
-
-function removeMeeting(userUid: string, id: string) {
-  deleteDoc(docRef(userUid, 'meetings', id)).catch(e =>
-    console.error('[removeMeeting]', e))
-}
+// All write helpers return a Promise so callers can handle errors and revert.
 
 // Firestore rejects undefined values — strip them before writing
 function stripUndefined<T extends object>(obj: T): T {
   return JSON.parse(JSON.stringify(obj)) as T
 }
 
-function writeTask(userUid: string, bucketId: string, task: Task) {
-  setDoc(docRef(userUid, 'tasks', task.id), stripUndefined({ ...task, bucketId })).catch(e =>
-    console.error('[writeTask]', e))
+function writeContact(userUid: string, contact: Contact): Promise<void> {
+  return setDoc(docRef(userUid, 'contacts', contact.id), contact)
+}
+
+function removeContact(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'contacts', id))
+}
+
+function writeMeeting(userUid: string, meeting: Meeting): Promise<void> {
+  return setDoc(docRef(userUid, 'meetings', meeting.id), meeting)
+}
+
+function removeMeeting(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'meetings', id))
+}
+
+function writeTask(userUid: string, bucketId: string, task: Task): Promise<void> {
+  return setDoc(docRef(userUid, 'tasks', task.id), stripUndefined({ ...task, bucketId }))
 }
 
 
-function writeTimeline(userUid: string, timeline: Timeline) {
-  setDoc(docRef(userUid, 'timelines', timeline.id), stripUndefined(timeline)).catch(e =>
-    console.error('[writeTimeline]', e))
+function writeTimeline(userUid: string, timeline: Timeline): Promise<void> {
+  return setDoc(docRef(userUid, 'timelines', timeline.id), stripUndefined(timeline))
 }
 
-function removeTimeline(userUid: string, id: string) {
-  deleteDoc(docRef(userUid, 'timelines', id)).catch(e =>
-    console.error('[removeTimeline]', e))
+function removeTimeline(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'timelines', id))
 }
 
-function writeSettings(userUid: string, settings: SettingsDoc) {
-  setDoc(settingsRef(userUid), settings).catch(e =>
-    console.error('[writeSettings]', e))
+function writeSettings(userUid: string, settings: SettingsDoc): Promise<void> {
+  return setDoc(settingsRef(userUid), settings)
+}
+
+function writeOrgchart(userUid: string, orgchart: OrgchartDoc): Promise<void> {
+  return setDoc(orgchartRef(userUid), orgchart)
 }
 
 // ─── Batch write helpers for cross-feature atomicity ─────────────────────────
@@ -236,21 +245,26 @@ async function migrateIfNeeded(userUid: string): Promise<boolean> {
     await add(docRef(userUid, 'timelines', tl.id), tl)
   }
 
-  // Settings
+  // Settings (buckets + email only)
   const bucketDefs: Omit<TaskBucket, 'tasks'>[] = (data.taskBuckets ?? []).map(
     ({ id, name, color }) => ({ id, name, color })
   )
   const settings: SettingsDoc = {
-    bucketDefs: bucketDefs.length > 0 ? bucketDefs : DEFAULT_BUCKET_DEFS,
-    dottedLines:    data.dottedLines    ?? [],
-    peerLines:      data.peerLines      ?? [],
-    chartContacts:  data.chartContacts  ?? [],
-    positions:      data.positions      ?? {},
-    activeChartOrg: data.activeChartOrg ?? null,
-    savedCharts:    data.savedCharts    ?? [],
-    emailSettings:  data.emailSettings  ?? {},
+    bucketDefs:    bucketDefs.length > 0 ? bucketDefs : DEFAULT_BUCKET_DEFS,
+    emailSettings: data.emailSettings ?? {},
   }
   await add(settingsRef(userUid), settings)
+
+  // Org chart (separate document)
+  const orgchart: OrgchartDoc = {
+    dottedLines:    (data as any).dottedLines    ?? [],
+    peerLines:      (data as any).peerLines      ?? [],
+    chartContacts:  (data as any).chartContacts  ?? [],
+    positions:      (data as any).positions      ?? {},
+    activeChartOrg: (data as any).activeChartOrg ?? null,
+    savedCharts:    (data as any).savedCharts    ?? [],
+  }
+  await add(orgchartRef(userUid), orgchart)
 
   await flush()
 
@@ -265,6 +279,10 @@ export const useAppStore = create<StoreState>()(
   immer((set, get) => ({
     uid: null,
     loading: true,
+    contactsReady: false,
+    meetingsReady: false,
+    tasksReady: false,
+    timelinesReady: false,
     syncing: false,
 
     contacts: [],
@@ -290,7 +308,13 @@ export const useAppStore = create<StoreState>()(
     saveUserData: () => {},
 
     loadUserData: async (userUid) => {
-      set(s => { s.loading = true })
+      set(s => {
+        s.loading = true
+        s.contactsReady = false
+        s.meetingsReady = false
+        s.tasksReady = false
+        s.timelinesReady = false
+      })
       collectionsLoaded = 0
 
       // Run migration from old single-doc format first
@@ -303,10 +327,10 @@ export const useAppStore = create<StoreState>()(
       const unsubs: Unsubscribe[] = []
 
       // Track how many subcollections have fired their first snapshot
+      // (4 subcollections + settings + orgchart = 6 total)
       const markLoaded = () => {
         collectionsLoaded++
-        // Once all 4 subcollections + settings have reported in, clear loading
-        if (collectionsLoaded >= TOTAL_COLLECTIONS + 1) {
+        if (collectionsLoaded >= TOTAL_COLLECTIONS + 2) {
           set(s => { s.loading = false })
         }
       }
@@ -314,16 +338,16 @@ export const useAppStore = create<StoreState>()(
       // ── Contacts ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(colRef(userUid, 'contacts'), (snap) => {
         const contacts: Contact[] = snap.docs.map(d => d.data() as Contact)
-        set(s => { s.contacts = contacts })
+        set(s => { s.contacts = contacts; s.contactsReady = true })
         markLoaded()
-      }, (e) => { console.error('[contacts snapshot]', e); markLoaded() }))
+      }, (e) => { console.error('[contacts snapshot]', e); set(s => { s.contactsReady = true }); markLoaded() }))
 
       // ── Meetings ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(colRef(userUid, 'meetings'), (snap) => {
         const meetings: Meeting[] = snap.docs.map(d => d.data() as Meeting)
-        set(s => { s.meetings = meetings })
+        set(s => { s.meetings = meetings; s.meetingsReady = true })
         markLoaded()
-      }, (e) => { console.error('[meetings snapshot]', e); markLoaded() }))
+      }, (e) => { console.error('[meetings snapshot]', e); set(s => { s.meetingsReady = true }); markLoaded() }))
 
       // ── Tasks ───────────────────────────────────────────────────────────────
       // We store the raw flat task list and rebuild taskBuckets whenever either
@@ -348,15 +372,16 @@ export const useAppStore = create<StoreState>()(
       unsubs.push(onSnapshot(colRef(userUid, 'tasks'), (snap) => {
         rawTasks = snap.docs.map(d => d.data() as Task & { bucketId: string })
         rebuildTaskBuckets()
+        set(s => { s.tasksReady = true })
         markLoaded()
-      }, (e) => { console.error('[tasks snapshot]', e); markLoaded() }))
+      }, (e) => { console.error('[tasks snapshot]', e); set(s => { s.tasksReady = true }); markLoaded() }))
 
       // ── Timelines ───────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(colRef(userUid, 'timelines'), (snap) => {
         const timelines: Timeline[] = snap.docs.map(d => d.data() as Timeline)
-        set(s => { s.timelines = timelines })
+        set(s => { s.timelines = timelines; s.timelinesReady = true })
         markLoaded()
-      }, (e) => { console.error('[timelines snapshot]', e); markLoaded() }))
+      }, (e) => { console.error('[timelines snapshot]', e); set(s => { s.timelinesReady = true }); markLoaded() }))
 
       // ── Settings ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(settingsRef(userUid), (snap) => {
@@ -366,26 +391,37 @@ export const useAppStore = create<StoreState>()(
             if (d.bucketDefs && d.bucketDefs.length > 0) {
               s.taskBuckets = d.bucketDefs.map(def => ({ ...def, tasks: [] }))
             }
+            s.emailSettings = d.emailSettings ?? {}
+          })
+          // Re-assign tasks into the now-correct bucket defs
+          rebuildTaskBuckets()
+        } else {
+          // No settings doc yet — write defaults
+          writeSettings(userUid, { bucketDefs: DEFAULT_BUCKET_DEFS, emailSettings: {} })
+            .catch(e => console.error('[writeSettings default]', e))
+        }
+        markLoaded()
+      }, (e) => { console.error('[settings snapshot]', e); markLoaded() }))
+
+      // ── Org chart ───────────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(orgchartRef(userUid), (snap) => {
+        if (snap.exists()) {
+          const d = snap.data() as Partial<OrgchartDoc>
+          set(s => {
             s.dottedLines    = d.dottedLines    ?? []
             s.peerLines      = d.peerLines      ?? []
             s.chartContacts  = d.chartContacts  ?? []
             s.positions      = d.positions      ?? {}
             s.activeChartOrg = d.activeChartOrg ?? null
             s.savedCharts    = d.savedCharts    ?? []
-            s.emailSettings  = d.emailSettings  ?? {}
           })
-          // Re-assign tasks into the now-correct bucket defs
-          rebuildTaskBuckets()
         } else {
-          // No settings doc yet — write defaults
-          writeSettings(userUid, {
-            bucketDefs: DEFAULT_BUCKET_DEFS,
-            dottedLines: [], peerLines: [], chartContacts: [],
-            positions: {}, activeChartOrg: null, savedCharts: [], emailSettings: {},
-          })
+          // No orgchart doc yet — write defaults
+          writeOrgchart(userUid, { dottedLines: [], peerLines: [], chartContacts: [], positions: {}, activeChartOrg: null, savedCharts: [] })
+            .catch(e => console.error('[writeOrgchart default]', e))
         }
         markLoaded()
-      }, (e) => { console.error('[settings snapshot]', e); markLoaded() }))
+      }, (e) => { console.error('[orgchart snapshot]', e); markLoaded() }))
 
       return () => { unsubs.forEach(u => u()) }
     },
@@ -393,12 +429,24 @@ export const useAppStore = create<StoreState>()(
     // ── Contacts ──────────────────────────────────────────────────────────────
     addContact: (contact) => {
       set(s => { s.contacts.push(contact) })
-      const u = get().uid; if (u) writeContact(u, contact)
+      const u = get().uid
+      if (u) writeContact(u, contact).catch(e => {
+        console.error('[addContact]', e)
+        set(s => { s.contacts = s.contacts.filter(c => c.id !== contact.id) })
+      })
     },
 
     updateContact: (contact) => {
-      set(s => { const i = s.contacts.findIndex(c => c.id === contact.id); if (i >= 0) s.contacts[i] = contact })
-      const u = get().uid; if (u) writeContact(u, contact)
+      let prev: Contact | undefined
+      set(s => {
+        const i = s.contacts.findIndex(c => c.id === contact.id)
+        if (i >= 0) { prev = { ...s.contacts[i] }; s.contacts[i] = contact }
+      })
+      const u = get().uid
+      if (u) writeContact(u, contact).catch(e => {
+        console.error('[updateContact]', e)
+        if (prev) set(s => { const i = s.contacts.findIndex(c => c.id === contact.id); if (i >= 0) s.contacts[i] = prev! })
+      })
     },
 
     deleteContact: (id) => {
@@ -412,71 +460,107 @@ export const useAppStore = create<StoreState>()(
       })
       const u = get().uid
       if (u) {
-        removeContact(u, id)
-        writeSettings(u, buildSettingsDoc(get()))
+        Promise.all([
+          removeContact(u, id),
+          writeOrgchart(u, buildOrgchartDoc(get())),
+        ]).catch(e => console.error('[deleteContact]', e))
       }
+    },
+
+    importContacts: (newContacts) => {
+      set(s => { newContacts.forEach(c => s.contacts.push(c)) })
+      const u = get().uid
+      if (!u) return
+      const batch = writeBatch(db)
+      for (const c of newContacts) batch.set(docRef(u, 'contacts', c.id), c)
+      batch.commit().catch(e => {
+        console.error('[importContacts]', e)
+        const ids = new Set(newContacts.map(c => c.id))
+        set(s => { s.contacts = s.contacts.filter(c => !ids.has(c.id)) })
+      })
     },
 
     // ── Org chart ─────────────────────────────────────────────────────────────
     setPositions: (positions) => {
       set(s => { s.positions = positions })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[setPositions]', e))
     },
 
     setChartContacts: (ids) => {
       set(s => { s.chartContacts = ids })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[setChartContacts]', e))
     },
 
     setActiveChartOrg: (org) => {
       set(s => { s.activeChartOrg = org })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[setActiveChartOrg]', e))
     },
 
     addDottedLine: (line) => {
       set(s => { s.dottedLines.push(line) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[addDottedLine]', e))
     },
 
     removeDottedLine: (fromId, toId) => {
       set(s => { s.dottedLines = s.dottedLines.filter(d => !(d.fromId === fromId && d.toId === toId)) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[removeDottedLine]', e))
     },
 
     addPeerLine: (line) => {
       set(s => { s.peerLines.push(line) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[addPeerLine]', e))
     },
 
     removePeerLine: (fromId, toId) => {
       set(s => { s.peerLines = s.peerLines.filter(d => !(d.fromId === fromId && d.toId === toId)) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[removePeerLine]', e))
     },
 
     saveChart: (chart) => {
       set(s => { s.savedCharts.push(chart) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => {
+        console.error('[saveChart]', e)
+        set(s => { s.savedCharts = s.savedCharts.filter(c => c.id !== chart.id) })
+      })
     },
 
     deleteChart: (id) => {
-      set(s => { s.savedCharts = s.savedCharts.filter(c => c.id !== id) })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      let prev: SavedChart | undefined
+      set(s => { prev = s.savedCharts.find(c => c.id === id); s.savedCharts = s.savedCharts.filter(c => c.id !== id) })
+      const u = get().uid; if (u) writeOrgchart(u, buildOrgchartDoc(get())).catch(e => {
+        console.error('[deleteChart]', e)
+        if (prev) set(s => { s.savedCharts.push(prev!) })
+      })
     },
 
     // ── Meetings ──────────────────────────────────────────────────────────────
     addMeeting: (meeting) => {
       set(s => { s.meetings.push(meeting) })
-      const u = get().uid; if (u) writeMeeting(u, meeting)
+      const u = get().uid
+      if (u) writeMeeting(u, meeting).catch(e => {
+        console.error('[addMeeting]', e)
+        set(s => { s.meetings = s.meetings.filter(m => m.id !== meeting.id) })
+      })
     },
 
     updateMeeting: (meeting) => {
-      set(s => { const i = s.meetings.findIndex(m => m.id === meeting.id); if (i >= 0) s.meetings[i] = meeting })
-      const u = get().uid; if (u) writeMeeting(u, meeting)
+      let prev: Meeting | undefined
+      set(s => { const i = s.meetings.findIndex(m => m.id === meeting.id); if (i >= 0) { prev = { ...s.meetings[i] }; s.meetings[i] = meeting } })
+      const u = get().uid
+      if (u) writeMeeting(u, meeting).catch(e => {
+        console.error('[updateMeeting]', e)
+        if (prev) set(s => { const i = s.meetings.findIndex(m => m.id === meeting.id); if (i >= 0) s.meetings[i] = prev! })
+      })
     },
 
     deleteMeeting: (id) => {
-      set(s => { s.meetings = s.meetings.filter(m => m.id !== id) })
-      const u = get().uid; if (u) removeMeeting(u, id)
+      let prev: Meeting | undefined
+      set(s => { prev = s.meetings.find(m => m.id === id); s.meetings = s.meetings.filter(m => m.id !== id) })
+      const u = get().uid
+      if (u) removeMeeting(u, id).catch(e => {
+        console.error('[deleteMeeting]', e)
+        if (prev) set(s => { s.meetings.push(prev!) })
+      })
     },
 
     saveMeetingWithTasks: (meeting) => {
@@ -552,7 +636,7 @@ export const useAppStore = create<StoreState>()(
       const u = get().uid
       if (!u) return
       // Write the bucket definitions (without tasks) to settings
-      writeSettings(u, buildSettingsDoc(get()))
+      writeSettings(u, buildSettingsDoc(get())).catch(e => console.error('[setTaskBuckets settings]', e))
       // Write all tasks (in case tasks were moved between buckets)
       const batch = writeBatch(db)
       for (const b of buckets) {
@@ -565,16 +649,31 @@ export const useAppStore = create<StoreState>()(
 
     addTask: (bucketId, task) => {
       set(s => { const b = s.taskBuckets.find(b => b.id === bucketId); if (b) b.tasks.push(task) })
-      const u = get().uid; if (u) writeTask(u, bucketId, task)
+      const u = get().uid
+      if (u) writeTask(u, bucketId, task).catch(e => {
+        console.error('[addTask]', e)
+        set(s => { const b = s.taskBuckets.find(b => b.id === bucketId); if (b) b.tasks = b.tasks.filter(t => t.id !== task.id) })
+      })
     },
 
     updateTask: (bucketId, task) => {
+      const isDone = (task.progress ?? 0) >= 100
+      let effectiveBucketId = bucketId
+
       set(s => {
-        const bucket = s.taskBuckets.find(b => b.id === bucketId)
-        if (bucket) {
-          const idx = bucket.tasks.findIndex(t => t.id === task.id)
-          if (idx >= 0) bucket.tasks[idx] = task
+        const doneBucket = s.taskBuckets.find(b => b.id === 'done') ?? s.taskBuckets[s.taskBuckets.length - 1]
+        const srcBucket  = s.taskBuckets.find(b => b.id === bucketId)
+
+        if (isDone && doneBucket && srcBucket && doneBucket.id !== bucketId) {
+          // Move to done bucket
+          if (srcBucket) srcBucket.tasks = srcBucket.tasks.filter(t => t.id !== task.id)
+          doneBucket.tasks.push(task)
+          effectiveBucketId = doneBucket.id
+        } else if (srcBucket) {
+          const idx = srcBucket.tasks.findIndex(t => t.id === task.id)
+          if (idx >= 0) srcBucket.tasks[idx] = task
         }
+
         // Sync to timeline items
         s.timelines.forEach(tl => {
           tl.items.forEach(item => {
@@ -587,23 +686,82 @@ export const useAppStore = create<StoreState>()(
           })
         })
         // Sync done state to meeting action items
-        if (task.progress === 100) {
+        if (isDone) {
           s.meetings.forEach(m => {
             m.actionItems.forEach(a => { if (a.taskId === task.id) a.done = true })
           })
         }
       })
+
       const u = get().uid
       if (!u) return
-      writeTask(u, bucketId, task)
+      writeTask(u, effectiveBucketId, task).catch(e => console.error('[updateTask]', e))
       // Write any timelines that were affected
       const affectedTimelines = get().timelines.filter(tl => tl.items.some(i => i.taskId === task.id))
-      affectedTimelines.forEach(tl => writeTimeline(u, tl))
+      affectedTimelines.forEach(tl => writeTimeline(u, tl).catch(e => console.error('[updateTask timeline]', e)))
       // Write any meetings that were affected (if task became done)
-      if (task.progress === 100) {
+      if (isDone) {
         const affectedMeetings = get().meetings.filter(m => m.actionItems.some(a => a.taskId === task.id))
-        affectedMeetings.forEach(m => writeMeeting(u, m))
+        affectedMeetings.forEach(m => writeMeeting(u, m).catch(e => console.error('[updateTask meeting]', e)))
       }
+    },
+
+    deleteTask: (taskId) => {
+      let prevTask: Task | undefined
+      let prevBucketId: string | undefined
+      let affectedTimelineIds: string[] = []
+      let affectedMeetingIds: string[] = []
+
+      set(s => {
+        // Remove from bucket, remember for potential revert
+        for (const b of s.taskBuckets) {
+          const idx = b.tasks.findIndex(t => t.id === taskId)
+          if (idx >= 0) {
+            prevTask = { ...b.tasks[idx] }
+            prevBucketId = b.id
+            b.tasks.splice(idx, 1)
+            break
+          }
+        }
+        // Cascade: null out taskId on linked timeline items
+        s.timelines.forEach(tl => {
+          tl.items.forEach(item => {
+            if (item.taskId === taskId) {
+              affectedTimelineIds.push(tl.id)
+              delete item.taskId
+            }
+          })
+        })
+        // Cascade: null out taskId on linked action items
+        s.meetings.forEach(m => {
+          m.actionItems.forEach(a => {
+            if (a.taskId === taskId) {
+              affectedMeetingIds.push(m.id)
+              delete a.taskId
+            }
+          })
+        })
+      })
+
+      const u = get().uid
+      if (!u) return
+      const batch = writeBatch(db)
+      batch.delete(docRef(u, 'tasks', taskId))
+      for (const tlId of affectedTimelineIds) {
+        const tl = get().timelines.find(x => x.id === tlId)
+        if (tl) batch.set(docRef(u, 'timelines', tl.id), stripUndefined(tl))
+      }
+      for (const mId of affectedMeetingIds) {
+        const m = get().meetings.find(x => x.id === mId)
+        if (m) batch.set(docRef(u, 'meetings', m.id), m)
+      }
+      batch.commit().catch(e => {
+        console.error('[deleteTask]', e)
+        // Revert: put task back in its bucket
+        if (prevTask && prevBucketId) {
+          set(s => { const b = s.taskBuckets.find(b => b.id === prevBucketId); if (b) b.tasks.push(prevTask!) })
+        }
+      })
     },
 
     moveTask: (taskId, fromBucketId, toBucketId) => {
@@ -636,24 +794,43 @@ export const useAppStore = create<StoreState>()(
 
     // ── Settings ──────────────────────────────────────────────────────────────
     setEmailSettings: (settings) => {
-      set(s => { s.emailSettings = settings })
-      const u = get().uid; if (u) writeSettings(u, buildSettingsDoc(get()))
+      let prev: EmailSettings | undefined
+      set(s => { prev = { ...s.emailSettings }; s.emailSettings = settings })
+      const u = get().uid
+      if (u) writeSettings(u, buildSettingsDoc(get())).catch(e => {
+        console.error('[setEmailSettings]', e)
+        if (prev) set(s => { s.emailSettings = prev! })
+      })
     },
 
     // ── Timelines ─────────────────────────────────────────────────────────────
     addTimeline: (t) => {
       set(s => { s.timelines.push(t) })
-      const u = get().uid; if (u) writeTimeline(u, t)
+      const u = get().uid
+      if (u) writeTimeline(u, t).catch(e => {
+        console.error('[addTimeline]', e)
+        set(s => { s.timelines = s.timelines.filter(x => x.id !== t.id) })
+      })
     },
 
     updateTimeline: (t) => {
-      set(s => { const i = s.timelines.findIndex(x => x.id === t.id); if (i >= 0) s.timelines[i] = t })
-      const u = get().uid; if (u) writeTimeline(u, t)
+      let prev: Timeline | undefined
+      set(s => { const i = s.timelines.findIndex(x => x.id === t.id); if (i >= 0) { prev = { ...s.timelines[i] }; s.timelines[i] = t } })
+      const u = get().uid
+      if (u) writeTimeline(u, t).catch(e => {
+        console.error('[updateTimeline]', e)
+        if (prev) set(s => { const i = s.timelines.findIndex(x => x.id === t.id); if (i >= 0) s.timelines[i] = prev! })
+      })
     },
 
     deleteTimeline: (id) => {
-      set(s => { s.timelines = s.timelines.filter(t => t.id !== id) })
-      const u = get().uid; if (u) removeTimeline(u, id)
+      let prev: Timeline | undefined
+      set(s => { prev = s.timelines.find(t => t.id === id); s.timelines = s.timelines.filter(t => t.id !== id) })
+      const u = get().uid
+      if (u) removeTimeline(u, id).catch(e => {
+        console.error('[deleteTimeline]', e)
+        if (prev) set(s => { s.timelines.push(prev!) })
+      })
     },
 
     // ── Atomic cross-feature mutations ────────────────────────────────────────
@@ -691,9 +868,21 @@ export const useAppStore = create<StoreState>()(
     },
 
     saveTaskWithTimelineItem: (bucketId, task) => {
+      const isDone = (task.progress ?? 0) >= 100
       let affectedTimelineId: string | null = null
+      let effectiveBucketId = bucketId
       set(s => {
-        const bucket = s.taskBuckets.find(b => b.id === bucketId)
+        const doneBucket = s.taskBuckets.find(b => b.id === 'done') ?? s.taskBuckets[s.taskBuckets.length - 1]
+        const targetId = isDone && doneBucket ? doneBucket.id : bucketId
+        effectiveBucketId = targetId
+
+        // Remove from source bucket if moving to done
+        if (isDone && doneBucket && doneBucket.id !== bucketId) {
+          const srcBucket = s.taskBuckets.find(b => b.id === bucketId)
+          if (srcBucket) srcBucket.tasks = srcBucket.tasks.filter(t => t.id !== task.id)
+        }
+
+        const bucket = s.taskBuckets.find(b => b.id === targetId)
         if (bucket) {
           const idx = bucket.tasks.findIndex(t => t.id === task.id)
           if (idx >= 0) bucket.tasks[idx] = task
@@ -716,7 +905,7 @@ export const useAppStore = create<StoreState>()(
             } else {
               const lane = tl.swimLanes.find(l => l.id === laneId)
               tl.items.push({
-                id: task.id + '_bar',
+                id: uid(),
                 swimLaneId: laneId,
                 label: task.text,
                 type: 'bar',
@@ -748,12 +937,12 @@ export const useAppStore = create<StoreState>()(
       if (affectedTimelineId) {
         // Read fresh (non-draft) timeline from state after set() has committed
         const tl = get().timelines.find(x => x.id === affectedTimelineId)
-        if (tl) batchWriteTaskAndTimeline(u, bucketId, task, tl)
+        if (tl) batchWriteTaskAndTimeline(u, effectiveBucketId, task, tl)
           .catch(e => console.error('[saveTaskWithTimelineItem batch]', e))
       } else {
-        writeTask(u, bucketId, task)
+        writeTask(u, effectiveBucketId, task).catch(e => console.error('[saveTaskWithTimelineItem]', e))
         get().timelines.filter(tl => tl.items.some(i => i.taskId === task.id))
-          .forEach(tl => writeTimeline(u, tl))
+          .forEach(tl => writeTimeline(u, tl).catch(e => console.error('[saveTaskWithTimelineItem timeline]', e)))
       }
     },
 
@@ -940,7 +1129,8 @@ export const useAppStore = create<StoreState>()(
       }
       batch.set(docRef(u, 'timelines', demoTimeline.id), demoTimeline)
       batch.commit().catch(e => console.error('[loadDemoData batch]', e))
-      writeSettings(u, buildSettingsDoc(get()))
+      writeSettings(u, buildSettingsDoc(get())).catch(e => console.error('[loadDemoData settings]', e))
+      writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[loadDemoData orgchart]', e))
     },
 
     clearDemoData: () => {
@@ -965,7 +1155,8 @@ export const useAppStore = create<StoreState>()(
       for (const id of ['demo-t1','demo-t2','demo-t3','demo-t4','demo-t5','demo-t6','demo-t7']) batch.delete(docRef(u, 'tasks', id))
       batch.delete(docRef(u, 'timelines', 'demo-tl1'))
       batch.commit().catch(e => console.error('[clearDemoData batch]', e))
-      writeSettings(u, buildSettingsDoc(get()))
+      writeSettings(u, buildSettingsDoc(get())).catch(e => console.error('[clearDemoData settings]', e))
+      writeOrgchart(u, buildOrgchartDoc(get())).catch(e => console.error('[clearDemoData orgchart]', e))
     },
   }))
 )
@@ -973,14 +1164,20 @@ export const useAppStore = create<StoreState>()(
 // ─── Settings doc builder ─────────────────────────────────────────────────────
 function buildSettingsDoc(state: StoreState): SettingsDoc {
   return {
-    bucketDefs: state.taskBuckets.map(({ id, name, color }) => ({ id, name, color })),
+    bucketDefs:    state.taskBuckets.map(({ id, name, color }) => ({ id, name, color })),
+    emailSettings: state.emailSettings,
+  }
+}
+
+// ─── Org chart doc builder ────────────────────────────────────────────────────
+function buildOrgchartDoc(state: StoreState): OrgchartDoc {
+  return {
     dottedLines:    state.dottedLines,
     peerLines:      state.peerLines,
     chartContacts:  state.chartContacts,
     positions:      state.positions,
     activeChartOrg: state.activeChartOrg,
     savedCharts:    state.savedCharts,
-    emailSettings:  state.emailSettings,
   }
 }
 

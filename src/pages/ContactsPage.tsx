@@ -12,7 +12,7 @@ type SortKey = 'alpha' | 'level'
 
 export default function ContactsPage() {
   const contacts = useAppStore(s => s.contacts)
-  const addContact = useAppStore(s => s.addContact)
+  const importContacts = useAppStore(s => s.importContacts)
   const deleteContact = useAppStore(s => s.deleteContact)
 
   const [search, setSearch] = useState('')
@@ -84,7 +84,7 @@ export default function ContactsPage() {
     if (!file) return
     const text = await readFileText(file)
     const existing = new Set(contacts.map(c => c.name.toLowerCase().trim()))
-    let added = 0
+    const toAdd: Contact[] = []
 
     if (file.name.endsWith('.json')) {
       let parsed: unknown
@@ -95,9 +95,8 @@ export default function ContactsPage() {
         const c = item as Partial<Contact>
         if (!c.name?.trim()) continue
         if (existing.has(c.name.toLowerCase().trim())) continue
-        addContact({ id: uid(), name: c.name.trim(), org: c.org ?? '', title: c.title ?? '', level: c.level ?? 'individual', email: c.email ?? '', phone: c.phone ?? '', parentId: c.parentId ?? '', createdAt: Date.now() })
+        toAdd.push({ id: uid(), name: c.name.trim(), org: c.org ?? '', title: c.title ?? '', level: c.level ?? 'individual', email: c.email ?? '', phone: c.phone ?? '', parentId: c.parentId ?? '', createdAt: Date.now() })
         existing.add(c.name.toLowerCase().trim())
-        added++
       }
     } else {
       // CSV: header row Name, Title, Organisation, Level, Email, Phone
@@ -115,12 +114,15 @@ export default function ContactsPage() {
         const name = row[iName]?.trim()
         if (!name) continue
         if (existing.has(name.toLowerCase())) continue
-        addContact({ id: uid(), name, org: iOrg >= 0 ? (row[iOrg] ?? '') : '', title: iTitle >= 0 ? (row[iTitle] ?? '') : '', level: 'individual', email: iEmail >= 0 ? (row[iEmail] ?? '') : '', phone: iPhone >= 0 ? (row[iPhone] ?? '') : '', parentId: '', createdAt: Date.now() })
+        toAdd.push({ id: uid(), name, org: iOrg >= 0 ? (row[iOrg] ?? '') : '', title: iTitle >= 0 ? (row[iTitle] ?? '') : '', level: 'individual', email: iEmail >= 0 ? (row[iEmail] ?? '') : '', phone: iPhone >= 0 ? (row[iPhone] ?? '') : '', parentId: '', createdAt: Date.now() })
         existing.add(name.toLowerCase())
-        added++
       }
     }
-    showToast(`${added} contact${added !== 1 ? 's' : ''} imported`, 'success')
+
+    if (toAdd.length === 0) { showToast('No new contacts to import'); return }
+    // Batch-add all contacts atomically
+    importContacts(toAdd)
+    showToast(`${toAdd.length} contact${toAdd.length !== 1 ? 's' : ''} imported`, 'success')
   }
 
   const sortLabel = (key: SortKey) => {

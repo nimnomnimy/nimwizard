@@ -20,10 +20,11 @@ const PRIORITIES = [
 function todayStr() { return new Date().toISOString().split('T')[0] }
 
 export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
-  const taskBuckets           = useAppStore(s => s.taskBuckets)
-  const timelines             = useAppStore(s => s.timelines)
+  const taskBuckets              = useAppStore(s => s.taskBuckets)
+  const timelines                = useAppStore(s => s.timelines)
   const saveTaskWithTimelineItem = useAppStore(s => s.saveTaskWithTimelineItem)
-  const setTaskBuckets        = useAppStore(s => s.setTaskBuckets)
+  const setTaskBuckets           = useAppStore(s => s.setTaskBuckets)
+  const deleteTask               = useAppStore(s => s.deleteTask)
 
   const [text,         setText]        = useState('')
   const [notes,        setNotes]       = useState('')
@@ -109,10 +110,7 @@ export default function TaskDrawer({ open, bucketId, task, onClose }: Props) {
   const handleDelete = () => {
     if (!task) return
     if (!confirm('Delete this task?')) return
-    const newBuckets = taskBuckets.map((b: TaskBucket) => ({
-      ...b, tasks: b.tasks.filter(t => t.id !== task.id)
-    }))
-    setTaskBuckets(newBuckets)
+    deleteTask(task.id)
     showToast('Task deleted')
     onClose()
   }
