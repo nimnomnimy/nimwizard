@@ -9,7 +9,10 @@ const NAV = [
   { to: '/tasks',     label: 'Tasks',      icon: TasksIcon },
   { to: '/timelines', label: 'Timelines',  icon: TimelinesIcon },
   { to: '/diagrams',  label: 'Diagrams',   icon: DiagramsIcon },
-  { to: '/deals',     label: 'Deal Engine', icon: DealsIcon },
+  { to: '/deals',      label: 'Deal Engine',  icon: DealsIcon },
+  { to: '/configs',    label: 'Cust. Configs', icon: ConfigsIcon },
+  { to: '/pricebooks', label: 'Pricebooks',   icon: PricebookIcon },
+  { to: '/contracts',  label: 'Contracts',    icon: ContractsIcon },
 ]
 
 export default function AppShell() {
@@ -146,4 +149,13 @@ function DealsIcon() {
 }
 function SetupIcon() {
   return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd"/></svg>
+}
+function ConfigsIcon() {
+  return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zm0 8a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zm6-6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zm0 8a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z"/></svg>
+}
+function PricebookIcon() {
+  return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M4 4a2 2 0 012-2h4.586A2 2 0 0112 2.586L15.414 6A2 2 0 0116 7.414V16a2 2 0 01-2 2H6a2 2 0 01-2-2V4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h6a1 1 0 100-2H7z" clipRule="evenodd"/></svg>
+}
+function ContractsIcon() {
+  return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm2 10a1 1 0 100 2h4a1 1 0 100-2H8zm0-4a1 1 0 100 2h4a1 1 0 100-2H8zm2-4a1 1 0 00-1 1v.586l2 2V5a1 1 0 00-1-1z" clipRule="evenodd"/></svg>
 }

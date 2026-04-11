@@ -9,7 +9,7 @@ import { db } from '../lib/firebase'
 import type {
   AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine,
   PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask, Task, Diagram,
-  DealProduct, Deal,
+  DealProduct, Deal, CustomerConfig, Pricebook, Contract,
 } from '../types'
 import { uid } from '../lib/utils'
 
@@ -69,7 +69,7 @@ function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: strin
 // ─── In-memory loading state (not reactive, just coordination flags) ──────────
 // These are module-level so they survive re-renders but reset on page reload
 let collectionsLoaded = 0   // count of subcollections that have fired at least once
-const TOTAL_COLLECTIONS = 7 // contacts, meetings, tasks, timelines, diagrams, dealProducts, deals (+settings+orgchart)
+const TOTAL_COLLECTIONS = 10 // contacts, meetings, tasks, timelines, diagrams, dealProducts, deals, customerConfigs, pricebooks, contracts (+settings+orgchart)
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 interface StoreState extends AppState {
@@ -139,6 +139,21 @@ interface StoreState extends AppState {
   addDeal: (d: Deal) => void
   updateDeal: (d: Deal) => void
   deleteDeal: (id: string) => void
+
+  // Customer Configs
+  addCustomerConfig: (c: CustomerConfig) => void
+  updateCustomerConfig: (c: CustomerConfig) => void
+  deleteCustomerConfig: (id: string) => void
+
+  // Pricebooks
+  addPricebook: (p: Pricebook) => void
+  updatePricebook: (p: Pricebook) => void
+  deletePricebook: (id: string) => void
+
+  // Contracts
+  addContract: (c: Contract) => void
+  updateContract: (c: Contract) => void
+  deleteContract: (id: string) => void
 
   // Atomic cross-feature mutations
   addTaskAndUpdateTimeline: (bucketId: string, task: Task, timelineId: string, updatedItem: TimelineItem) => void
@@ -211,6 +226,30 @@ function writeDeal(userUid: string, d: Deal): Promise<void> {
 
 function removeDeal(userUid: string, id: string): Promise<void> {
   return deleteDoc(docRef(userUid, 'deals', id))
+}
+
+function writeCustomerConfig(userUid: string, c: CustomerConfig): Promise<void> {
+  return setDoc(docRef(userUid, 'customerConfigs', c.id), stripUndefined(c))
+}
+
+function removeCustomerConfig(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'customerConfigs', id))
+}
+
+function writePricebook(userUid: string, p: Pricebook): Promise<void> {
+  return setDoc(docRef(userUid, 'pricebooks', p.id), stripUndefined(p))
+}
+
+function removePricebook(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'pricebooks', id))
+}
+
+function writeContract(userUid: string, c: Contract): Promise<void> {
+  return setDoc(docRef(userUid, 'contracts', c.id), stripUndefined(c))
+}
+
+function removeContract(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'contracts', id))
 }
 
 function writeSettings(userUid: string, settings: SettingsDoc): Promise<void> {
@@ -342,6 +381,9 @@ export const useAppStore = create<StoreState>()(
     diagrams: [],
     dealProducts: [],
     deals: [],
+    customerConfigs: [],
+    pricebooks: [],
+    contracts: [],
 
     setUid: (uid) => {
       collectionsLoaded = 0
@@ -449,6 +491,27 @@ export const useAppStore = create<StoreState>()(
         set(s => { s.deals = deals })
         markLoaded()
       }, (e) => { console.error('[deals snapshot]', e); markLoaded() }))
+
+      // ── Customer Configs ─────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'customerConfigs'), (snap) => {
+        const customerConfigs: CustomerConfig[] = snap.docs.map(d => d.data() as CustomerConfig)
+        set(s => { s.customerConfigs = customerConfigs })
+        markLoaded()
+      }, (e) => { console.error('[customerConfigs snapshot]', e); markLoaded() }))
+
+      // ── Pricebooks ───────────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'pricebooks'), (snap) => {
+        const pricebooks: Pricebook[] = snap.docs.map(d => d.data() as Pricebook)
+        set(s => { s.pricebooks = pricebooks })
+        markLoaded()
+      }, (e) => { console.error('[pricebooks snapshot]', e); markLoaded() }))
+
+      // ── Contracts ────────────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'contracts'), (snap) => {
+        const contracts: Contract[] = snap.docs.map(d => d.data() as Contract)
+        set(s => { s.contracts = contracts })
+        markLoaded()
+      }, (e) => { console.error('[contracts snapshot]', e); markLoaded() }))
 
       // ── Settings ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(settingsRef(userUid), (snap) => {
@@ -993,6 +1056,96 @@ export const useAppStore = create<StoreState>()(
       if (u) removeDeal(u, id).catch(e => {
         console.error('[deleteDeal]', e)
         if (prev) set(s => { s.deals.push(prev!) })
+      })
+    },
+
+    // ── Customer Configs ──────────────────────────────────────────────────────
+    addCustomerConfig: (c) => {
+      set(s => { s.customerConfigs.push(c) })
+      const u = get().uid
+      if (u) writeCustomerConfig(u, c).catch(e => {
+        console.error('[addCustomerConfig]', e)
+        set(s => { s.customerConfigs = s.customerConfigs.filter(x => x.id !== c.id) })
+      })
+    },
+
+    updateCustomerConfig: (c) => {
+      let prev: CustomerConfig | undefined
+      set(s => { const i = s.customerConfigs.findIndex(x => x.id === c.id); if (i >= 0) { prev = s.customerConfigs[i]; s.customerConfigs[i] = c } })
+      const u = get().uid
+      if (u) writeCustomerConfig(u, c).catch(e => {
+        console.error('[updateCustomerConfig]', e)
+        if (prev) set(s => { const i = s.customerConfigs.findIndex(x => x.id === c.id); if (i >= 0) s.customerConfigs[i] = prev! })
+      })
+    },
+
+    deleteCustomerConfig: (id) => {
+      let prev: CustomerConfig | undefined
+      set(s => { prev = s.customerConfigs.find(x => x.id === id); s.customerConfigs = s.customerConfigs.filter(x => x.id !== id) })
+      const u = get().uid
+      if (u) removeCustomerConfig(u, id).catch(e => {
+        console.error('[deleteCustomerConfig]', e)
+        if (prev) set(s => { s.customerConfigs.push(prev!) })
+      })
+    },
+
+    // ── Pricebooks ────────────────────────────────────────────────────────────
+    addPricebook: (p) => {
+      set(s => { s.pricebooks.push(p) })
+      const u = get().uid
+      if (u) writePricebook(u, p).catch(e => {
+        console.error('[addPricebook]', e)
+        set(s => { s.pricebooks = s.pricebooks.filter(x => x.id !== p.id) })
+      })
+    },
+
+    updatePricebook: (p) => {
+      let prev: Pricebook | undefined
+      set(s => { const i = s.pricebooks.findIndex(x => x.id === p.id); if (i >= 0) { prev = s.pricebooks[i]; s.pricebooks[i] = p } })
+      const u = get().uid
+      if (u) writePricebook(u, p).catch(e => {
+        console.error('[updatePricebook]', e)
+        if (prev) set(s => { const i = s.pricebooks.findIndex(x => x.id === p.id); if (i >= 0) s.pricebooks[i] = prev! })
+      })
+    },
+
+    deletePricebook: (id) => {
+      let prev: Pricebook | undefined
+      set(s => { prev = s.pricebooks.find(x => x.id === id); s.pricebooks = s.pricebooks.filter(x => x.id !== id) })
+      const u = get().uid
+      if (u) removePricebook(u, id).catch(e => {
+        console.error('[deletePricebook]', e)
+        if (prev) set(s => { s.pricebooks.push(prev!) })
+      })
+    },
+
+    // ── Contracts ─────────────────────────────────────────────────────────────
+    addContract: (c) => {
+      set(s => { s.contracts.push(c) })
+      const u = get().uid
+      if (u) writeContract(u, c).catch(e => {
+        console.error('[addContract]', e)
+        set(s => { s.contracts = s.contracts.filter(x => x.id !== c.id) })
+      })
+    },
+
+    updateContract: (c) => {
+      let prev: Contract | undefined
+      set(s => { const i = s.contracts.findIndex(x => x.id === c.id); if (i >= 0) { prev = s.contracts[i]; s.contracts[i] = c } })
+      const u = get().uid
+      if (u) writeContract(u, c).catch(e => {
+        console.error('[updateContract]', e)
+        if (prev) set(s => { const i = s.contracts.findIndex(x => x.id === c.id); if (i >= 0) s.contracts[i] = prev! })
+      })
+    },
+
+    deleteContract: (id) => {
+      let prev: Contract | undefined
+      set(s => { prev = s.contracts.find(x => x.id === id); s.contracts = s.contracts.filter(x => x.id !== id) })
+      const u = get().uid
+      if (u) removeContract(u, id).catch(e => {
+        console.error('[deleteContract]', e)
+        if (prev) set(s => { s.contracts.push(prev!) })
       })
     },
 

@@ -13,6 +13,9 @@ import TimelinesPage from './pages/TimelinesPage'
 import TimelineEditorPage from './pages/TimelineEditorPage'
 import DiagramsPage from './pages/DiagramsPage'
 import DealEnginePage from './pages/DealEnginePage'
+import CustomerConfigsPage from './pages/CustomerConfigsPage'
+import PricebookPage from './pages/PricebookPage'
+import ContractManagerPage from './pages/ContractManagerPage'
 
 function AppRoutes() {
   useAuth()
@@ -41,6 +44,9 @@ function AppRoutes() {
         <Route path="/timelines/:id" element={<TimelineEditorPage />} />
         <Route path="/diagrams"    element={<DiagramsPage />} />
         <Route path="/deals"       element={<DealEnginePage />} />
+        <Route path="/configs"     element={<CustomerConfigsPage />} />
+        <Route path="/pricebooks"  element={<PricebookPage />} />
+        <Route path="/contracts"   element={<ContractManagerPage />} />
         <Route path="/setup"       element={<SetupPage />} />
       </Route>
       <Route path="/admin" element={<AdminPage />} />

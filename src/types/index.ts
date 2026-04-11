@@ -329,6 +329,81 @@ export interface OptimizationResult {
   summary: string
 }
 
+// ─── Customer Configs ─────────────────────────────────────────────────────────
+
+export interface CustomerConfigItem {
+  id: string
+  productId: string    // reference to a DealProduct id (or free-text if no match)
+  productName: string  // display name — kept in sync or entered manually
+  description: string
+  quantity: number
+  notes?: string
+}
+
+export interface CustomerConfig {
+  id: string
+  customerName: string
+  notes?: string
+  items: CustomerConfigItem[]
+  createdAt: number
+  updatedAt: number
+}
+
+// ─── Pricebook ────────────────────────────────────────────────────────────────
+
+export interface PricebookEntry {
+  id: string
+  productId: string    // reference to DealProduct
+  productName: string  // snapshot at time of entry
+  unitPriceUsd: number
+  customFxRate?: number          // USD→AUD override for this entry
+  freightIncluded: boolean
+  specialTerms?: string
+}
+
+export interface Pricebook {
+  id: string
+  customerName: string
+  customFxRate?: number          // default USD→AUD for this pricebook
+  notes?: string
+  entries: PricebookEntry[]
+  createdAt: number
+  updatedAt: number
+}
+
+// ─── Contract Manager ─────────────────────────────────────────────────────────
+
+export type ContractType = 'master-agreement' | 'sow' | 'amendment' | 'renewal'
+export type PaymentTerms = 'net-30' | 'net-60' | 'net-90' | 'upfront' | 'milestone' | 'custom'
+export type BillingModel  = 'subscription' | 'one-time' | 'mixed'
+
+export interface ContractNotification {
+  id: string
+  label: string    // e.g. "Renewal Notice", "Contract Ending"
+  date: string     // YYYY-MM-DD
+  notified: boolean
+}
+
+export interface Contract {
+  id: string
+  contractNumber: string
+  type: ContractType
+  customerName: string
+  title: string
+  startDate: string          // YYYY-MM-DD
+  endDate: string            // YYYY-MM-DD
+  contractValueUsd: number
+  billingModel: BillingModel
+  paymentTerms: PaymentTerms
+  customPaymentTerms?: string  // when paymentTerms = 'custom'
+  specialTerms?: string
+  notifications: ContractNotification[]
+  notes?: string
+  parentContractId?: string  // SOWs link back to their master agreement
+  createdAt: number
+  updatedAt: number
+}
+
 // ─── App State ────────────────────────────────────────────────────────────────
 
 export interface AppState {
@@ -346,4 +421,7 @@ export interface AppState {
   diagrams: Diagram[]
   dealProducts: DealProduct[]
   deals: Deal[]
+  customerConfigs: CustomerConfig[]
+  pricebooks: Pricebook[]
+  contracts: Contract[]
 }
