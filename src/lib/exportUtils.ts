@@ -447,67 +447,55 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   const visible = contacts.filter(c => positions[c.id])
   if (!visible.length) return
 
-  const margin = 8
-  const titleH = 16
+  // Positions are in screen pixels (96dpi). Convert to mm: 1px = 0.264583mm
+  const PX_TO_MM = 0.264583
+  // Fixed card dimensions in mm — always legible regardless of chart size
+  const nW = 52   // mm
+  const nH = 22   // mm
 
-  // Compute content bounds
+  const margin = 8   // mm
+  const titleH = 10  // mm
+
+  // Compute layout bounds in mm
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const c of visible) {
     const p = positions[c.id]
-    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
-    maxX = Math.max(maxX, p.x + 200); maxY = Math.max(maxY, p.y + 88)
+    const px = p.x * PX_TO_MM; const py = p.y * PX_TO_MM
+    minX = Math.min(minX, px); minY = Math.min(minY, py)
+    maxX = Math.max(maxX, px + nW); maxY = Math.max(maxY, py + nH)
   }
 
-  const srcW = maxX - minX + 60
-  const srcH = maxY - minY + 60
+  const offX = margin - minX + 8
+  const offY = margin + titleH - minY + 8
 
-  // Scale to fit on page but never below 0.7 — keeps text legible.
-  // If 0.7 would overflow, the page dimensions are expanded instead.
-  const pageW = doc.internal.pageSize.getWidth()
-  const pageH = doc.internal.pageSize.getHeight()
-  const usableW = pageW - margin * 2
-  const usableH = pageH - margin * 2 - titleH
-  const fitScale = Math.min(usableW / srcW, usableH / srcH)
-  const scale = Math.max(fitScale, 0.7)
-
-  const offX = margin - minX * scale + 30 * scale
-  const offY = margin + titleH - minY * scale + 30 * scale
-
-  // Card size is based on minimum legible font size, not layout scale.
-  // This ensures cards are always readable regardless of how much the chart shrinks.
-  const MIN_CARD_SCALE = 1.0  // never render cards smaller than native 200×88
-  const cardScale = Math.max(scale, MIN_CARD_SCALE)
-  const nW = 200 * cardScale
-  const nH = 88 * cardScale
-
-  function sx(x: number) { return offX + x * scale }
-  function sy(y: number) { return offY + y * scale }
+  function sx(x: number) { return offX + x * PX_TO_MM }
+  function sy(y: number) { return offY + y * PX_TO_MM }
 
   // Title
-  doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
-  doc.text('Org Chart', margin, margin + 6)
+  doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
+  doc.text('Org Chart', margin, margin + 5)
 
-  // Connection lines first — connect to card centres
+  // Connection lines
   function drawLine(fromId: string, toId: string, style: 'solid' | 'dashed' | 'peer') {
     const fp = positions[fromId]; const tp = positions[toId]
     if (!fp || !tp) return
     if (style === 'peer') {
-      doc.setDrawColor(245, 158, 11); doc.setLineWidth(0.3 * scale)
+      doc.setDrawColor(245, 158, 11); doc.setLineWidth(0.3)
       doc.setLineDashPattern([1.5, 1], 0)
       const left  = fp.x < tp.x ? fp : tp
       const right = fp.x < tp.x ? tp : fp
-      const y1 = sy(left.y  + 44); const y2 = sy(right.y + 44)
-      const x1 = sx(left.x  + 200); const x2 = sx(right.x)
+      const y1 = sy(left.y)  + nH / 2; const y2 = sy(right.y) + nH / 2
+      const x1 = sx(left.x)  + nW;     const x2 = sx(right.x)
       const mx  = (x1 + x2) / 2
       doc.lines([[mx - x1, 0], [0, y2 - y1], [x2 - mx, 0]], x1, y1)
     } else {
       const col = style === 'dashed' ? [139, 92, 246] : [203, 213, 225]
       doc.setDrawColor(...(col as [number, number, number]))
-      doc.setLineWidth(0.3 * scale)
+      doc.setLineWidth(0.3)
       if (style === 'dashed') doc.setLineDashPattern([1.5, 1], 0)
       else doc.setLineDashPattern([], 0)
-      const x1 = sx(fp.x + 100); const y1 = sy(fp.y + 88)
-      const x2 = sx(tp.x + 100); const y2 = sy(tp.y)
+      const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
+      const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y)
       const my  = (y1 + y2) / 2
       doc.lines([[0, my - y1], [x2 - x1, 0], [0, y2 - my]], x1, y1)
     }
@@ -518,46 +506,47 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
   for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
 
-  // Cards — always drawn at cardScale so text is legible
+  // Cards — fixed size in mm, always legible
   for (const contact of visible) {
     const p = positions[contact.id]
     const x = sx(p.x); const y = sy(p.y)
 
-    // Card background + shadow effect (slight offset rect)
-    doc.setFillColor(240, 240, 240)
-    pdfRoundRect(doc, x + 0.5, y + 0.5, nW, nH, 2 * cardScale, true, false)
+    // Shadow
+    doc.setFillColor(230, 232, 240)
+    pdfRoundRect(doc, x + 0.4, y + 0.4, nW, nH, 1.5, true, false)
+    // Card
     doc.setFillColor(255, 255, 255); doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2)
-    pdfRoundRect(doc, x, y, nW, nH, 2 * cardScale, true, true)
+    pdfRoundRect(doc, x, y, nW, nH, 1.5, true, true)
 
     // Avatar circle
-    const avR = 11 * cardScale
-    const avX = x + 16 * cardScale + avR; const avY = y + nH / 2
+    const avR = 4.2
+    const avX = x + 4 + avR; const avY = y + nH / 2
     const [ar, ag, ab] = hexToRgb(avatarColorFromName(contact.name))
     doc.setFillColor(ar, ag, ab)
     doc.circle(avX, avY, avR, 'F')
 
     // Avatar initials
     const ini = contactInitials(contact.name)
-    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
+    doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
     const iw = doc.getTextWidth(ini)
-    doc.text(ini, avX - iw / 2, avY + 2 * cardScale)
+    doc.text(ini, avX - iw / 2, avY + 1.2)
 
-    // Text
-    const tx = avX + avR + 5 * cardScale
-    const maxTw = nW - (tx - x) - 4 * cardScale
+    // Text — fixed font sizes so always readable
+    const tx = avX + avR + 2.5
+    const maxTw = nW - (tx - x) - 2
 
-    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
-    doc.text(pdfFitText(doc, contact.name, maxTw), tx, y + 16 * cardScale)
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
+    doc.text(pdfFitText(doc, contact.name, maxTw), tx, y + 7)
 
     if (contact.title) {
-      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
-      doc.text(pdfFitText(doc, contact.title, maxTw), tx, y + 27 * cardScale)
+      doc.setFontSize(7); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
+      doc.text(pdfFitText(doc, contact.title, maxTw), tx, y + 12)
     }
 
     if (contact.level) {
       const badge = LEVEL_LABELS[contact.level] ?? contact.level
-      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
-      doc.text(badge.toUpperCase(), tx, y + 37 * cardScale)
+      doc.setFontSize(6); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
+      doc.text(badge.toUpperCase(), tx, y + 17)
     }
   }
 }
@@ -569,34 +558,29 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   const visible = contacts.filter(c => positions[c.id])
   if (!visible.length) return
 
+  // Positions are in screen pixels. Convert to inches: 1px = 1/96in
+  const PX_TO_IN = 1 / 96
+  // Fixed card size in inches — always legible on any slide
+  const nW = 2.0   // inches
+  const nH = 0.85  // inches
+
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const c of visible) {
     const p = positions[c.id]
-    minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
-    maxX = Math.max(maxX, p.x + 200); maxY = Math.max(maxY, p.y + 88)
+    const px = p.x * PX_TO_IN; const py = p.y * PX_TO_IN
+    minX = Math.min(minX, px); minY = Math.min(minY, py)
+    maxX = Math.max(maxX, px + nW); maxY = Math.max(maxY, py + nH)
   }
 
   const margin = 0.3   // inches
   const titleH = 0.5
-  const usableW = 9.4 - margin * 2
-  const usableH = 7.5 - titleH - margin * 2
-  const srcW = maxX - minX + 60
-  const srcH = maxY - minY + 60
-  // Never shrink below 0.009 in/px (≈ keeps cards ~1.8" wide) so text stays legible.
-  // If the chart is bigger than the slide, it will overflow — acceptable vs. unreadable text.
-  const fitScale = Math.min(usableW / srcW, usableH / srcH)
-  const scale = Math.max(fitScale, 0.009)   // px → inches
-  const offX = margin - minX * scale + 30 * scale
-  const offY = titleH + margin - minY * scale + 30 * scale
 
-  // Card size is based on minimum legible dimensions, independent of layout scale.
-  const MIN_CARD_SCALE = 0.011  // ~1.8" wide minimum card on a 10" slide
-  const cardScale = Math.max(scale, MIN_CARD_SCALE)
-  const nW = 200 * cardScale
-  const nH = 88 * cardScale
+  // Layout offset: top-left of bounding box maps to (margin, titleH + margin)
+  const offX = margin - minX
+  const offY = titleH + margin - minY
 
-  function sx(x: number) { return offX + x * scale }
-  function sy(y: number) { return offY + y * scale }
+  function sx(x: number) { return offX + x * PX_TO_IN }
+  function sy(y: number) { return offY + y * PX_TO_IN }
 
   // Title
   slide.addText('Org Chart', { x: 0.3, y: 0.1, w: 9.4, h: 0.4, fontSize: 14, bold: true, color: '1e293b' })
@@ -613,15 +597,15 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     if (style === 'peer') {
       const left  = fp.x < tp.x ? fp : tp
       const right = fp.x < tp.x ? tp : fp
-      const y1 = sy(left.y  + 44); const y2 = sy(right.y + 44)
-      const x1 = sx(left.x  + 200); const x2 = sx(right.x)
+      const y1 = sy(left.y)  + nH / 2; const y2 = sy(right.y) + nH / 2
+      const x1 = sx(left.x)  + nW;     const x2 = sx(right.x)
       const mx  = (x1 + x2) / 2
       slide.addShape(pptx.ShapeType.line, { x: x1, y: y1, w: mx - x1, h: 0, line: lineProps })
       slide.addShape(pptx.ShapeType.line, { x: mx, y: Math.min(y1, y2), w: 0, h: Math.abs(y2 - y1), line: lineProps })
       slide.addShape(pptx.ShapeType.line, { x: mx, y: y2, w: x2 - mx, h: 0, line: lineProps })
     } else {
-      const x1 = sx(fp.x + 100); const y1 = sy(fp.y + 88)
-      const x2 = sx(tp.x + 100); const y2 = sy(tp.y)
+      const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
+      const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y)
       const my  = (y1 + y2) / 2
       slide.addShape(pptx.ShapeType.line, { x: x1, y: y1, w: 0, h: my - y1, line: lineProps })
       slide.addShape(pptx.ShapeType.line, { x: Math.min(x1, x2), y: my, w: Math.abs(x2 - x1), h: 0, line: lineProps })
@@ -633,7 +617,7 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
   for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
 
-  // Cards — always at cardScale so text is legible
+  // Cards — fixed 2"×0.85" so text is always legible
   for (const contact of visible) {
     const p = positions[contact.id]
     const x = sx(p.x); const y = sy(p.y)
@@ -644,18 +628,18 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     // Card
     slide.addShape(pptx.ShapeType.roundRect, { x, y, w: nW, h: nH, fill: { color: 'ffffff' }, line: { color: 'e2e8f0', width: 0.5 }, rectRadius: 0.08 })
 
-    // Avatar circle — sized relative to card
-    const avR = 11 * cardScale
-    const avX = x + (16 + 11) * cardScale; const avY = y + nH / 2 - avR
+    // Avatar circle
+    const avR = 0.18  // inches radius
+    const avX = x + 0.15 + avR; const avY = y + nH / 2 - avR
     slide.addShape(pptx.ShapeType.ellipse, { x: avX - avR, y: avY, w: avR * 2, h: avR * 2, fill: { color: cardColor }, line: { width: 0 } })
     slide.addText(contactInitials(contact.name), {
       x: avX - avR, y: avY, w: avR * 2, h: avR * 2,
       fontSize: 9, bold: true, color: 'ffffff', align: 'center', valign: 'middle',
     })
 
-    // Text content — fixed legible font sizes
-    const tx = avX + avR + 5 * cardScale
-    const tw = nW - (tx - x) - 4 * cardScale
+    // Text content
+    const tx = avX + avR + 0.1
+    const tw = nW - (tx - x) - 0.1
 
     const lines: PptxGenJS.TextProps[] = [
       { text: contact.name, options: { bold: true, fontSize: 10, color: '1e293b', breakLine: true } },
@@ -663,7 +647,7 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     if (contact.title) lines.push({ text: contact.title, options: { fontSize: 9, color: '64748b', breakLine: true } })
     if (contact.level) lines.push({ text: (LEVEL_LABELS[contact.level] ?? contact.level).toUpperCase(), options: { fontSize: 8, color: '3b82f6', bold: true } })
 
-    slide.addText(lines, { x: tx, w: tw, y: y + nH * 0.18, h: nH * 0.7, valign: 'top', wrap: true, color: '1e293b' })
+    slide.addText(lines, { x: tx, w: tw, y: y + 0.07, h: nH - 0.1, valign: 'middle', wrap: true, color: '1e293b' })
   }
 }
 
@@ -860,8 +844,10 @@ export async function exportContactsXLSX(contacts: Contact[], orgData: OrgChartD
 }
 
 export async function exportContactsPDF(contacts: Contact[], orgData: OrgChartData): Promise<void> {
-  // Compute org chart page dimensions so we never have to shrink below legible scale.
-  // min scale is 0.7, so required page = content * 0.7 + margins.
+  // Page size is computed from the chart layout in mm so cards always fit at fixed legible size.
+  // Cards are 52×22mm. Positions are in px; 1px = 0.264583mm at 96dpi.
+  const PX_TO_MM = 0.264583
+  const CARD_W_MM = 52; const CARD_H_MM = 22
   let doc: jsPDF
   if (orgData.contacts.length > 0) {
     const vis = orgData.contacts.filter(c => orgData.positions[c.id])
@@ -869,15 +855,13 @@ export async function exportContactsPDF(contacts: Contact[], orgData: OrgChartDa
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
       for (const c of vis) {
         const p = orgData.positions[c.id]
-        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
-        maxX = Math.max(maxX, p.x + 200); maxY = Math.max(maxY, p.y + 88)
+        const px = p.x * PX_TO_MM; const py = p.y * PX_TO_MM
+        minX = Math.min(minX, px); minY = Math.min(minY, py)
+        maxX = Math.max(maxX, px + CARD_W_MM); maxY = Math.max(maxY, py + CARD_H_MM)
       }
-      const margin = 8; const titleH = 16; const minScale = 0.7
-      const neededW = (maxX - minX + 60) * minScale + margin * 2
-      const neededH = (maxY - minY + 60) * minScale + margin * 2 + titleH
-      // px → mm (1px = 0.2646mm at 96dpi, but jsPDF uses 72dpi internally → 0.3528mm)
-      const w = Math.max(297, neededW * 0.352778)
-      const h = Math.max(210, neededH * 0.352778)
+      const margin = 8; const titleH = 18
+      const w = Math.max(297, maxX - minX + margin * 2 + 16)
+      const h = Math.max(210, maxY - minY + margin * 2 + titleH + 16)
       doc = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', format: [w, h] })
     } else {
       doc = new jsPDF({ orientation: 'landscape' })
