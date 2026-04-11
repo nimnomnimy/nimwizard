@@ -210,14 +210,26 @@ export interface PricingTier {
   discountPercent: number
 }
 
+export type PricingType = 'one-time' | 'recurring'
+export type RecurringPeriod = 'monthly' | 'annual'
+
+export interface RecurringConfig {
+  period: RecurringPeriod       // monthly or annual billing
+  termMonths: number            // contract term length in months, e.g. 36
+  pricePerPeriod: number        // USD per billing period
+  floorPricePerPeriod: number   // USD floor per billing period
+}
+
 export interface DealProduct {
   id: string
   name: string
   category: ProductCategory
-  costPrice: number           // USD
-  floorSellPrice: number      // USD — hard minimum sell price
-  defaultSellPrice: number    // USD
-  fxOverride?: number         // USD→AUD override (undefined = use deal-level global)
+  pricingType: PricingType      // one-time or recurring
+  costPrice: number             // USD
+  floorSellPrice: number        // USD — hard minimum sell price (one-time / total)
+  defaultSellPrice: number      // USD (one-time or total contract value)
+  recurringConfig?: RecurringConfig  // populated when pricingType = 'recurring'
+  fxOverride?: number           // USD→AUD override (undefined = use deal-level global)
   pricingTiers?: PricingTier[]
   createdAt: number
 }
@@ -351,6 +363,15 @@ export interface CustomerConfig {
 
 // ─── Pricebook ────────────────────────────────────────────────────────────────
 
+export type UpliftType = 'none' | 'cpi' | 'fixed'
+
+export interface UpliftConfig {
+  type: UpliftType
+  percentage: number        // e.g. 3.5 for 3.5%
+  label?: string            // e.g. "CPI", "Annual uplift"
+  applyAnnually: boolean    // true = applied each year of term
+}
+
 export interface PricebookEntry {
   id: string
   productId: string    // reference to DealProduct
@@ -359,6 +380,7 @@ export interface PricebookEntry {
   customFxRate?: number          // USD→AUD override for this entry
   freightIncluded: boolean
   specialTerms?: string
+  uplift?: UpliftConfig          // optional per-entry uplift override
 }
 
 export interface Pricebook {
@@ -366,6 +388,7 @@ export interface Pricebook {
   customerName: string
   customFxRate?: number          // default USD→AUD for this pricebook
   notes?: string
+  defaultUplift?: UpliftConfig   // default uplift applied to all entries
   entries: PricebookEntry[]
   createdAt: number
   updatedAt: number

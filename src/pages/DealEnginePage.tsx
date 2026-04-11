@@ -4,7 +4,6 @@ import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import CurrencyBar from '../components/ui/CurrencyBar'
-import ProductDrawer from '../components/deals/ProductDrawer'
 import DealLineItemRow from '../components/deals/DealLineItem'
 import DealSummaryPanel from '../components/deals/DealSummaryPanel'
 import OptimizationPanel from '../components/deals/OptimizationPanel'
@@ -17,16 +16,7 @@ import type {
   ProductCategory, OptimizationRecommendation, OptimizationResult,
 } from '../types'
 
-type MainTab = 'products' | 'deals'
 type RightTab = 'summary' | 'optimizer' | 'charts'
-
-const CATEGORY_COLORS: Record<ProductCategory, string> = {
-  'Software':              'bg-blue-100 text-blue-700',
-  'Hardware':              'bg-slate-100 text-slate-700',
-  'Professional Services': 'bg-purple-100 text-purple-700',
-  'Technical Services':    'bg-sky-100 text-sky-700',
-  'Maintenance':           'bg-green-100 text-green-700',
-}
 
 const DISCOUNT_TYPE_LABELS = {
   'direct':         'Direct',
@@ -47,9 +37,7 @@ export default function DealEnginePage() {
 
   const setFxRate = useCurrency(s => s.setFxRate)
 
-  const [mainTab, setMainTab]       = useState<MainTab>('deals')
   const [rightTab, setRightTab]     = useState<RightTab>('summary')
-  const [drawerProductId, setDrawerProductId] = useState<string | null | undefined>(undefined)
   const [activeDealId, setActiveDealId]       = useState<string | null>(null)
   const [showComparison, setShowComparison]   = useState(false)
   const [showNewDealModal, setShowNewDealModal] = useState(false)
@@ -92,7 +80,7 @@ export default function DealEnginePage() {
     setActiveDealId(d.id)
     setShowNewDealModal(false)
     setNewDealName('')
-    setMainTab('deals')
+    // mainTab removed
     showToast(`"${d.name}" created`, 'success')
   }
 
@@ -217,85 +205,19 @@ export default function DealEnginePage() {
   return (
     <div className="h-full flex flex-col overflow-hidden bg-slate-50">
 
-      {/* Top tab bar */}
+      {/* Top bar */}
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center justify-between gap-3" style={{ minHeight: 52 }}>
-        <div className="flex gap-1">
-          {(['deals', 'products'] as MainTab[]).map(t => (
-            <button key={t} onClick={() => setMainTab(t)}
-              className={`px-4 py-2 text-sm font-semibold rounded-lg transition-colors capitalize ${mainTab === t ? 'bg-blue-500 text-white' : 'text-slate-500 hover:bg-slate-100'}`}>
-              {t === 'deals' ? `Deals (${deals.length})` : `Products (${products.length})`}
-            </button>
-          ))}
-        </div>
+        <h2 className="text-sm font-bold text-slate-700">Deals <span className="text-slate-400 font-normal">({deals.length})</span></h2>
         <CurrencyBar className="mr-auto" />
-        <div className="flex gap-2">
-          {mainTab === 'products' && (
-            <button onClick={() => setDrawerProductId(null)}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors min-h-[40px]">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-              New Product
-            </button>
-          )}
-          {mainTab === 'deals' && (
-            <button onClick={() => { setShowNewDealModal(true); setNewDealName('') }}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors min-h-[40px]">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-              New Deal
-            </button>
-          )}
-        </div>
+        <button onClick={() => { setShowNewDealModal(true); setNewDealName('') }}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors min-h-[40px]">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+          New Deal
+        </button>
       </div>
 
-      {/* ── PRODUCTS TAB ────────────────────────────────────────────────────── */}
-      {mainTab === 'products' && (
-        <div className="flex-1 overflow-y-auto p-4">
-          {products.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
-              <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
-                <rect x="6" y="6" width="36" height="36" rx="4" stroke="currentColor" strokeWidth="2"/>
-                <path d="M16 24h16M24 16v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
-              </svg>
-              <div className="text-center">
-                <p className="font-semibold text-slate-600">No products yet</p>
-                <p className="text-sm mt-1">Create your first product to start building deals</p>
-              </div>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {products.map(p => {
-                const margin = p.defaultSellPrice > 0
-                  ? ((p.defaultSellPrice - p.costPrice) / p.defaultSellPrice * 100).toFixed(1)
-                  : '—'
-                const floorMargin = p.floorSellPrice > 0
-                  ? ((p.floorSellPrice - p.costPrice) / p.floorSellPrice * 100).toFixed(1)
-                  : '—'
-                return (
-                  <div key={p.id} onClick={() => setDrawerProductId(p.id)}
-                    className="bg-white border border-slate-200 rounded-xl p-4 cursor-pointer hover:border-blue-300 hover:shadow-sm transition-all group">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h3 className="text-sm font-bold text-slate-800 truncate">{p.name}</h3>
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full flex-shrink-0 ${CATEGORY_COLORS[p.category]}`}>{p.category}</span>
-                    </div>
-                    <div className="flex flex-col gap-1 text-xs text-slate-500">
-                      <div className="flex justify-between"><span>Cost</span><span className="font-medium text-slate-700">${p.costPrice.toLocaleString()}</span></div>
-                      <div className="flex justify-between"><span>Floor Sell</span><span className="font-medium text-slate-700">${p.floorSellPrice.toLocaleString()} <span className="text-slate-400">({floorMargin}%)</span></span></div>
-                      <div className="flex justify-between"><span>Default Sell</span><span className="font-medium text-slate-700">${p.defaultSellPrice.toLocaleString()} <span className="text-slate-400">({margin}%)</span></span></div>
-                      {p.fxOverride && <div className="flex justify-between"><span>FX Override</span><span className="font-medium text-blue-600">{p.fxOverride.toFixed(4)}</span></div>}
-                      {p.pricingTiers && p.pricingTiers.length > 0 && (
-                        <p className="text-slate-400 mt-1">{p.pricingTiers.length} pricing tier{p.pricingTiers.length > 1 ? 's' : ''}</p>
-                      )}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── DEALS TAB ───────────────────────────────────────────────────────── */}
-      {mainTab === 'deals' && (
-        <div className="flex-1 flex min-h-0 overflow-hidden">
+      {/* ── DEALS ───────────────────────────────────────────────────────── */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
 
           {/* Left: deal list */}
           <div className="w-56 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
@@ -456,7 +378,6 @@ export default function DealEnginePage() {
             </div>
           )}
         </div>
-      )}
 
       {/* Modals */}
       {showComparison && activeDeal && (
@@ -464,14 +385,6 @@ export default function DealEnginePage() {
           deal={activeDeal}
           products={products}
           onClose={() => setShowComparison(false)}
-        />
-      )}
-
-      {drawerProductId !== undefined && (
-        <ProductDrawer
-          productId={drawerProductId}
-          open={true}
-          onClose={() => setDrawerProductId(undefined)}
         />
       )}
 

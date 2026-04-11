@@ -18,7 +18,6 @@ function marginColor(pct: number, belowFloor: boolean): string {
   return 'text-red-500 font-semibold'
 }
 
-const fmtUsd = (n: number) => `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 interface Props {
   item: LineItemType
@@ -31,8 +30,9 @@ interface Props {
 export default function DealLineItemRow({ item, products, metrics, onChange, onRemove }: Props) {
   const [freightOpen, setFreightOpen] = useState(false)
   const product = products.find(p => p.id === item.productId)
-  const currFmt = useCurrency(s => s.fmt)
-  const currency = useCurrency(s => s.currency)
+  const currFmt       = useCurrency(s => s.fmt)
+  const fmtAud        = useCurrency(s => s.fmtAud)
+  const showSecondary = useCurrency(s => s.showSecondary)
 
   const set = <K extends keyof LineItemType>(k: K, v: LineItemType[K]) =>
     onChange({ ...item, [k]: v })
@@ -115,10 +115,8 @@ export default function DealLineItemRow({ item, products, metrics, onChange, onR
           <span className="text-sm text-slate-700 font-medium">
             {metrics ? currFmt(metrics.sellPriceUsd) : '—'}
           </span>
-          {currency === 'USD' && metrics && (
-            <p className="text-[10px] text-slate-400">
-              A{fmtUsd(metrics.sellAud)}
-            </p>
+          {showSecondary && metrics && (
+            <p className="text-[10px] text-slate-400">{fmtAud(metrics.sellPriceUsd)}</p>
           )}
         </td>
 
@@ -130,6 +128,7 @@ export default function DealLineItemRow({ item, products, metrics, onChange, onR
                 {metrics.marginPercent === -Infinity ? 'N/A' : `${metrics.marginPercent.toFixed(1)}%`}
               </span>
               <p className="text-[10px] text-slate-400">{currFmt(metrics.marginUsd)}</p>
+              {showSecondary && <p className="text-[10px] text-slate-300">{fmtAud(metrics.marginUsd)}</p>}
               {metrics.belowFloor && (
                 <p className="text-[10px] text-red-500 font-semibold">⚠ Below floor</p>
               )}

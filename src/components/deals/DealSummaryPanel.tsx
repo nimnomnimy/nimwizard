@@ -8,8 +8,9 @@ interface Props {
 }
 
 export default function DealSummaryPanel({ metrics }: Props) {
-  const fmt = useCurrency(s => s.fmt)
-  const currency = useCurrency(s => s.currency)
+  const fmt           = useCurrency(s => s.fmt)
+  const fmtAud        = useCurrency(s => s.fmtAud)
+  const showSecondary = useCurrency(s => s.showSecondary)
   const budgetUsedPct = metrics.discountBudgetUsed + (metrics.discountBudgetUsed + metrics.discountBudgetRemaining) > 0
     ? (metrics.discountBudgetUsed / (metrics.discountBudgetUsed + metrics.discountBudgetRemaining)) * 100
     : 0
@@ -41,10 +42,11 @@ export default function DealSummaryPanel({ metrics }: Props) {
       {/* Key metrics grid */}
       <div className="grid grid-cols-2 gap-2">
         <MetricTile label="Total Sell" value={fmt(metrics.totalSellUsd)}
-          sub={currency === 'USD' ? `A$${metrics.totalSellAud.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined} />
+          sub={showSecondary ? fmtAud(metrics.totalSellUsd) : undefined} />
         <MetricTile label="Total Cost" value={fmt(metrics.totalCostUsd)}
-          sub={currency === 'USD' ? `A$${metrics.totalCostAud.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined} />
-        <MetricTile label="Margin $" value={fmt(metrics.totalMarginUsd)} valueClass={marginColor} />
+          sub={showSecondary ? fmtAud(metrics.totalCostUsd) : undefined} />
+        <MetricTile label="Margin $" value={fmt(metrics.totalMarginUsd)} valueClass={marginColor}
+          sub={showSecondary ? fmtAud(metrics.totalMarginUsd) : undefined} />
         <MetricTile label="Margin %" value={pct(metrics.totalMarginPercent)} valueClass={marginColor} />
       </div>
 

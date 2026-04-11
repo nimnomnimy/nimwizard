@@ -3,14 +3,29 @@ import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
 import CurrencyBar from '../components/ui/CurrencyBar'
-import type { Pricebook, PricebookEntry } from '../types'
+import type { Pricebook, PricebookEntry, UpliftConfig, UpliftType } from '../types'
+
+function emptyUplift(): UpliftConfig {
+  return { type: 'none', percentage: 0, applyAnnually: false }
+}
 
 function emptyEntry(): PricebookEntry {
   return { id: uid(), productId: '', productName: '', unitPriceUsd: 0, freightIncluded: false }
 }
 
 function emptyPricebook(): Omit<Pricebook, 'id' | 'createdAt' | 'updatedAt'> {
-  return { customerName: '', customFxRate: undefined, notes: '', entries: [emptyEntry()] }
+  return { customerName: '', customFxRate: undefined, notes: '', entries: [emptyEntry()], defaultUplift: emptyUplift() }
+}
+
+function applyUplift(price: number, uplift: UpliftConfig | undefined): number {
+  if (!uplift || uplift.type === 'none' || uplift.percentage === 0) return price
+  return price * (1 + uplift.percentage / 100)
+}
+
+function upliftLabel(uplift: UpliftConfig | undefined): string | null {
+  if (!uplift || uplift.type === 'none') return null
+  const tag = uplift.label || (uplift.type === 'cpi' ? 'CPI' : 'Uplift')
+  return `+${uplift.percentage}% ${tag}${uplift.applyAnnually ? '/yr' : ''}`
 }
 
 export default function PricebookPage() {
@@ -20,7 +35,8 @@ export default function PricebookPage() {
   const updatePricebook = useAppStore(s => s.updatePricebook)
   const deletePricebook = useAppStore(s => s.deletePricebook)
   const fmt             = useCurrency(s => s.fmt)
-  const currency        = useCurrency(s => s.currency)
+  const fmtAud          = useCurrency(s => s.fmtAud)
+  const showSecondary   = useCurrency(s => s.showSecondary)
 
   const [activeId, setActiveId]   = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -46,7 +62,13 @@ export default function PricebookPage() {
 
   function openEdit(p: Pricebook) {
     setEditId(p.id)
-    setDraft({ customerName: p.customerName, customFxRate: p.customFxRate, notes: p.notes ?? '', entries: p.entries.map(e => ({ ...e })) })
+    setDraft({
+      customerName: p.customerName,
+      customFxRate: p.customFxRate,
+      notes: p.notes ?? '',
+      entries: p.entries.map(e => ({ ...e })),
+      defaultUplift: p.defaultUplift ? { ...p.defaultUplift } : emptyUplift(),
+    })
     setFxInput(p.customFxRate?.toString() ?? '')
     setUseFx(p.customFxRate != null)
     setShowModal(true)
@@ -58,6 +80,7 @@ export default function PricebookPage() {
     const payload = {
       ...draft,
       customFxRate: useFx ? (parseFloat(fxInput) || undefined) : undefined,
+      defaultUplift: draft.defaultUplift?.type === 'none' ? undefined : draft.defaultUplift,
     }
     if (editId) {
       updatePricebook({ id: editId, ...payload, createdAt: pricebooks.find(p => p.id === editId)!.createdAt, updatedAt: ts })
@@ -82,10 +105,8 @@ export default function PricebookPage() {
     })
   }
 
-  // Compute AUD price for display
-  function toAud(usdPrice: number, entry: PricebookEntry, pb: Pricebook): number {
-    const rate = entry.customFxRate ?? pb.customFxRate ?? 1
-    return usdPrice * rate
+  function setDefaultUplift(patch: Partial<UpliftConfig>) {
+    setDraft(d => ({ ...d, defaultUplift: { ...(d.defaultUplift ?? emptyUplift()), ...patch } }))
   }
 
   return (
@@ -115,10 +136,17 @@ export default function PricebookPage() {
             <button key={p.id} onClick={() => setActiveId(p.id)}
               className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
               <p className="font-semibold text-slate-800 truncate">{p.customerName}</p>
-              <p className="text-[11px] text-slate-400 mt-0.5">
-                {p.entries.length} product{p.entries.length !== 1 ? 's' : ''}
-                {p.customFxRate ? ` · FX ${p.customFxRate.toFixed(4)}` : ''}
-              </p>
+              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                <span className="text-[11px] text-slate-400">
+                  {p.entries.length} product{p.entries.length !== 1 ? 's' : ''}
+                  {p.customFxRate ? ` · FX ${p.customFxRate.toFixed(4)}` : ''}
+                </span>
+                {p.defaultUplift && p.defaultUplift.type !== 'none' && (
+                  <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded-full">
+                    {upliftLabel(p.defaultUplift)}
+                  </span>
+                )}
+              </div>
             </button>
           ))}
         </div>
@@ -136,10 +164,15 @@ export default function PricebookPage() {
             <div className="flex items-start justify-between">
               <div>
                 <h1 className="text-xl font-bold text-slate-900">{active.customerName}</h1>
-                <div className="flex items-center gap-3 mt-1">
+                <div className="flex items-center gap-3 mt-1 flex-wrap">
                   {active.customFxRate && (
                     <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full">
                       FX rate: {active.customFxRate.toFixed(4)} USD→AUD
+                    </span>
+                  )}
+                  {active.defaultUplift && active.defaultUplift.type !== 'none' && (
+                    <span className="text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-full">
+                      {upliftLabel(active.defaultUplift)}
                     </span>
                   )}
                   {active.notes && <p className="text-sm text-slate-500">{active.notes}</p>}
@@ -163,34 +196,46 @@ export default function PricebookPage() {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Product</th>
-                    <th className="px-4 py-3 text-right">Unit Price</th>
-                    {currency === 'USD' && (active.customFxRate != null) && <th className="px-4 py-3 text-right">AUD</th>}
+                    <th className="px-4 py-3 text-right">Base Price</th>
+                    {active.defaultUplift && active.defaultUplift.type !== 'none' && (
+                      <th className="px-4 py-3 text-right text-amber-600">After Uplift</th>
+                    )}
                     <th className="px-4 py-3 text-center w-28">Freight</th>
                     <th className="px-4 py-3 text-left">Special Terms</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {active.entries.map(entry => (
-                    <tr key={entry.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
-                      <td className="px-4 py-3">
-                        <p className="font-medium text-slate-800">{entry.productName || '—'}</p>
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-700">
-                        {fmt(entry.unitPriceUsd)}
-                      </td>
-                      {currency === 'USD' && (active.customFxRate != null) && (
-                        <td className="px-4 py-3 text-right text-slate-500">
-                          A${toAud(entry.unitPriceUsd, entry, active).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  {active.entries.map(entry => {
+                    const effectiveUplift = entry.uplift ?? active.defaultUplift
+                    const uplifted = applyUplift(entry.unitPriceUsd, effectiveUplift)
+                    const hasUplift = active.defaultUplift && active.defaultUplift.type !== 'none'
+                    return (
+                      <tr key={entry.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-slate-800">{entry.productName || '—'}</p>
+                          {entry.uplift && entry.uplift.type !== 'none' && (
+                            <p className="text-[10px] text-amber-600 mt-0.5">{upliftLabel(entry.uplift)} (override)</p>
+                          )}
                         </td>
-                      )}
-                      <td className="px-4 py-3 text-center">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${entry.freightIncluded ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
-                          {entry.freightIncluded ? 'Included' : 'Excluded'}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-xs text-slate-400">{entry.specialTerms || '—'}</td>
-                    </tr>
-                  ))}
+                        <td className="px-4 py-3 text-right">
+                          <span className="font-semibold text-slate-700">{fmt(entry.unitPriceUsd)}</span>
+                          {showSecondary && <p className="text-[10px] text-slate-400">{fmtAud(entry.unitPriceUsd)}</p>}
+                        </td>
+                        {hasUplift && (
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-semibold text-amber-700">{fmt(uplifted)}</span>
+                            {showSecondary && <p className="text-[10px] text-amber-400">{fmtAud(uplifted)}</p>}
+                          </td>
+                        )}
+                        <td className="px-4 py-3 text-center">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${entry.freightIncluded ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
+                            {entry.freightIncluded ? 'Included' : 'Excluded'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-xs text-slate-400">{entry.specialTerms || '—'}</td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -236,6 +281,47 @@ export default function PricebookPage() {
                     onChange={e => setFxInput(e.target.value)}
                     placeholder="e.g. 1.5800"
                     className="w-40 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                )}
+              </div>
+
+              {/* Default Uplift / CPI */}
+              <div className="flex flex-col gap-2 bg-amber-50 border border-amber-100 rounded-xl p-3">
+                <p className="text-xs font-bold text-amber-700 uppercase tracking-wide">Default Price Uplift</p>
+                <div className="flex gap-2 flex-wrap">
+                  {(['none', 'cpi', 'fixed'] as UpliftType[]).map(t => (
+                    <button key={t} type="button"
+                      onClick={() => setDefaultUplift({ type: t })}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold transition-colors ${(draft.defaultUplift?.type ?? 'none') === t ? 'bg-amber-500 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      {t === 'none' ? 'None' : t === 'cpi' ? 'CPI' : 'Fixed %'}
+                    </button>
+                  ))}
+                </div>
+                {draft.defaultUplift?.type !== 'none' && (
+                  <div className="flex flex-wrap gap-3 items-end">
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[11px] font-semibold text-slate-400">Percentage</label>
+                      <div className="relative w-28">
+                        <input type="number" min="0" step="0.01" value={draft.defaultUplift?.percentage ?? ''}
+                          onChange={e => setDefaultUplift({ percentage: parseFloat(e.target.value) || 0 })}
+                          placeholder="0.00"
+                          className="w-full pr-5 pl-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
+                      </div>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-[11px] font-semibold text-slate-400">Label (optional)</label>
+                      <input value={draft.defaultUplift?.label ?? ''}
+                        onChange={e => setDefaultUplift({ label: e.target.value })}
+                        placeholder={draft.defaultUplift?.type === 'cpi' ? 'CPI' : 'Uplift'}
+                        className="w-32 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                    </div>
+                    <label className="flex items-center gap-2 cursor-pointer pb-1.5">
+                      <input type="checkbox" checked={draft.defaultUplift?.applyAnnually ?? false}
+                        onChange={e => setDefaultUplift({ applyAnnually: e.target.checked })}
+                        className="rounded border-slate-300" />
+                      <span className="text-xs text-slate-600">Apply annually</span>
+                    </label>
+                  </div>
                 )}
               </div>
 
@@ -293,7 +379,7 @@ export default function PricebookPage() {
                     </div>
 
                     {/* Freight + Special Terms row */}
-                    <div className="flex gap-3 items-center">
+                    <div className="flex gap-3 items-center flex-wrap">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={entry.freightIncluded}
                           onChange={e => setEntry(idx, { freightIncluded: e.target.checked })}
@@ -305,6 +391,35 @@ export default function PricebookPage() {
                         placeholder="Special terms…"
                         className="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </div>
+
+                    {/* Per-entry uplift override */}
+                    {draft.defaultUplift?.type !== 'none' && (
+                      <div className="flex items-center gap-2">
+                        <label className="text-[11px] font-semibold text-slate-400 flex-shrink-0">Override uplift:</label>
+                        <select
+                          value={entry.uplift?.type ?? ''}
+                          onChange={e => {
+                            const t = e.target.value as UpliftType | ''
+                            if (t === '') setEntry(idx, { uplift: undefined })
+                            else setEntry(idx, { uplift: { type: t, percentage: entry.uplift?.percentage ?? 0, applyAnnually: false } })
+                          }}
+                          className="border border-slate-200 rounded-lg px-2 py-1 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                          <option value="">Use default</option>
+                          <option value="none">None (no uplift)</option>
+                          <option value="cpi">CPI</option>
+                          <option value="fixed">Fixed %</option>
+                        </select>
+                        {entry.uplift && entry.uplift.type !== 'none' && (
+                          <div className="relative w-24">
+                            <input type="number" min="0" step="0.01"
+                              value={entry.uplift.percentage}
+                              onChange={e => setEntry(idx, { uplift: { ...entry.uplift!, percentage: parseFloat(e.target.value) || 0 } })}
+                              className="w-full pr-5 pl-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-amber-400" />
+                            <span className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">%</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

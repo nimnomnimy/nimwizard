@@ -10,7 +10,7 @@ const NAV = [
   { to: '/timelines', label: 'Timelines',  icon: TimelinesIcon },
   { to: '/diagrams',  label: 'Diagrams',   icon: DiagramsIcon },
   { to: '/deals',      label: 'Deal Engine',  icon: DealsIcon },
-  { to: '/configs',    label: 'Cust. Configs', icon: ConfigsIcon },
+  { to: '/configs',    label: 'Products',      icon: ConfigsIcon },
   { to: '/pricebooks', label: 'Pricebooks',   icon: PricebookIcon },
   { to: '/contracts',  label: 'Contracts',    icon: ContractsIcon },
 ]
