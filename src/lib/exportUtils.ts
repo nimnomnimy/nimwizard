@@ -473,16 +473,21 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   const offX = margin - minX * scale + 30 * scale
   const offY = margin + titleH - minY * scale + 30 * scale
 
+  // Card size is based on minimum legible font size, not layout scale.
+  // This ensures cards are always readable regardless of how much the chart shrinks.
+  const MIN_CARD_SCALE = 1.0  // never render cards smaller than native 200×88
+  const cardScale = Math.max(scale, MIN_CARD_SCALE)
+  const nW = 200 * cardScale
+  const nH = 88 * cardScale
+
   function sx(x: number) { return offX + x * scale }
   function sy(y: number) { return offY + y * scale }
-  const nW = 200 * scale
-  const nH = 88 * scale
 
   // Title
   doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
   doc.text('Org Chart', margin, margin + 6)
 
-  // Connection lines first
+  // Connection lines first — connect to card centres
   function drawLine(fromId: string, toId: string, style: 'solid' | 'dashed' | 'peer') {
     const fp = positions[fromId]; const tp = positions[toId]
     if (!fp || !tp) return
@@ -513,46 +518,46 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
   for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
 
-  // Cards
+  // Cards — always drawn at cardScale so text is legible
   for (const contact of visible) {
     const p = positions[contact.id]
     const x = sx(p.x); const y = sy(p.y)
 
     // Card background + shadow effect (slight offset rect)
     doc.setFillColor(240, 240, 240)
-    pdfRoundRect(doc, x + 0.5, y + 0.5, nW, nH, 2 * scale, true, false)
+    pdfRoundRect(doc, x + 0.5, y + 0.5, nW, nH, 2 * cardScale, true, false)
     doc.setFillColor(255, 255, 255); doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.2)
-    pdfRoundRect(doc, x, y, nW, nH, 2 * scale, true, true)
+    pdfRoundRect(doc, x, y, nW, nH, 2 * cardScale, true, true)
 
     // Avatar circle
-    const avR = 11 * scale
-    const avX = x + 16 * scale + avR; const avY = y + nH / 2
+    const avR = 11 * cardScale
+    const avX = x + 16 * cardScale + avR; const avY = y + nH / 2
     const [ar, ag, ab] = hexToRgb(avatarColorFromName(contact.name))
     doc.setFillColor(ar, ag, ab)
     doc.circle(avX, avY, avR, 'F')
 
     // Avatar initials
     const ini = contactInitials(contact.name)
-    doc.setFontSize(Math.max(7, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
+    doc.setFontSize(8); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
     const iw = doc.getTextWidth(ini)
-    doc.text(ini, avX - iw / 2, avY + 2 * scale)
+    doc.text(ini, avX - iw / 2, avY + 2 * cardScale)
 
     // Text
-    const tx = avX + avR + 5 * scale
-    const maxTw = nW - (tx - x) - 4 * scale
+    const tx = avX + avR + 5 * cardScale
+    const maxTw = nW - (tx - x) - 4 * cardScale
 
-    doc.setFontSize(Math.max(8, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
-    doc.text(pdfFitText(doc, contact.name, maxTw), tx, y + 14 * scale)
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
+    doc.text(pdfFitText(doc, contact.name, maxTw), tx, y + 16 * cardScale)
 
     if (contact.title) {
-      doc.setFontSize(Math.max(7, 5.5 * scale)); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
-      doc.text(pdfFitText(doc, contact.title, maxTw), tx, y + 24 * scale)
+      doc.setFontSize(8); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
+      doc.text(pdfFitText(doc, contact.title, maxTw), tx, y + 27 * cardScale)
     }
 
     if (contact.level) {
       const badge = LEVEL_LABELS[contact.level] ?? contact.level
-      doc.setFontSize(Math.max(6, 5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
-      doc.text(badge.toUpperCase(), tx, y + 33 * scale)
+      doc.setFontSize(7); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
+      doc.text(badge.toUpperCase(), tx, y + 37 * cardScale)
     }
   }
 }
@@ -584,10 +589,14 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   const offX = margin - minX * scale + 30 * scale
   const offY = titleH + margin - minY * scale + 30 * scale
 
+  // Card size is based on minimum legible dimensions, independent of layout scale.
+  const MIN_CARD_SCALE = 0.011  // ~1.8" wide minimum card on a 10" slide
+  const cardScale = Math.max(scale, MIN_CARD_SCALE)
+  const nW = 200 * cardScale
+  const nH = 88 * cardScale
+
   function sx(x: number) { return offX + x * scale }
   function sy(y: number) { return offY + y * scale }
-  const nW = 200 * scale
-  const nH = 88 * scale
 
   // Title
   slide.addText('Org Chart', { x: 0.3, y: 0.1, w: 9.4, h: 0.4, fontSize: 14, bold: true, color: '1e293b' })
@@ -607,7 +616,6 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
       const y1 = sy(left.y  + 44); const y2 = sy(right.y + 44)
       const x1 = sx(left.x  + 200); const x2 = sx(right.x)
       const mx  = (x1 + x2) / 2
-      // Draw as 3 separate line segments
       slide.addShape(pptx.ShapeType.line, { x: x1, y: y1, w: mx - x1, h: 0, line: lineProps })
       slide.addShape(pptx.ShapeType.line, { x: mx, y: Math.min(y1, y2), w: 0, h: Math.abs(y2 - y1), line: lineProps })
       slide.addShape(pptx.ShapeType.line, { x: mx, y: y2, w: x2 - mx, h: 0, line: lineProps })
@@ -625,7 +633,7 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
   for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
 
-  // Cards
+  // Cards — always at cardScale so text is legible
   for (const contact of visible) {
     const p = positions[contact.id]
     const x = sx(p.x); const y = sy(p.y)
@@ -636,27 +644,26 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     // Card
     slide.addShape(pptx.ShapeType.roundRect, { x, y, w: nW, h: nH, fill: { color: 'ffffff' }, line: { color: 'e2e8f0', width: 0.5 }, rectRadius: 0.08 })
 
-    // Avatar circle
-    const avR = 11 * scale
-    const avX = x + (16 + 11) * scale; const avY = y + nH / 2 - avR
+    // Avatar circle — sized relative to card
+    const avR = 11 * cardScale
+    const avX = x + (16 + 11) * cardScale; const avY = y + nH / 2 - avR
     slide.addShape(pptx.ShapeType.ellipse, { x: avX - avR, y: avY, w: avR * 2, h: avR * 2, fill: { color: cardColor }, line: { width: 0 } })
     slide.addText(contactInitials(contact.name), {
       x: avX - avR, y: avY, w: avR * 2, h: avR * 2,
-      fontSize: Math.max(8, Math.round(7 * scale * 72)), bold: true, color: 'ffffff', align: 'center', valign: 'middle',
+      fontSize: 9, bold: true, color: 'ffffff', align: 'center', valign: 'middle',
     })
 
-    // Text content
-    const tx = avX + avR + 5 * scale
-    const tw = nW - (tx - x) - 4 * scale
-    const textOpts = { x: tx, w: tw, bold: false, color: '1e293b' }
+    // Text content — fixed legible font sizes
+    const tx = avX + avR + 5 * cardScale
+    const tw = nW - (tx - x) - 4 * cardScale
 
     const lines: PptxGenJS.TextProps[] = [
-      { text: contact.name, options: { bold: true, fontSize: Math.max(9, Math.round(6.5 * scale * 72)), color: '1e293b', breakLine: true } },
+      { text: contact.name, options: { bold: true, fontSize: 10, color: '1e293b', breakLine: true } },
     ]
-    if (contact.title) lines.push({ text: contact.title, options: { fontSize: Math.max(8, Math.round(5.5 * scale * 72)), color: '64748b', breakLine: true } })
-    if (contact.level) lines.push({ text: (LEVEL_LABELS[contact.level] ?? contact.level).toUpperCase(), options: { fontSize: Math.max(7, Math.round(5 * scale * 72)), color: '3b82f6', bold: true } })
+    if (contact.title) lines.push({ text: contact.title, options: { fontSize: 9, color: '64748b', breakLine: true } })
+    if (contact.level) lines.push({ text: (LEVEL_LABELS[contact.level] ?? contact.level).toUpperCase(), options: { fontSize: 8, color: '3b82f6', bold: true } })
 
-    slide.addText(lines, { ...textOpts, y: y + nH * 0.18, h: nH * 0.7, valign: 'top', wrap: true })
+    slide.addText(lines, { x: tx, w: tw, y: y + nH * 0.18, h: nH * 0.7, valign: 'top', wrap: true, color: '1e293b' })
   }
 }
 

@@ -1310,7 +1310,7 @@ export default function OrgChartPage() {
                   `}
                   style={{
                     left: pos.x, top: pos.y,
-                    width: NODE_W, minHeight: NODE_H,
+                    minWidth: 160, maxWidth: 240,
                     touchAction: 'none',
                     zIndex: isSelected ? 20 : 10,
                     background: 'white',
@@ -1360,10 +1360,10 @@ export default function OrgChartPage() {
                       {initials(c.name)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold truncate text-slate-800">{c.name}</p>
-                      {c.title && <p className="text-[10px] truncate text-slate-400">{c.title}</p>}
+                      <p className="text-xs font-bold text-slate-800 leading-snug">{c.name}</p>
+                      {c.title && <p className="text-[10px] text-slate-400 leading-snug mt-0.5">{c.title}</p>}
                       {c.level && (
-                        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400">
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400 mt-0.5 block">
                           {LEVEL_LABELS[c.level as Level] ?? c.level}
                         </span>
                       )}
