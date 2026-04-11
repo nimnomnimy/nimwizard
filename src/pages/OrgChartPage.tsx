@@ -66,29 +66,45 @@ function computeTreeLayout(
   function regularChildren(node: any): any[] { return node.children.filter((c: any) => !c.isAssistant) }
   function assistantChildren(node: any): any[] { return node.children.filter((c: any) => c.isAssistant) }
 
-  // Measure how wide a subtree rooted at node will be, given its branch style
-  // Only regular (non-assistant) children contribute to width
-  function subtreeWidth(node: any): number {
+  // Measure how wide a subtree rooted at node will be, given its branch style.
+  // Returns { leftSpan, rightSpan } — how far the subtree extends left/right from the node's center.
+  // This is needed so left-column and right-column reserve space on the correct side.
+  function subtreeSpan(node: any): { left: number; right: number } {
+    const half = NODE_W / 2
     const reg = regularChildren(node)
-    if (!reg.length) return NODE_W
+    if (!reg.length) return { left: half, right: half }
     const style = nodeStyle(node)
-    if (style === 'right-column' || style === 'left-column') {
-      const childMaxW = Math.max(...reg.map((c: any) => subtreeWidth(c)))
-      return NODE_W + hGap + childMaxW
+
+    if (style === 'right-column') {
+      // Children are to the right: parent left edge + children column to the right
+      const childMaxW = Math.max(...reg.map((c: any) => subtreeSpan(c).left + subtreeSpan(c).right))
+      return { left: half, right: half + hGap + childMaxW }
+    }
+    if (style === 'left-column') {
+      // Children are to the left: parent right edge + children column to the left
+      const childMaxW = Math.max(...reg.map((c: any) => subtreeSpan(c).left + subtreeSpan(c).right))
+      return { left: half + hGap + childMaxW, right: half }
     }
     if (style === 'two-column') {
-      const rows = Math.ceil(reg.length / 2)
-      const pairW = NODE_W * 2 + hGap
-      const childRows: any[][] = []
-      for (let i = 0; i < rows; i++) childRows.push(reg.slice(i * 2, i * 2 + 2))
-      const maxChildRowW = Math.max(...childRows.map(row =>
-        row.reduce((s: number, c: any) => s + subtreeWidth(c), 0) + hGap * (row.length - 1)
-      ))
-      return Math.max(pairW, maxChildRowW)
+      // Two columns of children below — each column uses max subtreeWidth of its items
+      const leftColW  = Math.max(...reg.filter((_: any, i: number) => i % 2 === 0).map((c: any) => subtreeSpan(c).left + subtreeSpan(c).right))
+      const rightColW = reg.filter((_: any, i: number) => i % 2 === 1).length
+        ? Math.max(...reg.filter((_: any, i: number) => i % 2 === 1).map((c: any) => subtreeSpan(c).left + subtreeSpan(c).right))
+        : 0
+      const totalW = leftColW + (rightColW ? hGap + rightColW : 0)
+      const spread = Math.max(NODE_W * 2 + hGap, totalW) / 2
+      return { left: spread, right: spread }
     }
-    // tree / staggered
-    const cw = reg.reduce((s: number, c: any) => s + subtreeWidth(c), 0)
-    return Math.max(NODE_W, cw + hGap * (reg.length - 1))
+    // tree / staggered — symmetric centering
+    const totalW = reg.reduce((s: number, c: any) => s + subtreeSpan(c).left + subtreeSpan(c).right, 0)
+      + hGap * (reg.length - 1)
+    const spread = Math.max(NODE_W, totalW) / 2
+    return { left: spread, right: spread }
+  }
+
+  function subtreeWidth(node: any): number {
+    const s = subtreeSpan(node)
+    return s.left + s.right
   }
 
   // Measure subtree height (used by column styles for sibling spacing)
@@ -125,43 +141,52 @@ function computeTreeLayout(
     const reg  = regularChildren(node)
     const asst = assistantChildren(node)
 
-    // Layout assistant children to the right of the parent, at mid-parent Y
-    // They sit at the same vertical level as the parent so the tap-off line is natural
-    const asstOffsetX = NODE_W + hGap
+    // Assistants sit to the right of the parent at the same Y level
     asst.forEach((child: any, i: number) => {
       const asstX = Math.round(centerX + NODE_W / 2 + hGap + i * (NODE_W + hGap / 2))
-      positions[child.id] = { x: asstX, y: Math.round(y + NODE_H / 2 - NODE_H / 2) }
-      // Recurse for any children of the assistant
+      positions[child.id] = { x: asstX, y }
       if (child.children.length) layout(child, asstX + NODE_W / 2, y)
     })
-    void asstOffsetX
 
     if (!reg.length) return
 
     if (style === 'right-column') {
-      const colX = centerX + NODE_W / 2 + hGap + NODE_W / 2
+      // Children stacked vertically in a column to the right of the parent
+      const colCX = centerX + NODE_W / 2 + hGap + NODE_W / 2
       let cy = y
       reg.forEach((child: any) => {
-        layout(child, colX, cy)
+        layout(child, colCX, cy)
         cy += subtreeHeight(child) + vGap
       })
     } else if (style === 'left-column') {
-      const colX = centerX - NODE_W / 2 - hGap - NODE_W / 2
+      // Children stacked vertically in a column to the left of the parent.
+      // The column center is: parent center − half parent − gap − half child subtree width.
+      // We need to account for the widest child subtree so nothing goes off-screen.
+      const maxChildW = Math.max(...reg.map((c: any) => subtreeWidth(c)))
+      const colCX = centerX - NODE_W / 2 - hGap - maxChildW / 2
       let cy = y
       reg.forEach((child: any) => {
-        layout(child, colX, cy)
+        // Each child is centred on colCX — if a child's subtree is narrower than maxChildW,
+        // it still aligns to the same bus X which keeps connectors tidy.
+        layout(child, colCX, cy)
         cy += subtreeHeight(child) + vGap
       })
     } else if (style === 'two-column') {
-      const totalW = NODE_W * 2 + hGap
-      const startX = centerX - totalW / 2 + NODE_W / 2
+      // Two columns of children below the parent.
+      // Column widths are sized to the widest subtree in each column so nothing overlaps.
+      const leftItems  = reg.filter((_: any, i: number) => i % 2 === 0)
+      const rightItems = reg.filter((_: any, i: number) => i % 2 === 1)
+      const leftColW   = leftItems.length  ? Math.max(...leftItems.map( (c: any) => subtreeWidth(c))) : NODE_W
+      const rightColW  = rightItems.length ? Math.max(...rightItems.map((c: any) => subtreeWidth(c))) : NODE_W
+      const totalW     = leftColW + hGap + rightColW
+      const leftCX     = centerX - totalW / 2 + leftColW / 2
+      const rightCX    = leftCX + leftColW / 2 + hGap + rightColW / 2
       const rows = Math.ceil(reg.length / 2)
       let rowY = childY
       for (let r = 0; r < rows; r++) {
         const pair = reg.slice(r * 2, r * 2 + 2)
         pair.forEach((child: any, col: number) => {
-          const cx = startX + col * (NODE_W + hGap)
-          layout(child, cx, rowY)
+          layout(child, col === 0 ? leftCX : rightCX, rowY)
         })
         const rowH = Math.max(...pair.map((c: any) => subtreeHeight(c)))
         rowY += rowH + vGap
@@ -188,12 +213,15 @@ function computeTreeLayout(
     }
   }
 
-  // Place roots side by side
+  // Place roots side by side, ensuring left-column roots start far enough right
+  // that their children don't go off the left edge.
   let startX = 30
   roots.forEach(r => {
-    const sw = subtreeWidth(r)
-    layout(r, startX + sw / 2, 30)
-    startX += sw + hGap * 2
+    const span = subtreeSpan(r)
+    // Ensure the leftmost point of this root's subtree stays at or past startX
+    const centerX = startX + span.left
+    layout(r, centerX, 30)
+    startX = centerX + span.right + hGap * 2
   })
   return positions
 }
