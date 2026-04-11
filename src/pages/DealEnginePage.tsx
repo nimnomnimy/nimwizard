@@ -397,7 +397,6 @@ export default function DealEnginePage() {
                   {/* Discount rules */}
                   <DiscountRulesSection
                     rules={activeDeal.discountRules}
-                    products={products}
                     onAdd={addRule}
                     onUpdate={updateRule}
                     onRemove={removeRule}
@@ -492,13 +491,10 @@ export default function DealEnginePage() {
 
 // ── Discount rules section ────────────────────────────────────────────────────
 
-import type { DealProduct } from '../types'
-
 function DiscountRulesSection({
-  rules, products, onAdd, onUpdate, onRemove, onApply,
+  rules, onAdd, onUpdate, onRemove, onApply,
 }: {
   rules: DiscountRule[]
-  products: DealProduct[]
   onAdd: () => void
   onUpdate: (r: DiscountRule) => void
   onRemove: (id: string) => void

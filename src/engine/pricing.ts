@@ -17,7 +17,7 @@
  */
 
 import type {
-  DealProduct, DealLineItem, DiscountRule, PricingTier, ProductCategory,
+  DealProduct, DealLineItem, DiscountRule, PricingTier,
 } from '../types'
 
 // ─── Tier pricing ─────────────────────────────────────────────────────────────

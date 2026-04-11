@@ -95,7 +95,7 @@ export default function DealCharts({ deal, products, metrics }: Props) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" interval={0} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                <Tooltip formatter={(v: number) => fmt(v)} />
+                <Tooltip formatter={(v) => fmt(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
                 <Bar dataKey="Cost"    stackId="a" fill="#94a3b8" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Freight" stackId="a" fill="#f97316" radius={[0, 0, 0, 0]} />
@@ -133,7 +133,7 @@ export default function DealCharts({ deal, products, metrics }: Props) {
                       <Cell key={i} fill={d.color} />
                     ))}
                   </Pie>
-                  <RTooltip formatter={(v: number) => fmt(v)} />
+                  <RTooltip formatter={(v) => fmt(Number(v))} />
                 </PieChart>
               </ResponsiveContainer>
               <div className="flex flex-col gap-2">
@@ -163,7 +163,7 @@ export default function DealCharts({ deal, products, metrics }: Props) {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                 <XAxis dataKey="name" tick={{ fontSize: 10 }} angle={-30} textAnchor="end" interval={0} />
                 <YAxis tick={{ fontSize: 10 }} tickFormatter={v => `$${v.toFixed(0)}`} />
-                <Tooltip formatter={(v: number) => fmt(v)} />
+                <Tooltip formatter={(v) => fmt(Number(v))} />
                 <Legend wrapperStyle={{ fontSize: 10, paddingTop: 8 }} />
                 <Bar dataKey="Current"    fill="#3b82f6" radius={[3, 3, 0, 0]} />
                 <Bar dataKey="All Ocean"  fill="#10b981" radius={[3, 3, 0, 0]} />

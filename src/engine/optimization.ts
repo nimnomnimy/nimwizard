@@ -58,7 +58,7 @@ import type {
   Deal, DealProduct, DealLineItem, DealMetrics,
   OptimizationResult, OptimizationRecommendation, OptimizationGoal,
 } from '../types'
-import { calcDealMetrics, calcLineMetrics } from './metrics'
+import { calcDealMetrics } from './metrics'
 import { calcFreight, allOceanCost, allAirCost } from './freight'
 
 // ─── Tuneable thresholds ──────────────────────────────────────────────────────
@@ -92,15 +92,15 @@ function applyRecommendationToDeal(
         return {
           ...item,
           freight: item.freight
-            ? { ...item.freight, method: 'ocean' }
-            : { method: 'ocean', oceanCostPerUnit: item.freight?.oceanCostPerUnit },
+            ? { ...item.freight, method: 'ocean' as const }
+            : { method: 'ocean' as const },
         }
       case 'switch-to-air':
         return {
           ...item,
           freight: item.freight
-            ? { ...item.freight, method: 'air' }
-            : { method: 'air', airCostPerUnit: item.freight?.airCostPerUnit },
+            ? { ...item.freight, method: 'air' as const }
+            : { method: 'air' as const },
         }
       case 'give-free-units': {
         // Mark one item as free (simplification — in reality you'd split the line)
@@ -224,9 +224,8 @@ export function optimizeDeal(
     // Discount perceived value = just the discount amount
     const discountPerceivedValue = discountUsd
 
-    // Ratio: how much perceived value per $ spent
-    const freeRatio     = freeUnitCount > 0 ? freePerceivedValue / discountUsd : 0
-    const discountRatio = 1.0  // always 1:1
+    // Ratio: how much perceived value per $ spent (discount ratio is always 1:1)
+    const freeRatio = freeUnitCount > 0 ? freePerceivedValue / discountUsd : 0
 
     if (freeRatio >= FREE_UNITS_VALUE_RATIO_THRESHOLD && freeUnitCount >= 1) {
       // Free units yield better perceived value per dollar

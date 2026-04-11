@@ -7,7 +7,7 @@ const pct = (n: number) => `${n.toFixed(1)}%`
 
 interface Props {
   metrics: DealMetrics
-  fxRate: number
+  fxRate?: number
 }
 
 export default function DealSummaryPanel({ metrics, fxRate }: Props) {

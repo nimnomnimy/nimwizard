@@ -166,7 +166,6 @@ export default function DealLineItemRow({ item, products, metrics, fxRate, onCha
           <td colSpan={8} className="px-4 py-3">
             <FreightEditor
               freight={item.freight}
-              qty={item.quantity}
               breakdown={freightBreakdown}
               onChange={f => set('freight', f)}
             />
@@ -184,12 +183,11 @@ import type { FreightBreakdown } from '../../engine/freight'
 
 function FreightEditor({
   freight,
-  qty,
   breakdown,
   onChange,
 }: {
   freight: FreightConfig | undefined
-  qty: number
+  qty?: number
   breakdown: FreightBreakdown | null
   onChange: (f: FreightConfig | undefined) => void
 }) {

@@ -1,4 +1,4 @@
-import type { Deal, DealProduct, DealScenario, DealMetrics } from '../../types'
+import type { Deal, DealProduct, DealMetrics } from '../../types'
 import { calcDealMetrics } from '../../engine/metrics'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -105,7 +105,7 @@ export default function ScenarioComparison({ deal, products, onClose }: Props) {
                     <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} />
                     <YAxis tick={{ fontSize: 11 }} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-                    <Tooltip formatter={(v: number) => fmt(v)} />
+                    <Tooltip formatter={(v) => fmt(Number(v))} />
                     <Legend wrapperStyle={{ fontSize: 11 }} />
                     {scenarioMetrics.map((s, i) => (
                       <Bar key={s.label} dataKey={s.label} fill={COLORS[i % COLORS.length]} radius={[3, 3, 0, 0]} />
