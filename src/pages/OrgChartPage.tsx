@@ -408,7 +408,7 @@ export default function OrgChartPage() {
       // Separate assistant children (title contains 'asst' or 'assistant') from regular
       const isAssistant = (id: string) => {
         const c = contacts.find(x => x.id === id)
-        return /^asst\.?$|assistant/i.test(c?.title ?? '') || /^asst\.?$|assistant/i.test(c?.name ?? '')
+        return c?.isAssistant === true
       }
       const assistantIds = childIds.filter(isAssistant)
       const regularIds   = childIds.filter(id => !isAssistant(id))
@@ -455,15 +455,25 @@ export default function OrgChartPage() {
           // (bus handle rendered as React div — see busHandles below)
         }
 
-        // Assistants: horizontal off parent side, then stub down to child top-center
+        // Assistants: dashed branch off the parent bus
+        const ASST_DASH_COL = '5,4'
+        const ASST_COLOR_COL = '#64748b'
         assistantIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
-          const chCX = ch.x + ch.w / 2
-          const d = `M ${parExitX} ${parMidY} L ${chCX} ${parMidY} L ${chCX} ${ch.y}`
-          const vis = makePath(d, lineColor)
+          const chMidY = ch.y + ch.h / 2
+          const goRight = parExitX <= ch.x + ch.w / 2
+          const chEdgeX = goRight ? ch.x : ch.x + ch.w
+          const d = `M ${parExitX} ${parMidY} L ${chEdgeX} ${parMidY} L ${chEdgeX} ${chMidY}`
+          const vis = makePath(d, ASST_COLOR_COL, ASST_DASH_COL)
           ;(svg as SVGSVGElement).appendChild(vis)
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, ASST_COLOR_COL, () => deleteConn(childId), [vis]))
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          dot.setAttribute('cx', String(parExitX)); dot.setAttribute('cy', String(parMidY))
+          dot.setAttribute('r', '3.5'); dot.setAttribute('fill', 'white')
+          dot.setAttribute('stroke', ASST_COLOR_COL); dot.setAttribute('stroke-width', '1.5')
+          dot.setAttribute('pointer-events', 'none')
+          ;(svg as SVGSVGElement).appendChild(dot)
         })
         return
       }
@@ -500,16 +510,26 @@ export default function OrgChartPage() {
         })
         // (bus handle rendered as React div — see busHandles below)
 
-        // Assistants tap off the trunk
+        // Assistants tap off the trunk with a dashed branch
+        const ASST_DASH2 = '5,4'
+        const ASST_COLOR2 = '#64748b'
         assistantIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const tapY = Math.round(trunkTop + (busY - trunkTop) * 0.5)
-          const chCX = ch.x + ch.w / 2
-          const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
-          const vis = makePath(d, lineColor)
+          const chMidY = ch.y + ch.h / 2
+          const goRight = parCX <= ch.x + ch.w / 2
+          const chEdgeX = goRight ? ch.x : ch.x + ch.w
+          const d = `M ${parCX} ${tapY} L ${chEdgeX} ${tapY} L ${chEdgeX} ${chMidY}`
+          const vis = makePath(d, ASST_COLOR2, ASST_DASH2)
           ;(svg as SVGSVGElement).appendChild(vis)
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, ASST_COLOR2, () => deleteConn(childId), [vis]))
+          const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+          dot.setAttribute('cx', String(parCX)); dot.setAttribute('cy', String(tapY))
+          dot.setAttribute('r', '3.5'); dot.setAttribute('fill', 'white')
+          dot.setAttribute('stroke', ASST_COLOR2); dot.setAttribute('stroke-width', '1.5')
+          dot.setAttribute('pointer-events', 'none')
+          ;(svg as SVGSVGElement).appendChild(dot)
         })
         return
       }
@@ -552,16 +572,39 @@ export default function OrgChartPage() {
         // (bus handle rendered as React div — see busHandles below)
       }
 
-      // Assistants: tap off trunk at the bus Y level
+      // Assistants: dashed branch tapping off the trunk midpoint → horizontal to card left/right edge
+      const ASST_DASH = '5,4'
+      const ASST_COLOR = '#64748b'
       assistantIds.forEach(childId => {
         const ch = getRect(childId)
         if (!ch) return
+        // Tap point on the vertical trunk — halfway between parent bottom and bus Y
         const tapY = Math.round(trunkTop + (busY - trunkTop) * 0.5)
-        const chCX = ch.x + ch.w / 2
-        const d = `M ${parCX} ${tapY} L ${chCX} ${tapY} L ${chCX} ${ch.y}`
-        const vis = makePath(d, lineColor)
+        // Connect to whichever horizontal side of the card is closer to the trunk
+        const chLeft  = ch.x
+        const chRight = ch.x + ch.w
+        const chMidY  = ch.y + ch.h / 2
+        const goRight = parCX <= (chLeft + chRight) / 2
+        const chEdgeX = goRight ? chLeft : chRight
+        // Path: down trunk to tapY (if no regular children, draw the trunk segment too)
+        if (regularIds.length === 0) {
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${tapY}`, ASST_COLOR, ASST_DASH))
+        }
+        // Horizontal dash from trunk to card edge, then down/up to card mid-Y
+        const d = `M ${parCX} ${tapY} L ${chEdgeX} ${tapY} L ${chEdgeX} ${chMidY}`
+        const vis = makePath(d, ASST_COLOR, ASST_DASH)
         ;(svg as SVGSVGElement).appendChild(vis)
-        ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+        ;(svg as SVGSVGElement).appendChild(makeHitPath(d, ASST_COLOR, () => deleteConn(childId), [vis]))
+        // Small circle at the tap point to indicate branch origin
+        const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle')
+        dot.setAttribute('cx', String(parCX))
+        dot.setAttribute('cy', String(tapY))
+        dot.setAttribute('r', '3.5')
+        dot.setAttribute('fill', 'white')
+        dot.setAttribute('stroke', ASST_COLOR)
+        dot.setAttribute('stroke-width', '1.5')
+        dot.setAttribute('pointer-events', 'none')
+        ;(svg as SVGSVGElement).appendChild(dot)
       })
     })
 
@@ -812,7 +855,7 @@ export default function OrgChartPage() {
       const style = nodeBranchStyles[parentId] ?? branchStyle
       const isAssistant = (id: string) => {
         const c = contacts.find(x => x.id === id)
-        return /^asst\.?$|assistant/i.test(c?.title ?? '') || /^asst\.?$|assistant/i.test(c?.name ?? '')
+        return c?.isAssistant === true
       }
       const regularIds = childIds.filter(id => !isAssistant(id))
       if (regularIds.length === 0) return
@@ -1310,7 +1353,7 @@ export default function OrgChartPage() {
                   `}
                   style={{
                     left: pos.x, top: pos.y,
-                    minWidth: 160, maxWidth: 240,
+                    width: NODE_W, height: NODE_H,
                     touchAction: 'none',
                     zIndex: isSelected ? 20 : 10,
                     background: 'white',
@@ -1360,10 +1403,10 @@ export default function OrgChartPage() {
                       {initials(c.name)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-xs font-bold text-slate-800 leading-snug">{c.name}</p>
-                      {c.title && <p className="text-[10px] text-slate-400 leading-snug mt-0.5">{c.title}</p>}
+                      <p className="text-xs font-bold truncate text-slate-800">{c.name}</p>
+                      {c.title && <p className="text-[10px] truncate text-slate-400">{c.title}</p>}
                       {c.level && (
-                        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400 mt-0.5 block">
+                        <span className="text-[9px] font-bold uppercase tracking-wide text-slate-400 truncate block">
                           {LEVEL_LABELS[c.level as Level] ?? c.level}
                         </span>
                       )}

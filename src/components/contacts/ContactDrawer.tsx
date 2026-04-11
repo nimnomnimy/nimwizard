@@ -13,7 +13,7 @@ interface Props {
   onClose: () => void
 }
 
-const empty = (): Partial<Contact> => ({ name: '', org: '', title: '', level: 'individual', email: '', phone: '', parentId: '' })
+const empty = (): Partial<Contact> => ({ name: '', org: '', title: '', level: 'individual', email: '', phone: '', parentId: '', isAssistant: false })
 
 // Derive email placeholder from name + org
 function emailPlaceholder(name: string, org: string): string {
@@ -104,6 +104,7 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
       email: form.email?.trim() ?? '',
       phone: form.phone?.trim() ?? '',
       parentId: form.parentId ?? '',
+      isAssistant: form.isAssistant ?? false,
       createdAt: existing?.createdAt ?? Date.now(),
     }
     if (existing) {
@@ -271,6 +272,21 @@ export default function ContactDrawer({ contactId, open, onClose }: Props) {
               </div>
             )}
           </div>
+
+          {/* Assistant toggle */}
+          <label className="flex items-center gap-3 cursor-pointer select-none py-1">
+            <button type="button"
+              role="switch"
+              aria-checked={form.isAssistant ?? false}
+              onClick={() => setForm(f => ({ ...f, isAssistant: !f.isAssistant }))}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${form.isAssistant ? 'bg-blue-500' : 'bg-slate-200'}`}>
+              <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.isAssistant ? 'translate-x-4' : 'translate-x-0.5'}`} />
+            </button>
+            <div>
+              <p className="text-sm font-medium text-slate-700">Assistant</p>
+              <p className="text-xs text-slate-400">Draws as a side branch on org charts</p>
+            </div>
+          </label>
 
           {/* Email */}
           <div className="flex flex-col gap-1.5">

@@ -11,6 +11,7 @@ export interface Contact {
   email?: string
   phone?: string
   parentId?: string
+  isAssistant?: boolean
   createdAt: number
 }
 
