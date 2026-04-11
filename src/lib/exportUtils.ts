@@ -465,8 +465,15 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
     maxX = Math.max(maxX, px + nW); maxY = Math.max(maxY, py + nH)
   }
 
-  const offX = margin - minX + 8
-  const offY = margin + titleH - minY + 8
+  // Centre the chart horizontally and vertically on the page
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
+  const chartWmm = maxX - minX
+  const chartHmm = maxY - minY
+  const usableW = pageW - margin * 2
+  const usableH = pageH - margin * 2 - titleH
+  const offX = margin + (usableW - chartWmm) / 2 - minX
+  const offY = margin + titleH + (usableH - chartHmm) / 2 - minY
 
   function sx(x: number) { return offX + x * PX_TO_MM }
   function sy(y: number) { return offY + y * PX_TO_MM }
@@ -640,9 +647,14 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   const margin = 0.3   // inches
   const titleH = 0.5
 
-  // Layout offset: top-left of bounding box maps to (margin, titleH + margin)
-  const offX = margin - minX
-  const offY = titleH + margin - minY
+  // Centre the chart on the slide (default 10" × 7.5")
+  const slideW = 10.0; const slideH = 7.5
+  const chartWin = maxX - minX
+  const chartHin = maxY - minY
+  const usableW = slideW - margin * 2
+  const usableH = slideH - titleH - margin * 2
+  const offX = margin + (usableW - chartWin) / 2 - minX
+  const offY = titleH + margin + (usableH - chartHin) / 2 - minY
 
   function sx(x: number) { return offX + x * PX_TO_IN }
   function sy(y: number) { return offY + y * PX_TO_IN }

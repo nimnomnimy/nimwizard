@@ -743,7 +743,31 @@ export default function OrgChartPage() {
   // ─── Auto-layout ────────────────────────────────────────────────────────────
   const cleanupLayout = () => {
     const fresh = computeTreeLayout(visibleContacts, hGap, vGap, branchStyle, nodeBranchStyles)
-    setPositions({ ...positions, ...fresh })
+
+    // Centre the chart in the visible viewport
+    const area = areaRef.current
+    if (area && Object.keys(fresh).length > 0) {
+      const allX = Object.values(fresh).map(p => p.x)
+      const allY = Object.values(fresh).map(p => p.y)
+      const chartMinX = Math.min(...allX)
+      const chartMaxX = Math.max(...allX) + NODE_W
+      const chartMinY = Math.min(...allY)
+      const chartMaxY = Math.max(...allY) + NODE_H
+      const chartW = chartMaxX - chartMinX
+      const chartH = chartMaxY - chartMinY
+      const viewW = area.clientWidth
+      const viewH = area.clientHeight
+      const offsetX = Math.max(30, (viewW - chartW) / 2) - chartMinX
+      const offsetY = Math.max(30, (viewH - chartH) / 2) - chartMinY
+      const centred: typeof fresh = {}
+      for (const [id, p] of Object.entries(fresh)) {
+        centred[id] = { x: Math.round(p.x + offsetX), y: Math.round(p.y + offsetY) }
+      }
+      setPositions({ ...positions, ...centred })
+    } else {
+      setPositions({ ...positions, ...fresh })
+    }
+
     setBusOffsets({})
     busOffsetsRef.current = {}
     showToast('Layout applied', 'success')
