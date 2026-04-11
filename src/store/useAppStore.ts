@@ -9,6 +9,7 @@ import { db } from '../lib/firebase'
 import type {
   AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine,
   PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask, Task, Diagram,
+  DealProduct, Deal,
 } from '../types'
 import { uid } from '../lib/utils'
 
@@ -19,6 +20,8 @@ import { uid } from '../lib/utils'
 //   users/{uid}/tasks/{taskId}          (includes bucketId field)
 //   users/{uid}/timelines/{timelineId}
 //   users/{uid}/diagrams/{diagramId}
+//   users/{uid}/dealProducts/{productId}
+//   users/{uid}/deals/{dealId}
 //   users/{uid}/settings/app            (buckets, email, saved charts)
 //   users/{uid}/orgchart/state          (positions, lines, chartContacts, savedCharts)
 
@@ -66,7 +69,7 @@ function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: strin
 // ─── In-memory loading state (not reactive, just coordination flags) ──────────
 // These are module-level so they survive re-renders but reset on page reload
 let collectionsLoaded = 0   // count of subcollections that have fired at least once
-const TOTAL_COLLECTIONS = 5 // contacts, meetings, tasks, timelines, diagrams (+settings+orgchart fire separately)
+const TOTAL_COLLECTIONS = 7 // contacts, meetings, tasks, timelines, diagrams, dealProducts, deals (+settings+orgchart)
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 interface StoreState extends AppState {
@@ -127,6 +130,16 @@ interface StoreState extends AppState {
   updateDiagram: (d: Diagram) => void
   deleteDiagram: (id: string) => void
 
+  // Deal Engine — Products
+  addDealProduct: (p: DealProduct) => void
+  updateDealProduct: (p: DealProduct) => void
+  deleteDealProduct: (id: string) => void
+
+  // Deal Engine — Deals
+  addDeal: (d: Deal) => void
+  updateDeal: (d: Deal) => void
+  deleteDeal: (id: string) => void
+
   // Atomic cross-feature mutations
   addTaskAndUpdateTimeline: (bucketId: string, task: Task, timelineId: string, updatedItem: TimelineItem) => void
   saveTaskWithTimelineItem: (bucketId: string, task: Task) => void
@@ -182,6 +195,22 @@ function writeDiagram(userUid: string, diagram: Diagram): Promise<void> {
 
 function removeDiagram(userUid: string, id: string): Promise<void> {
   return deleteDoc(docRef(userUid, 'diagrams', id))
+}
+
+function writeDealProduct(userUid: string, p: DealProduct): Promise<void> {
+  return setDoc(docRef(userUid, 'dealProducts', p.id), stripUndefined(p))
+}
+
+function removeDealProduct(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'dealProducts', id))
+}
+
+function writeDeal(userUid: string, d: Deal): Promise<void> {
+  return setDoc(docRef(userUid, 'deals', d.id), stripUndefined(d))
+}
+
+function removeDeal(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'deals', id))
 }
 
 function writeSettings(userUid: string, settings: SettingsDoc): Promise<void> {
@@ -311,6 +340,8 @@ export const useAppStore = create<StoreState>()(
     emailSettings: {},
     timelines: [],
     diagrams: [],
+    dealProducts: [],
+    deals: [],
 
     setUid: (uid) => {
       collectionsLoaded = 0
@@ -404,6 +435,20 @@ export const useAppStore = create<StoreState>()(
         set(s => { s.diagrams = diagrams })
         markLoaded()
       }, (e) => { console.error('[diagrams snapshot]', e); markLoaded() }))
+
+      // ── Deal Products ───────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'dealProducts'), (snap) => {
+        const dealProducts: DealProduct[] = snap.docs.map(d => d.data() as DealProduct)
+        set(s => { s.dealProducts = dealProducts })
+        markLoaded()
+      }, (e) => { console.error('[dealProducts snapshot]', e); markLoaded() }))
+
+      // ── Deals ────────────────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'deals'), (snap) => {
+        const deals: Deal[] = snap.docs.map(d => d.data() as Deal)
+        set(s => { s.deals = deals })
+        markLoaded()
+      }, (e) => { console.error('[deals snapshot]', e); markLoaded() }))
 
       // ── Settings ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(settingsRef(userUid), (snap) => {
@@ -888,6 +933,66 @@ export const useAppStore = create<StoreState>()(
       if (u) removeDiagram(u, id).catch(e => {
         console.error('[deleteDiagram]', e)
         if (prev) set(s => { s.diagrams.push(prev!) })
+      })
+    },
+
+    // ── Deal Engine — Products ────────────────────────────────────────────────
+    addDealProduct: (p) => {
+      set(s => { s.dealProducts.push(p) })
+      const u = get().uid
+      if (u) writeDealProduct(u, p).catch(e => {
+        console.error('[addDealProduct]', e)
+        set(s => { s.dealProducts = s.dealProducts.filter(x => x.id !== p.id) })
+      })
+    },
+
+    updateDealProduct: (p) => {
+      let prev: DealProduct | undefined
+      set(s => { const i = s.dealProducts.findIndex(x => x.id === p.id); if (i >= 0) { prev = { ...s.dealProducts[i] }; s.dealProducts[i] = p } })
+      const u = get().uid
+      if (u) writeDealProduct(u, p).catch(e => {
+        console.error('[updateDealProduct]', e)
+        if (prev) set(s => { const i = s.dealProducts.findIndex(x => x.id === p.id); if (i >= 0) s.dealProducts[i] = prev! })
+      })
+    },
+
+    deleteDealProduct: (id) => {
+      let prev: DealProduct | undefined
+      set(s => { prev = s.dealProducts.find(x => x.id === id); s.dealProducts = s.dealProducts.filter(x => x.id !== id) })
+      const u = get().uid
+      if (u) removeDealProduct(u, id).catch(e => {
+        console.error('[deleteDealProduct]', e)
+        if (prev) set(s => { s.dealProducts.push(prev!) })
+      })
+    },
+
+    // ── Deal Engine — Deals ───────────────────────────────────────────────────
+    addDeal: (d) => {
+      set(s => { s.deals.push(d) })
+      const u = get().uid
+      if (u) writeDeal(u, d).catch(e => {
+        console.error('[addDeal]', e)
+        set(s => { s.deals = s.deals.filter(x => x.id !== d.id) })
+      })
+    },
+
+    updateDeal: (d) => {
+      let prev: Deal | undefined
+      set(s => { const i = s.deals.findIndex(x => x.id === d.id); if (i >= 0) { prev = { ...s.deals[i] }; s.deals[i] = d } })
+      const u = get().uid
+      if (u) writeDeal(u, d).catch(e => {
+        console.error('[updateDeal]', e)
+        if (prev) set(s => { const i = s.deals.findIndex(x => x.id === d.id); if (i >= 0) s.deals[i] = prev! })
+      })
+    },
+
+    deleteDeal: (id) => {
+      let prev: Deal | undefined
+      set(s => { prev = s.deals.find(x => x.id === id); s.deals = s.deals.filter(x => x.id !== id) })
+      const u = get().uid
+      if (u) removeDeal(u, id).catch(e => {
+        console.error('[deleteDeal]', e)
+        if (prev) set(s => { s.deals.push(prev!) })
       })
     },
 

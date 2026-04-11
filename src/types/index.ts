@@ -193,6 +193,142 @@ export interface Diagram {
   updatedAt: number
 }
 
+// ─── Deal Engine ──────────────────────────────────────────────────────────────
+
+export type ProductCategory =
+  | 'Software' | 'Hardware' | 'Professional Services'
+  | 'Technical Services' | 'Maintenance'
+
+export type FreightMethod = 'ocean' | 'air' | 'mixed'
+export type LineItemStatus = 'paid' | 'discounted' | 'free'
+export type DiscountType = 'percent' | 'fixed'
+export type OptimizationGoal = 'margin' | 'perceived-value'
+
+export interface PricingTier {
+  minQty: number
+  maxQty: number | null   // null = unlimited
+  discountPercent: number
+}
+
+export interface DealProduct {
+  id: string
+  name: string
+  category: ProductCategory
+  costPrice: number           // USD
+  floorSellPrice: number      // USD — hard minimum sell price
+  defaultSellPrice: number    // USD
+  fxOverride?: number         // USD→AUD override (undefined = use deal-level global)
+  pricingTiers?: PricingTier[]
+  createdAt: number
+}
+
+export interface FreightConfig {
+  method: FreightMethod
+  oceanCostPerUnit?: number   // USD per unit
+  airCostPerUnit?: number     // USD per unit
+  oceanQty?: number           // units via ocean (mixed only)
+  airQty?: number             // units via air (mixed only)
+}
+
+export interface DealLineItem {
+  id: string
+  productId: string
+  quantity: number
+  sellPriceUsd: number        // per unit, user-proposed
+  status: LineItemStatus
+  discountType?: DiscountType
+  discountValue?: number      // % or $ per type
+  freight?: FreightConfig
+  notes?: string
+}
+
+export interface DiscountRule {
+  id: string
+  type: 'direct' | 'volume-units' | 'volume-value' | 'category' | 'conditional'
+  discountType: DiscountType
+  discountValue: number
+  threshold?: number          // volume-units: qty; volume-value: $ total
+  category?: ProductCategory  // category rules only
+  ifProductId?: string        // conditional: trigger product
+  thenProductId?: string      // conditional: target product
+  label?: string
+}
+
+export interface DealScenario {
+  id: string
+  label: string               // "Scenario A", "Scenario B", etc.
+  lineItems: DealLineItem[]
+  discountRules: DiscountRule[]
+  discountBudgetUsd: number
+}
+
+export interface Deal {
+  id: string
+  name: string
+  lineItems: DealLineItem[]
+  discountRules: DiscountRule[]
+  discountBudgetUsd: number
+  globalFxRate: number        // USD→AUD
+  scenarios: DealScenario[]
+  notes?: string
+  createdAt: number
+  updatedAt: number
+}
+
+// Computed at runtime — never stored in Firestore
+export interface LineMetrics {
+  lineItemId: string
+  costUsd: number             // costPrice × qty
+  freightCostUsd: number      // total freight for this line
+  totalCostUsd: number        // costUsd + freightCostUsd
+  listPriceUsd: number        // defaultSellPrice × qty (before any discount)
+  sellPriceUsd: number        // actual sell × qty
+  discountUsd: number         // listPrice - sellPrice
+  marginUsd: number           // sellPrice - totalCost
+  marginPercent: number       // marginUsd / sellPriceUsd × 100
+  belowFloor: boolean
+  perceivedValueUsd: number   // listPrice × qty (customer perceived saving basis)
+  costAud: number
+  sellAud: number
+}
+
+export interface DealMetrics {
+  lines: LineMetrics[]
+  totalCostUsd: number
+  totalFreightUsd: number
+  totalSellUsd: number
+  totalMarginUsd: number
+  totalMarginPercent: number
+  totalListValueUsd: number   // what customer would pay at full list
+  totalDiscountUsd: number
+  totalFreeValueUsd: number   // list value of gratis items
+  perceivedSavingsPercent: number
+  discountBudgetUsed: number
+  discountBudgetRemaining: number
+  hasFloorViolation: boolean
+  violatingLineIds: string[]
+  totalSellAud: number
+  totalCostAud: number
+}
+
+export interface OptimizationRecommendation {
+  type: 'switch-to-ocean' | 'switch-to-air' | 'give-free-units' | 'apply-discount'
+      | 'reduce-discount' | 'adjust-sell-price'
+  lineItemId: string
+  description: string
+  why: string
+  marginImpactUsd: number     // positive = margin improves
+  perceivedValueImpactUsd: number
+  priority: 'high' | 'medium' | 'low'
+}
+
+export interface OptimizationResult {
+  goal: OptimizationGoal
+  recommendations: OptimizationRecommendation[]
+  projectedMetrics: DealMetrics
+  summary: string
+}
+
 // ─── App State ────────────────────────────────────────────────────────────────
 
 export interface AppState {
@@ -208,4 +344,6 @@ export interface AppState {
   emailSettings: EmailSettings
   timelines: Timeline[]
   diagrams: Diagram[]
+  dealProducts: DealProduct[]
+  deals: Deal[]
 }

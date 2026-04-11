@@ -1,7 +1,7 @@
 {
   "name": "nimwizard",
   "private": true,
-  "version": "0.0.75",
+  "version": "0.0.76",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,6 +19,7 @@
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
     "react-router-dom": "^7.14.0",
+    "recharts": "^3.8.1",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
