@@ -239,7 +239,7 @@ export default function DiagramsPage() {
       {showNewModal && (
         <>
           <div className="fixed inset-0 bg-black/40 z-40" onClick={() => setShowNewModal(false)} />
-          <div className="fixed z-50 inset-x-4 top-1/2 -translate-y-1/2 sm:inset-auto sm:left-1/2 sm:-translate-x-1/2 sm:w-80 bg-white rounded-2xl shadow-2xl p-5 flex flex-col gap-4">
+          <div className="fixed z-50 inset-x-4 top-[30%] sm:inset-auto sm:left-1/2 sm:-translate-x-1/2 sm:top-[30%] sm:w-80 bg-white rounded-2xl shadow-2xl p-5 flex flex-col gap-4">
             <h2 className="text-base font-bold text-slate-900">New Diagram</h2>
             <input
               autoFocus
