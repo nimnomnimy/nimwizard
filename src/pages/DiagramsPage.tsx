@@ -23,6 +23,8 @@ export default function DiagramsPage() {
 
   const iframeRef = useRef<HTMLIFrameElement>(null)
   const pendingXmlRef = useRef<string | null>(null)
+  const loadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [embedError, setEmbedError] = useState(false)
 
   // ── postMessage handling ──────────────────────────────────────────────────
   const handleMessage = useCallback((e: MessageEvent) => {
@@ -31,6 +33,9 @@ export default function DiagramsPage() {
     try { msg = JSON.parse(e.data) } catch { return }
 
     if (msg.event === 'init') {
+      // draw.io loaded — clear the error timeout
+      if (loadTimerRef.current) { clearTimeout(loadTimerRef.current); loadTimerRef.current = null }
+      setEmbedError(false)
       // Send the current diagram XML to the editor
       const xml = pendingXmlRef.current ?? ''
       pendingXmlRef.current = null
@@ -52,6 +57,7 @@ export default function DiagramsPage() {
     }
 
     if (msg.event === 'exit') {
+      if (loadTimerRef.current) { clearTimeout(loadTimerRef.current); loadTimerRef.current = null }
       setView('list')
       setActiveDiagram(null)
     }
@@ -66,7 +72,11 @@ export default function DiagramsPage() {
   const openDiagram = (d: Diagram) => {
     pendingXmlRef.current = d.xml
     setActiveDiagram(d)
+    setEmbedError(false)
     setView('editor')
+    // If draw.io doesn't fire 'init' within 10s, show the error state
+    if (loadTimerRef.current) clearTimeout(loadTimerRef.current)
+    loadTimerRef.current = setTimeout(() => setEmbedError(true), 10000)
   }
 
   // ── Create ────────────────────────────────────────────────────────────────
@@ -126,13 +136,41 @@ export default function DiagramsPage() {
           <span className="text-white/30">/</span>
           <span className="text-white font-medium text-sm truncate">{activeDiagram?.name}</span>
         </div>
-        <iframe
-          ref={iframeRef}
-          src={EMBED_URL}
-          className="flex-1 w-full border-0"
-          allow="clipboard-read; clipboard-write"
-          title="draw.io diagram editor"
-        />
+        <div className="flex-1 relative">
+          <iframe
+            ref={iframeRef}
+            src={EMBED_URL}
+            className="absolute inset-0 w-full h-full border-0"
+            allow="clipboard-read; clipboard-write"
+            title="draw.io diagram editor"
+          />
+          {embedError && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900 gap-4">
+              <svg width="48" height="48" viewBox="0 0 48 48" fill="none" className="text-slate-500">
+                <circle cx="24" cy="24" r="20" stroke="currentColor" strokeWidth="2"/>
+                <path d="M24 16v10M24 32v1" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/>
+              </svg>
+              <div className="text-center">
+                <p className="text-white font-semibold text-base">Diagram editor unavailable</p>
+                <p className="text-slate-400 text-sm mt-1">Could not reach embed.diagrams.net — check your connection and try again.</p>
+              </div>
+              <button
+                onClick={() => {
+                  setEmbedError(false)
+                  if (loadTimerRef.current) clearTimeout(loadTimerRef.current)
+                  loadTimerRef.current = setTimeout(() => setEmbedError(true), 10000)
+                  // Force iframe reload by briefly clearing src
+                  if (iframeRef.current) {
+                    iframeRef.current.src = ''
+                    setTimeout(() => { if (iframeRef.current) iframeRef.current.src = EMBED_URL }, 100)
+                  }
+                }}
+                className="px-5 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors min-h-[44px]">
+                Retry
+              </button>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
