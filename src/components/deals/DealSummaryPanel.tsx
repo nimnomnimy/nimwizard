@@ -10,7 +10,7 @@ interface Props {
   fxRate?: number
 }
 
-export default function DealSummaryPanel({ metrics, fxRate }: Props) {
+export default function DealSummaryPanel({ metrics }: Props) {
   const budgetUsedPct = metrics.discountBudgetUsed + (metrics.discountBudgetUsed + metrics.discountBudgetRemaining) > 0
     ? (metrics.discountBudgetUsed / (metrics.discountBudgetUsed + metrics.discountBudgetRemaining)) * 100
     : 0
