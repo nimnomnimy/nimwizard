@@ -766,6 +766,7 @@ export const useAppStore = create<StoreState>()(
 
     moveTask: (taskId, fromBucketId, toBucketId) => {
       let movedTask: Task | null = null
+      let meetingsAffected = false
       set(s => {
         const fromBucket = s.taskBuckets.find(b => b.id === fromBucketId)
         const toBucket   = s.taskBuckets.find(b => b.id === toBucketId)
@@ -776,7 +777,13 @@ export const useAppStore = create<StoreState>()(
         if (toBucketId === 'done') {
           task.progress = 100
           s.meetings.forEach(m => {
-            m.actionItems.forEach(a => { if (a.taskId === taskId) a.done = true })
+            m.actionItems.forEach(a => { if (a.taskId === taskId) { a.done = true; meetingsAffected = true } })
+          })
+        } else if (fromBucketId === 'done') {
+          // Moving back out of done — mark incomplete
+          if (task.progress === 100) task.progress = 0
+          s.meetings.forEach(m => {
+            m.actionItems.forEach(a => { if (a.taskId === taskId) { a.done = false; meetingsAffected = true } })
           })
         }
         toBucket.tasks.push(task)
@@ -784,11 +791,10 @@ export const useAppStore = create<StoreState>()(
       })
       const u = get().uid
       if (!u || !movedTask) return
-      // Just update the task doc with new bucketId (atomic, no full-collection write)
-      writeTask(u, toBucketId, movedTask)
-      if (toBucketId === 'done') {
+      writeTask(u, toBucketId, movedTask).catch(e => console.error('[moveTask]', e))
+      if (meetingsAffected) {
         const affectedMeetings = get().meetings.filter(m => m.actionItems.some(a => a.taskId === taskId))
-        affectedMeetings.forEach(m => writeMeeting(u, m))
+        affectedMeetings.forEach(m => writeMeeting(u, m).catch(e => console.error('[moveTask meeting]', e)))
       }
     },
 
