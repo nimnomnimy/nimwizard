@@ -447,11 +447,10 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   const visible = contacts.filter(c => positions[c.id])
   if (!visible.length) return
 
-  const pageW = doc.internal.pageSize.getWidth()
-  const pageH = doc.internal.pageSize.getHeight()
   const margin = 8
+  const titleH = 16
 
-  // Compute bounds and scale
+  // Compute content bounds
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const c of visible) {
     const p = positions[c.id]
@@ -461,11 +460,18 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
 
   const srcW = maxX - minX + 60
   const srcH = maxY - minY + 60
+
+  // Scale to fit on page but never below 0.7 — keeps text legible.
+  // If 0.7 would overflow, the page dimensions are expanded instead.
+  const pageW = doc.internal.pageSize.getWidth()
+  const pageH = doc.internal.pageSize.getHeight()
   const usableW = pageW - margin * 2
-  const usableH = pageH - margin * 2 - 16
-  const scale = Math.min(usableW / srcW, usableH / srcH, 1)
+  const usableH = pageH - margin * 2 - titleH
+  const fitScale = Math.min(usableW / srcW, usableH / srcH)
+  const scale = Math.max(fitScale, 0.7)
+
   const offX = margin - minX * scale + 30 * scale
-  const offY = margin + 14 - minY * scale + 30 * scale
+  const offY = margin + titleH - minY * scale + 30 * scale
 
   function sx(x: number) { return offX + x * scale }
   function sy(y: number) { return offY + y * scale }
@@ -527,7 +533,7 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
 
     // Avatar initials
     const ini = contactInitials(contact.name)
-    doc.setFontSize(Math.max(4, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
+    doc.setFontSize(Math.max(7, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(255, 255, 255)
     const iw = doc.getTextWidth(ini)
     doc.text(ini, avX - iw / 2, avY + 2 * scale)
 
@@ -535,17 +541,17 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
     const tx = avX + avR + 5 * scale
     const maxTw = nW - (tx - x) - 4 * scale
 
-    doc.setFontSize(Math.max(4, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
+    doc.setFontSize(Math.max(8, 6.5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
     doc.text(pdfFitText(doc, contact.name, maxTw), tx, y + 14 * scale)
 
     if (contact.title) {
-      doc.setFontSize(Math.max(3.5, 5.5 * scale)); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
+      doc.setFontSize(Math.max(7, 5.5 * scale)); doc.setFont('helvetica', 'normal'); doc.setTextColor(100, 116, 139)
       doc.text(pdfFitText(doc, contact.title, maxTw), tx, y + 24 * scale)
     }
 
     if (contact.level) {
       const badge = LEVEL_LABELS[contact.level] ?? contact.level
-      doc.setFontSize(Math.max(3, 5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
+      doc.setFontSize(Math.max(6, 5 * scale)); doc.setFont('helvetica', 'bold'); doc.setTextColor(59, 130, 246)
       doc.text(badge.toUpperCase(), tx, y + 33 * scale)
     }
   }
@@ -571,7 +577,10 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   const usableH = 7.5 - titleH - margin * 2
   const srcW = maxX - minX + 60
   const srcH = maxY - minY + 60
-  const scale = Math.min(usableW / srcW, usableH / srcH)   // px → inches
+  // Never shrink below 0.009 in/px (≈ keeps cards ~1.8" wide) so text stays legible.
+  // If the chart is bigger than the slide, it will overflow — acceptable vs. unreadable text.
+  const fitScale = Math.min(usableW / srcW, usableH / srcH)
+  const scale = Math.max(fitScale, 0.009)   // px → inches
   const offX = margin - minX * scale + 30 * scale
   const offY = titleH + margin - minY * scale + 30 * scale
 
@@ -633,7 +642,7 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     slide.addShape(pptx.ShapeType.ellipse, { x: avX - avR, y: avY, w: avR * 2, h: avR * 2, fill: { color: cardColor }, line: { width: 0 } })
     slide.addText(contactInitials(contact.name), {
       x: avX - avR, y: avY, w: avR * 2, h: avR * 2,
-      fontSize: Math.max(5, Math.round(7 * scale * 72)), bold: true, color: 'ffffff', align: 'center', valign: 'middle',
+      fontSize: Math.max(8, Math.round(7 * scale * 72)), bold: true, color: 'ffffff', align: 'center', valign: 'middle',
     })
 
     // Text content
@@ -642,10 +651,10 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
     const textOpts = { x: tx, w: tw, bold: false, color: '1e293b' }
 
     const lines: PptxGenJS.TextProps[] = [
-      { text: contact.name, options: { bold: true, fontSize: Math.max(5, Math.round(6.5 * scale * 72)), color: '1e293b', breakLine: true } },
+      { text: contact.name, options: { bold: true, fontSize: Math.max(9, Math.round(6.5 * scale * 72)), color: '1e293b', breakLine: true } },
     ]
-    if (contact.title) lines.push({ text: contact.title, options: { fontSize: Math.max(4, Math.round(5.5 * scale * 72)), color: '64748b', breakLine: true } })
-    if (contact.level) lines.push({ text: (LEVEL_LABELS[contact.level] ?? contact.level).toUpperCase(), options: { fontSize: Math.max(3.5, Math.round(5 * scale * 72)), color: '3b82f6', bold: true } })
+    if (contact.title) lines.push({ text: contact.title, options: { fontSize: Math.max(8, Math.round(5.5 * scale * 72)), color: '64748b', breakLine: true } })
+    if (contact.level) lines.push({ text: (LEVEL_LABELS[contact.level] ?? contact.level).toUpperCase(), options: { fontSize: Math.max(7, Math.round(5 * scale * 72)), color: '3b82f6', bold: true } })
 
     slide.addText(lines, { ...textOpts, y: y + nH * 0.18, h: nH * 0.7, valign: 'top', wrap: true })
   }
@@ -844,7 +853,31 @@ export async function exportContactsXLSX(contacts: Contact[], orgData: OrgChartD
 }
 
 export async function exportContactsPDF(contacts: Contact[], orgData: OrgChartData): Promise<void> {
-  const doc = new jsPDF({ orientation: 'landscape' })
+  // Compute org chart page dimensions so we never have to shrink below legible scale.
+  // min scale is 0.7, so required page = content * 0.7 + margins.
+  let doc: jsPDF
+  if (orgData.contacts.length > 0) {
+    const vis = orgData.contacts.filter(c => orgData.positions[c.id])
+    if (vis.length > 0) {
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const c of vis) {
+        const p = orgData.positions[c.id]
+        minX = Math.min(minX, p.x); minY = Math.min(minY, p.y)
+        maxX = Math.max(maxX, p.x + 200); maxY = Math.max(maxY, p.y + 88)
+      }
+      const margin = 8; const titleH = 16; const minScale = 0.7
+      const neededW = (maxX - minX + 60) * minScale + margin * 2
+      const neededH = (maxY - minY + 60) * minScale + margin * 2 + titleH
+      // px → mm (1px = 0.2646mm at 96dpi, but jsPDF uses 72dpi internally → 0.3528mm)
+      const w = Math.max(297, neededW * 0.352778)
+      const h = Math.max(210, neededH * 0.352778)
+      doc = new jsPDF({ orientation: w >= h ? 'landscape' : 'portrait', format: [w, h] })
+    } else {
+      doc = new jsPDF({ orientation: 'landscape' })
+    }
+  } else {
+    doc = new jsPDF({ orientation: 'landscape' })
+  }
   if (orgData.contacts.length > 0) {
     addOrgChartToPDF(doc, orgData)
     doc.addPage()
