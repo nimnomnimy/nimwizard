@@ -471,40 +471,105 @@ function addOrgChartToPDF(doc: jsPDF, data: OrgChartData) {
   function sx(x: number) { return offX + x * PX_TO_MM }
   function sy(y: number) { return offY + y * PX_TO_MM }
 
+  // vGap and hGap in mm (matching web defaults converted from px)
+  const vGapMM = 60 * PX_TO_MM
+  const LINE_COLOR: [number, number, number] = [203, 213, 225]
+  const ASST_COLOR: [number, number, number] = [100, 116, 139]
+
   // Title
   doc.setFontSize(11); doc.setFont('helvetica', 'bold'); doc.setTextColor(30, 41, 59)
   doc.text('Org Chart', margin, margin + 5)
 
-  // Connection lines
-  function drawLine(fromId: string, toId: string, style: 'solid' | 'dashed' | 'peer') {
-    const fp = positions[fromId]; const tp = positions[toId]
-    if (!fp || !tp) return
-    if (style === 'peer') {
-      doc.setDrawColor(245, 158, 11); doc.setLineWidth(0.3)
-      doc.setLineDashPattern([1.5, 1], 0)
-      const left  = fp.x < tp.x ? fp : tp
-      const right = fp.x < tp.x ? tp : fp
-      const y1 = sy(left.y)  + nH / 2; const y2 = sy(right.y) + nH / 2
-      const x1 = sx(left.x)  + nW;     const x2 = sx(right.x)
-      const mx  = (x1 + x2) / 2
-      doc.lines([[mx - x1, 0], [0, y2 - y1], [x2 - mx, 0]], x1, y1)
-    } else {
-      const col = style === 'dashed' ? [139, 92, 246] : [203, 213, 225]
-      doc.setDrawColor(...(col as [number, number, number]))
-      doc.setLineWidth(0.3)
-      if (style === 'dashed') doc.setLineDashPattern([1.5, 1], 0)
-      else doc.setLineDashPattern([], 0)
-      const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
-      const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y)
-      const my  = (y1 + y2) / 2
-      doc.lines([[0, my - y1], [x2 - x1, 0], [0, y2 - my]], x1, y1)
+  // ── Hierarchy lines: trunk + bus + stubs (matching web drawConnections) ──────
+  const visibleIds = new Set(visible.map(c => c.id))
+  const childrenByParent: Record<string, string[]> = {}
+  visible.forEach(c => {
+    if (c.parentId && visibleIds.has(c.parentId)) {
+      if (!childrenByParent[c.parentId]) childrenByParent[c.parentId] = []
+      childrenByParent[c.parentId].push(c.id)
     }
-    doc.setLineDashPattern([], 0)
-  }
+  })
 
-  for (const c of visible) { if (c.parentId && positions[c.parentId]) drawLine(c.parentId, c.id, 'solid') }
-  for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
-  for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
+  Object.entries(childrenByParent).forEach(([parentId, childIds]) => {
+    const par = positions[parentId]
+    if (!par) return
+    const parCX = sx(par.x) + nW / 2
+    const trunkTop = sy(par.y) + nH
+    const busY = trunkTop + vGapMM / 2
+
+    const regularIds   = childIds.filter(id => !visible.find(c => c.id === id)?.isAssistant)
+    const assistantIds = childIds.filter(id =>  visible.find(c => c.id === id)?.isAssistant)
+
+    if (regularIds.length > 0) {
+      // Trunk: parent bottom-center → bus Y
+      doc.setDrawColor(...LINE_COLOR); doc.setLineWidth(0.3); doc.setLineDashPattern([], 0)
+      doc.line(parCX, trunkTop, parCX, busY)
+
+      // Horizontal bus spanning all regular child centres
+      const childCXs = regularIds.map(id => sx(positions[id].x) + nW / 2)
+      const busLeft  = Math.min(parCX, ...childCXs)
+      const busRight = Math.max(parCX, ...childCXs)
+      if (busLeft < busRight) doc.line(busLeft, busY, busRight, busY)
+
+      // Stubs: bus → each child top-centre
+      regularIds.forEach(id => {
+        const p = positions[id]
+        if (!p) return
+        const cx = sx(p.x) + nW / 2
+        doc.line(cx, busY, cx, sy(p.y))
+      })
+    }
+
+    // Assistant: dashed tap off trunk midpoint → horizontal → card mid-Y
+    if (assistantIds.length > 0) {
+      const tapY = trunkTop + (busY - trunkTop) * 0.5
+      if (regularIds.length === 0) {
+        doc.setDrawColor(...ASST_COLOR); doc.setLineWidth(0.3); doc.setLineDashPattern([1.5, 1], 0)
+        doc.line(parCX, trunkTop, parCX, tapY)
+      }
+      assistantIds.forEach(id => {
+        const p = positions[id]
+        if (!p) return
+        const chMidY = sy(p.y) + nH / 2
+        const goRight = parCX <= sx(p.x) + nW / 2
+        const chEdgeX = goRight ? sx(p.x) : sx(p.x) + nW
+        doc.setDrawColor(...ASST_COLOR); doc.setLineWidth(0.3); doc.setLineDashPattern([1.5, 1], 0)
+        doc.line(parCX, tapY, chEdgeX, tapY)
+        doc.line(chEdgeX, tapY, chEdgeX, chMidY)
+        // Hollow circle at tap point
+        doc.setLineDashPattern([], 0)
+        doc.setFillColor(255, 255, 255)
+        doc.circle(parCX, tapY, 1.2, 'FD')
+      })
+      doc.setLineDashPattern([], 0)
+    }
+  })
+
+  // ── Dotted lines (reporting relationships) ───────────────────────────────────
+  dottedLines.forEach(dl => {
+    const fp = positions[dl.fromId]; const tp = positions[dl.toId]
+    if (!fp || !tp) return
+    doc.setDrawColor(139, 92, 246); doc.setLineWidth(0.3); doc.setLineDashPattern([1.5, 1], 0)
+    const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
+    const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y)
+    const my  = (y1 + y2) / 2
+    doc.lines([[0, my - y1], [x2 - x1, 0], [0, y2 - my]], x1, y1)
+    doc.setLineDashPattern([], 0)
+  })
+
+  // ── Peer lines ────────────────────────────────────────────────────────────────
+  peerLines.forEach(pl => {
+    const fp = positions[pl.fromId]; const tp = positions[pl.toId]
+    if (!fp || !tp) return
+    doc.setDrawColor(245, 158, 11); doc.setLineWidth(0.3); doc.setLineDashPattern([1.5, 1], 0)
+    const left  = fp.x < tp.x ? fp : tp
+    const right = fp.x < tp.x ? tp : fp
+    const y1 = sy(left.y) + nH / 2; const y2 = sy(right.y) + nH / 2
+    const x1 = sx(left.x) + nW;     const x2 = sx(right.x)
+    const mx  = (x1 + x2) / 2
+    doc.lines([[mx - x1, 0], [0, y2 - y1], [x2 - mx, 0]], x1, y1)
+    doc.setLineDashPattern([], 0)
+  })
 
   // Cards — fixed size in mm, always legible
   for (const contact of visible) {
@@ -582,40 +647,97 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   function sx(x: number) { return offX + x * PX_TO_IN }
   function sy(y: number) { return offY + y * PX_TO_IN }
 
+  const vGapIN = 60 * PX_TO_IN
+  const solidLine = { color: 'cbd5e1', width: 0.75, dashType: 'solid' as const }
+  const asstLine  = { color: '64748b', width: 0.75, dashType: 'dash' as const }
+
+  function seg(x: number, y: number, w: number, h: number, lp: typeof solidLine) {
+    slide.addShape(pptx.ShapeType.line, { x, y, w, h, line: lp })
+  }
+
   // Title
   slide.addText('Org Chart', { x: 0.3, y: 0.1, w: 9.4, h: 0.4, fontSize: 14, bold: true, color: '1e293b' })
 
-  // Connection lines
-  function drawLine(fromId: string, toId: string, style: 'solid' | 'dashed' | 'peer') {
-    const fp = positions[fromId]; const tp = positions[toId]
-    if (!fp || !tp) return
-    const lineProps = {
-      color: style === 'peer' ? 'f59e0b' : style === 'dashed' ? '8b5cf6' : 'cbd5e1',
-      width: 0.75,
-      dashType: (style !== 'solid' ? 'dash' : 'solid') as 'dash' | 'solid',
+  // ── Hierarchy lines ──────────────────────────────────────────────────────────
+  const visibleIds = new Set(visible.map(c => c.id))
+  const childrenByParent: Record<string, string[]> = {}
+  visible.forEach(c => {
+    if (c.parentId && visibleIds.has(c.parentId)) {
+      if (!childrenByParent[c.parentId]) childrenByParent[c.parentId] = []
+      childrenByParent[c.parentId].push(c.id)
     }
-    if (style === 'peer') {
-      const left  = fp.x < tp.x ? fp : tp
-      const right = fp.x < tp.x ? tp : fp
-      const y1 = sy(left.y)  + nH / 2; const y2 = sy(right.y) + nH / 2
-      const x1 = sx(left.x)  + nW;     const x2 = sx(right.x)
-      const mx  = (x1 + x2) / 2
-      slide.addShape(pptx.ShapeType.line, { x: x1, y: y1, w: mx - x1, h: 0, line: lineProps })
-      slide.addShape(pptx.ShapeType.line, { x: mx, y: Math.min(y1, y2), w: 0, h: Math.abs(y2 - y1), line: lineProps })
-      slide.addShape(pptx.ShapeType.line, { x: mx, y: y2, w: x2 - mx, h: 0, line: lineProps })
-    } else {
-      const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
-      const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y)
-      const my  = (y1 + y2) / 2
-      slide.addShape(pptx.ShapeType.line, { x: x1, y: y1, w: 0, h: my - y1, line: lineProps })
-      slide.addShape(pptx.ShapeType.line, { x: Math.min(x1, x2), y: my, w: Math.abs(x2 - x1), h: 0, line: lineProps })
-      slide.addShape(pptx.ShapeType.line, { x: x2, y: my, w: 0, h: y2 - my, line: lineProps })
-    }
-  }
+  })
 
-  for (const c of visible) { if (c.parentId && positions[c.parentId]) drawLine(c.parentId, c.id, 'solid') }
-  for (const dl of dottedLines) drawLine(dl.fromId, dl.toId, 'dashed')
-  for (const pl of peerLines) drawLine(pl.fromId, pl.toId, 'peer')
+  Object.entries(childrenByParent).forEach(([parentId, childIds]) => {
+    const par = positions[parentId]
+    if (!par) return
+    const parCX    = sx(par.x) + nW / 2
+    const trunkTop = sy(par.y) + nH
+    const busY     = trunkTop + vGapIN / 2
+
+    const regularIds   = childIds.filter(id => !visible.find(c => c.id === id)?.isAssistant)
+    const assistantIds = childIds.filter(id =>  visible.find(c => c.id === id)?.isAssistant)
+
+    if (regularIds.length > 0) {
+      // Trunk
+      seg(parCX, trunkTop, 0, busY - trunkTop, solidLine)
+      // Bus
+      const childCXs = regularIds.map(id => sx(positions[id].x) + nW / 2)
+      const busLeft  = Math.min(parCX, ...childCXs)
+      const busRight = Math.max(parCX, ...childCXs)
+      if (busLeft < busRight) seg(busLeft, busY, busRight - busLeft, 0, solidLine)
+      // Stubs
+      regularIds.forEach(id => {
+        const p = positions[id]
+        if (!p) return
+        const cx = sx(p.x) + nW / 2
+        seg(cx, busY, 0, sy(p.y) - busY, solidLine)
+      })
+    }
+
+    // Assistant lines: dashed tap off trunk
+    if (assistantIds.length > 0) {
+      const tapY = trunkTop + (busY - trunkTop) * 0.5
+      if (regularIds.length === 0) seg(parCX, trunkTop, 0, tapY - trunkTop, asstLine)
+      assistantIds.forEach(id => {
+        const p = positions[id]
+        if (!p) return
+        const chMidY  = sy(p.y) + nH / 2
+        const goRight = parCX <= sx(p.x) + nW / 2
+        const chEdgeX = goRight ? sx(p.x) : sx(p.x) + nW
+        seg(parCX, tapY, chEdgeX - parCX, 0, asstLine)
+        seg(chEdgeX, Math.min(tapY, chMidY), 0, Math.abs(chMidY - tapY), asstLine)
+        // Hollow circle at tap point
+        slide.addShape(pptx.ShapeType.ellipse, { x: parCX - 0.04, y: tapY - 0.04, w: 0.08, h: 0.08, fill: { color: 'ffffff' }, line: { color: '64748b', width: 0.75 } })
+      })
+    }
+  })
+
+  // ── Dotted lines ─────────────────────────────────────────────────────────────
+  dottedLines.forEach(dl => {
+    const fp = positions[dl.fromId]; const tp = positions[dl.toId]
+    if (!fp || !tp) return
+    const lp = { color: '8b5cf6', width: 0.75, dashType: 'dash' as const }
+    const x1 = sx(fp.x) + nW / 2; const y1 = sy(fp.y) + nH
+    const x2 = sx(tp.x) + nW / 2; const y2 = sy(tp.y); const my = (y1 + y2) / 2
+    seg(x1, y1, 0, my - y1, lp)
+    seg(Math.min(x1, x2), my, Math.abs(x2 - x1), 0, lp)
+    seg(x2, my, 0, y2 - my, lp)
+  })
+
+  // ── Peer lines ────────────────────────────────────────────────────────────────
+  peerLines.forEach(pl => {
+    const fp = positions[pl.fromId]; const tp = positions[pl.toId]
+    if (!fp || !tp) return
+    const lp = { color: 'f59e0b', width: 0.75, dashType: 'dash' as const }
+    const left  = fp.x < tp.x ? fp : tp
+    const right = fp.x < tp.x ? tp : fp
+    const y1 = sy(left.y) + nH / 2; const y2 = sy(right.y) + nH / 2
+    const x1 = sx(left.x) + nW;     const x2 = sx(right.x); const mx = (x1 + x2) / 2
+    seg(x1, y1, mx - x1, 0, lp)
+    seg(mx, Math.min(y1, y2), 0, Math.abs(y2 - y1), lp)
+    seg(mx, y2, x2 - mx, 0, lp)
+  })
 
   // Cards — fixed 2"×0.85" so text is always legible
   for (const contact of visible) {
