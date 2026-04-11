@@ -651,7 +651,8 @@ function addOrgChartToPPTX(pptx: PptxGenJS, slide: PptxGenJS.Slide, data: OrgCha
   const solidLine = { color: 'cbd5e1', width: 0.75, dashType: 'solid' as const }
   const asstLine  = { color: '64748b', width: 0.75, dashType: 'dash' as const }
 
-  function seg(x: number, y: number, w: number, h: number, lp: typeof solidLine) {
+  type LineProps = { color: string; width: number; dashType: 'solid' | 'dash' }
+  function seg(x: number, y: number, w: number, h: number, lp: LineProps) {
     slide.addShape(pptx.ShapeType.line, { x, y, w, h, line: lp })
   }
 
