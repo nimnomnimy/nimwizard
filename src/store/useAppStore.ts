@@ -8,7 +8,7 @@ import {
 import { db } from '../lib/firebase'
 import type {
   AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine,
-  PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask, Task,
+  PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask, Task, Diagram,
 } from '../types'
 import { uid } from '../lib/utils'
 
@@ -18,6 +18,7 @@ import { uid } from '../lib/utils'
 //   users/{uid}/meetings/{meetingId}
 //   users/{uid}/tasks/{taskId}          (includes bucketId field)
 //   users/{uid}/timelines/{timelineId}
+//   users/{uid}/diagrams/{diagramId}
 //   users/{uid}/settings/app            (buckets, email, saved charts)
 //   users/{uid}/orgchart/state          (positions, lines, chartContacts, savedCharts)
 
@@ -65,7 +66,7 @@ function subtaskDateSpan(subTasks: SubTask[]): { startDate?: string; due?: strin
 // ─── In-memory loading state (not reactive, just coordination flags) ──────────
 // These are module-level so they survive re-renders but reset on page reload
 let collectionsLoaded = 0   // count of subcollections that have fired at least once
-const TOTAL_COLLECTIONS = 4 // contacts, meetings, tasks, timelines (+settings+orgchart fire separately)
+const TOTAL_COLLECTIONS = 5 // contacts, meetings, tasks, timelines, diagrams (+settings+orgchart fire separately)
 
 // ─── Store interface ──────────────────────────────────────────────────────────
 interface StoreState extends AppState {
@@ -121,6 +122,11 @@ interface StoreState extends AppState {
   updateTimeline: (t: Timeline) => void
   deleteTimeline: (id: string) => void
 
+  // Diagrams
+  addDiagram: (d: Diagram) => void
+  updateDiagram: (d: Diagram) => void
+  deleteDiagram: (id: string) => void
+
   // Atomic cross-feature mutations
   addTaskAndUpdateTimeline: (bucketId: string, task: Task, timelineId: string, updatedItem: TimelineItem) => void
   saveTaskWithTimelineItem: (bucketId: string, task: Task) => void
@@ -168,6 +174,14 @@ function writeTimeline(userUid: string, timeline: Timeline): Promise<void> {
 
 function removeTimeline(userUid: string, id: string): Promise<void> {
   return deleteDoc(docRef(userUid, 'timelines', id))
+}
+
+function writeDiagram(userUid: string, diagram: Diagram): Promise<void> {
+  return setDoc(docRef(userUid, 'diagrams', diagram.id), stripUndefined(diagram))
+}
+
+function removeDiagram(userUid: string, id: string): Promise<void> {
+  return deleteDoc(docRef(userUid, 'diagrams', id))
 }
 
 function writeSettings(userUid: string, settings: SettingsDoc): Promise<void> {
@@ -296,6 +310,7 @@ export const useAppStore = create<StoreState>()(
     savedCharts: [],
     emailSettings: {},
     timelines: [],
+    diagrams: [],
 
     setUid: (uid) => {
       collectionsLoaded = 0
@@ -382,6 +397,13 @@ export const useAppStore = create<StoreState>()(
         set(s => { s.timelines = timelines; s.timelinesReady = true })
         markLoaded()
       }, (e) => { console.error('[timelines snapshot]', e); set(s => { s.timelinesReady = true }); markLoaded() }))
+
+      // ── Diagrams ────────────────────────────────────────────────────────────
+      unsubs.push(onSnapshot(colRef(userUid, 'diagrams'), (snap) => {
+        const diagrams: Diagram[] = snap.docs.map(d => d.data() as Diagram)
+        set(s => { s.diagrams = diagrams })
+        markLoaded()
+      }, (e) => { console.error('[diagrams snapshot]', e); markLoaded() }))
 
       // ── Settings ────────────────────────────────────────────────────────────
       unsubs.push(onSnapshot(settingsRef(userUid), (snap) => {
@@ -836,6 +858,36 @@ export const useAppStore = create<StoreState>()(
       if (u) removeTimeline(u, id).catch(e => {
         console.error('[deleteTimeline]', e)
         if (prev) set(s => { s.timelines.push(prev!) })
+      })
+    },
+
+    // ── Diagrams ──────────────────────────────────────────────────────────────
+    addDiagram: (diagram) => {
+      set(s => { s.diagrams.push(diagram) })
+      const u = get().uid
+      if (u) writeDiagram(u, diagram).catch(e => {
+        console.error('[addDiagram]', e)
+        set(s => { s.diagrams = s.diagrams.filter(d => d.id !== diagram.id) })
+      })
+    },
+
+    updateDiagram: (diagram) => {
+      let prev: Diagram | undefined
+      set(s => { const i = s.diagrams.findIndex(d => d.id === diagram.id); if (i >= 0) { prev = { ...s.diagrams[i] }; s.diagrams[i] = diagram } })
+      const u = get().uid
+      if (u) writeDiagram(u, diagram).catch(e => {
+        console.error('[updateDiagram]', e)
+        if (prev) set(s => { const i = s.diagrams.findIndex(d => d.id === diagram.id); if (i >= 0) s.diagrams[i] = prev! })
+      })
+    },
+
+    deleteDiagram: (id) => {
+      let prev: Diagram | undefined
+      set(s => { prev = s.diagrams.find(d => d.id === id); s.diagrams = s.diagrams.filter(d => d.id !== id) })
+      const u = get().uid
+      if (u) removeDiagram(u, id).catch(e => {
+        console.error('[deleteDiagram]', e)
+        if (prev) set(s => { s.diagrams.push(prev!) })
       })
     },
 

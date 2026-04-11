@@ -183,6 +183,16 @@ export interface Timeline {
   freezePeriods?: FreezePeriod[]
 }
 
+// ─── Diagrams ─────────────────────────────────────────────────────────────────
+
+export interface Diagram {
+  id: string
+  name: string
+  xml: string          // draw.io XML content
+  createdAt: number
+  updatedAt: number
+}
+
 // ─── App State ────────────────────────────────────────────────────────────────
 
 export interface AppState {
@@ -197,4 +207,5 @@ export interface AppState {
   savedCharts: SavedChart[]
   emailSettings: EmailSettings
   timelines: Timeline[]
+  diagrams: Diagram[]
 }
