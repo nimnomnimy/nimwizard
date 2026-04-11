@@ -561,27 +561,34 @@ export default function OrgChartPage() {
       const busY      = trunkTop + vGap / 2 + busOffset
 
       if (regularIds.length > 0) {
-        // Trunk: parent bottom-center straight down to bus Y
-        ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${busY}`, lineColor))
+        // Clamp bus Y so it never overlaps card tops — ensures no overhang at low vGap
+        const minChildTop = Math.min(...regularRects.map(r => r.y))
+        const clampedBusY = Math.min(busY, minChildTop - 2)
+
+        // Trunk: parent bottom-center → bus Y
+        if (clampedBusY > trunkTop) {
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${parCX} ${trunkTop} L ${parCX} ${clampedBusY}`, lineColor))
+        }
 
         // Bus: spans from leftmost to rightmost child top-center
         const childCXs = regularRects.map(r => r.x + r.w / 2)
         const busLeft  = Math.min(parCX, ...childCXs)
         const busRight = Math.max(parCX, ...childCXs)
         if (busLeft < busRight) {
-          ;(svg as SVGSVGElement).appendChild(makePath(`M ${busLeft} ${busY} L ${busRight} ${busY}`, lineColor))
+          ;(svg as SVGSVGElement).appendChild(makePath(`M ${busLeft} ${clampedBusY} L ${busRight} ${clampedBusY}`, lineColor))
         }
 
-        // Stubs: bus Y → each child top-center (always visible even if child is dragged close)
+        // Stubs: bus Y → each child top-center
         regularIds.forEach(childId => {
           const ch = getRect(childId)
           if (!ch) return
           const cx = ch.x + ch.w / 2
-          const stubTop = Math.min(busY, ch.y - MIN_STUB)
-          const d = `M ${cx} ${stubTop} L ${cx} ${ch.y}`
-          const vis = makePath(d, lineColor)
-          ;(svg as SVGSVGElement).appendChild(vis)
-          ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+          if (clampedBusY < ch.y) {
+            const d = `M ${cx} ${clampedBusY} L ${cx} ${ch.y}`
+            const vis = makePath(d, lineColor)
+            ;(svg as SVGSVGElement).appendChild(vis)
+            ;(svg as SVGSVGElement).appendChild(makeHitPath(d, lineColor, () => deleteConn(childId), [vis]))
+          }
         })
         // (bus handle rendered as React div — see busHandles below)
       }
@@ -1088,7 +1095,7 @@ export default function OrgChartPage() {
                       Vertical gap
                     </label>
                     <div className="flex items-center gap-1">
-                      <button onClick={() => setVGap(g => Math.max(10, g - 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">−</button>
+                      <button onClick={() => setVGap(g => Math.max(40, g - 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">−</button>
                       <span className="w-10 text-center text-sm font-semibold text-slate-700">{vGap}</span>
                       <button onClick={() => setVGap(g => Math.min(200, g + 10))} className="w-6 h-6 rounded border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center text-xs font-bold">+</button>
                     </div>
