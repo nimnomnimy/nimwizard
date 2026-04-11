@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { DealLineItem as LineItemType, DealProduct, LineMetrics, FreightMethod } from '../../types'
 import { calcFreight } from '../../engine/freight'
 import { suggestedSellPrice } from '../../engine/pricing'
+import { useCurrency } from '../../store/useCurrency'
 
 const STATUS_LABELS = { paid: 'Paid', discounted: 'Discounted', free: 'Free' }
 const STATUS_COLORS = {
@@ -17,20 +18,21 @@ function marginColor(pct: number, belowFloor: boolean): string {
   return 'text-red-500 font-semibold'
 }
 
-const fmt = (n: number) => `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+const fmtUsd = (n: number) => `$${n.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 interface Props {
   item: LineItemType
   products: DealProduct[]
   metrics: LineMetrics | undefined
-  fxRate: number
   onChange: (updated: LineItemType) => void
   onRemove: () => void
 }
 
-export default function DealLineItemRow({ item, products, metrics, fxRate, onChange, onRemove }: Props) {
+export default function DealLineItemRow({ item, products, metrics, onChange, onRemove }: Props) {
   const [freightOpen, setFreightOpen] = useState(false)
   const product = products.find(p => p.id === item.productId)
+  const currFmt = useCurrency(s => s.fmt)
+  const currency = useCurrency(s => s.currency)
 
   const set = <K extends keyof LineItemType>(k: K, v: LineItemType[K]) =>
     onChange({ ...item, [k]: v })
@@ -111,11 +113,11 @@ export default function DealLineItemRow({ item, products, metrics, fxRate, onCha
         {/* Line total */}
         <td className="px-2 py-2.5 w-28 text-right">
           <span className="text-sm text-slate-700 font-medium">
-            {metrics ? fmt(metrics.sellPriceUsd) : '—'}
+            {metrics ? currFmt(metrics.sellPriceUsd) : '—'}
           </span>
-          {fxRate && metrics && (
+          {currency === 'USD' && metrics && (
             <p className="text-[10px] text-slate-400">
-              A{fmt(metrics.sellAud)}
+              A{fmtUsd(metrics.sellAud)}
             </p>
           )}
         </td>
@@ -127,7 +129,7 @@ export default function DealLineItemRow({ item, products, metrics, fxRate, onCha
               <span className={`text-sm ${marginColor(metrics.marginPercent, metrics.belowFloor)}`}>
                 {metrics.marginPercent === -Infinity ? 'N/A' : `${metrics.marginPercent.toFixed(1)}%`}
               </span>
-              <p className="text-[10px] text-slate-400">{fmt(metrics.marginUsd)}</p>
+              <p className="text-[10px] text-slate-400">{currFmt(metrics.marginUsd)}</p>
               {metrics.belowFloor && (
                 <p className="text-[10px] text-red-500 font-semibold">⚠ Below floor</p>
               )}

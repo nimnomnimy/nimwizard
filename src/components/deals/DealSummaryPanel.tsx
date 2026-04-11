@@ -1,16 +1,15 @@
 import type { DealMetrics } from '../../types'
-
-const fmt = (n: number, decimals = 2) =>
-  `$${n.toLocaleString('en-AU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
+import { useCurrency } from '../../store/useCurrency'
 
 const pct = (n: number) => `${n.toFixed(1)}%`
 
 interface Props {
   metrics: DealMetrics
-  fxRate?: number
 }
 
 export default function DealSummaryPanel({ metrics }: Props) {
+  const fmt = useCurrency(s => s.fmt)
+  const currency = useCurrency(s => s.currency)
   const budgetUsedPct = metrics.discountBudgetUsed + (metrics.discountBudgetUsed + metrics.discountBudgetRemaining) > 0
     ? (metrics.discountBudgetUsed / (metrics.discountBudgetUsed + metrics.discountBudgetRemaining)) * 100
     : 0
@@ -41,8 +40,10 @@ export default function DealSummaryPanel({ metrics }: Props) {
 
       {/* Key metrics grid */}
       <div className="grid grid-cols-2 gap-2">
-        <MetricTile label="Total Sell" value={fmt(metrics.totalSellUsd)} sub={`A${fmt(metrics.totalSellAud)}`} />
-        <MetricTile label="Total Cost" value={fmt(metrics.totalCostUsd)} sub={`A${fmt(metrics.totalCostAud)}`} />
+        <MetricTile label="Total Sell" value={fmt(metrics.totalSellUsd)}
+          sub={currency === 'USD' ? `A$${metrics.totalSellAud.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined} />
+        <MetricTile label="Total Cost" value={fmt(metrics.totalCostUsd)}
+          sub={currency === 'USD' ? `A$${metrics.totalCostAud.toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : undefined} />
         <MetricTile label="Margin $" value={fmt(metrics.totalMarginUsd)} valueClass={marginColor} />
         <MetricTile label="Margin %" value={pct(metrics.totalMarginPercent)} valueClass={marginColor} />
       </div>

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
+import CurrencyBar from '../components/ui/CurrencyBar'
 import type { Contract, ContractNotification, ContractType, PaymentTerms, BillingModel } from '../types'
 
 const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
@@ -32,8 +34,6 @@ const TYPE_COLORS: Record<ContractType, string> = {
   'renewal':          'bg-green-100 text-green-700',
 }
 
-const fmt = (n: number) =>
-  `$${n.toLocaleString('en-AU', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`
 
 function daysUntil(dateStr: string): number {
   const d = new Date(dateStr)
@@ -65,6 +65,7 @@ export default function ContractManagerPage() {
   const addContract    = useAppStore(s => s.addContract)
   const updateContract = useAppStore(s => s.updateContract)
   const deleteContract = useAppStore(s => s.deleteContract)
+  const fmt            = useCurrency(s => s.fmt)
 
   const [activeId, setActiveId]   = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -187,10 +188,11 @@ export default function ContractManagerPage() {
       {/* Left pane */}
       <div className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
         <div className="p-3 border-b border-slate-100 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-800 text-sm">Contracts</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-bold text-slate-800 text-sm flex-shrink-0">Contracts</h2>
+            <CurrencyBar />
             <button onClick={openNew}
-              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors">
+              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors flex-shrink-0">
               + New
             </button>
           </div>

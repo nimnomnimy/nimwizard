@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
+import CurrencyBar from '../components/ui/CurrencyBar'
 import ProductDrawer from '../components/deals/ProductDrawer'
 import DealLineItemRow from '../components/deals/DealLineItem'
 import DealSummaryPanel from '../components/deals/DealSummaryPanel'
@@ -43,6 +45,8 @@ export default function DealEnginePage() {
   const updateDeal    = useAppStore(s => s.updateDeal)
   const deleteDeal    = useAppStore(s => s.deleteDeal)
 
+  const setFxRate = useCurrency(s => s.setFxRate)
+
   const [mainTab, setMainTab]       = useState<MainTab>('deals')
   const [rightTab, setRightTab]     = useState<RightTab>('summary')
   const [drawerProductId, setDrawerProductId] = useState<string | null | undefined>(undefined)
@@ -53,6 +57,11 @@ export default function DealEnginePage() {
 
   // ── Active deal ────────────────────────────────────────────────────────────
   const activeDeal = deals.find(d => d.id === activeDealId) ?? null
+
+  // Sync deal's FX rate into the currency store whenever active deal changes
+  useEffect(() => {
+    if (activeDeal?.globalFxRate) setFxRate(activeDeal.globalFxRate)
+  }, [activeDeal?.id, activeDeal?.globalFxRate, setFxRate])
 
   // Compute metrics reactively
   const metrics = useMemo(() => {
@@ -209,7 +218,7 @@ export default function DealEnginePage() {
     <div className="h-full flex flex-col overflow-hidden bg-slate-50">
 
       {/* Top tab bar */}
-      <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center justify-between" style={{ minHeight: 52 }}>
+      <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center justify-between gap-3" style={{ minHeight: 52 }}>
         <div className="flex gap-1">
           {(['deals', 'products'] as MainTab[]).map(t => (
             <button key={t} onClick={() => setMainTab(t)}
@@ -218,6 +227,7 @@ export default function DealEnginePage() {
             </button>
           ))}
         </div>
+        <CurrencyBar className="mr-auto" />
         <div className="flex gap-2">
           {mainTab === 'products' && (
             <button onClick={() => setDrawerProductId(null)}
@@ -320,11 +330,15 @@ export default function DealEnginePage() {
                     className="text-base font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none px-1 min-w-[120px]" />
 
                   <div className="flex items-center gap-1.5 ml-auto flex-wrap gap-y-2">
-                    {/* FX rate */}
+                    {/* FX rate — synced to CurrencyBar via useEffect */}
                     <label className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <span>FX</span>
+                      <span>Deal FX</span>
                       <input type="number" min="0" step="0.001" value={activeDeal.globalFxRate}
-                        onChange={e => patchDeal({ globalFxRate: parseFloat(e.target.value) || DEFAULT_FX })}
+                        onChange={e => {
+                          const val = parseFloat(e.target.value) || DEFAULT_FX
+                          patchDeal({ globalFxRate: val })
+                          setFxRate(val)
+                        }}
                         className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </label>
                     {/* Budget */}
@@ -361,7 +375,7 @@ export default function DealEnginePage() {
                           <th className="px-3 py-2.5 text-xs font-semibold text-slate-500">Product</th>
                           <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-20">Qty</th>
                           <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-32">Status</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-32">Sell/Unit (USD)</th>
+                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-32">Sell/Unit</th>
                           <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-28 text-right">Line Total</th>
                           <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-28 text-right">Margin</th>
                           <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-24 text-center">Type</th>
@@ -378,7 +392,6 @@ export default function DealEnginePage() {
                             item={item}
                             products={products}
                             metrics={metrics?.lines.find(l => l.lineItemId === item.id)}
-                            fxRate={activeDeal.globalFxRate}
                             onChange={updateLineItem}
                             onRemove={() => removeLineItem(item.id)}
                           />
@@ -427,7 +440,7 @@ export default function DealEnginePage() {
                 ))}
               </div>
               <div className="flex-1 overflow-y-auto p-3">
-                {rightTab === 'summary'   && <DealSummaryPanel metrics={metrics} fxRate={activeDeal.globalFxRate} />}
+                {rightTab === 'summary'   && <DealSummaryPanel metrics={metrics} />}
                 {rightTab === 'optimizer' && (
                   <OptimizationPanel
                     deal={activeDeal}

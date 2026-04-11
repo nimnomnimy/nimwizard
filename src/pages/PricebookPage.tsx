@@ -1,10 +1,9 @@
 import { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
+import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
+import CurrencyBar from '../components/ui/CurrencyBar'
 import type { Pricebook, PricebookEntry } from '../types'
-
-const fmt = (n: number, decimals = 2) =>
-  `$${n.toLocaleString('en-AU', { minimumFractionDigits: decimals, maximumFractionDigits: decimals })}`
 
 function emptyEntry(): PricebookEntry {
   return { id: uid(), productId: '', productName: '', unitPriceUsd: 0, freightIncluded: false }
@@ -20,6 +19,8 @@ export default function PricebookPage() {
   const addPricebook    = useAppStore(s => s.addPricebook)
   const updatePricebook = useAppStore(s => s.updatePricebook)
   const deletePricebook = useAppStore(s => s.deletePricebook)
+  const fmt             = useCurrency(s => s.fmt)
+  const currency        = useCurrency(s => s.currency)
 
   const [activeId, setActiveId]   = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
@@ -93,10 +94,11 @@ export default function PricebookPage() {
       {/* Left pane */}
       <div className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
         <div className="p-3 border-b border-slate-100 flex flex-col gap-2">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-800 text-sm">Pricebooks</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="font-bold text-slate-800 text-sm flex-shrink-0">Pricebooks</h2>
+            <CurrencyBar />
             <button onClick={openNew}
-              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors">
+              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors flex-shrink-0">
               + New
             </button>
           </div>
@@ -161,8 +163,8 @@ export default function PricebookPage() {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Product</th>
-                    <th className="px-4 py-3 text-right">Unit Price (USD)</th>
-                    {active.customFxRate && <th className="px-4 py-3 text-right">Unit Price (AUD)</th>}
+                    <th className="px-4 py-3 text-right">Unit Price</th>
+                    {currency === 'USD' && (active.customFxRate != null) && <th className="px-4 py-3 text-right">AUD</th>}
                     <th className="px-4 py-3 text-center w-28">Freight</th>
                     <th className="px-4 py-3 text-left">Special Terms</th>
                   </tr>
@@ -176,9 +178,9 @@ export default function PricebookPage() {
                       <td className="px-4 py-3 text-right font-semibold text-slate-700">
                         {fmt(entry.unitPriceUsd)}
                       </td>
-                      {active.customFxRate && (
+                      {currency === 'USD' && (active.customFxRate != null) && (
                         <td className="px-4 py-3 text-right text-slate-500">
-                          A{fmt(toAud(entry.unitPriceUsd, entry, active))}
+                          A${toAud(entry.unitPriceUsd, entry, active).toLocaleString('en-AU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                         </td>
                       )}
                       <td className="px-4 py-3 text-center">
