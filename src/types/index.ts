@@ -229,6 +229,43 @@ export interface PriceHistoryEntry {
   note?: string                  // e.g. "Initial" or free-text
 }
 
+// ─── Product Configurations ───────────────────────────────────────────────────
+
+export type ConfigRowUnit = 'one time' | 'months' | 'years' | 'per unit' | 'per site' | 'per user'
+
+export interface ConfigRow {
+  id: string
+  productId?: string            // optional link to a DealProduct
+  productCode?: string          // e.g. "7371-1203-2000"
+  description: string
+  quantity: number
+  costPriceUsd: number
+  floorPriceUsd: number
+  sellPriceUsd: number
+  unit: ConfigRowUnit
+  termMonths?: number           // recurring: contract term in months
+  notes?: string
+}
+
+export interface ConfigGroup {
+  id: string
+  label: string                 // e.g. "7371-1203-2000" or "R7 CASH"
+  description?: string
+  collapsed: boolean
+  rows: ConfigRow[]
+  subGroups: ConfigGroup[]      // recursive — subgroups within this group
+}
+
+export interface ProductConfiguration {
+  id: string
+  name: string                  // e.g. "R7 CASH", "Standard Package"
+  currency: 'USD' | 'AUD'      // the currency prices are entered in (display only)
+  notes?: string
+  groups: ConfigGroup[]         // top-level groups
+  createdAt: number
+  updatedAt: number
+}
+
 export interface DealProduct {
   id: string
   name: string
@@ -241,6 +278,7 @@ export interface DealProduct {
   fxOverride?: number           // USD→AUD override (undefined = use deal-level global)
   pricingTiers?: PricingTier[]
   priceHistory?: PriceHistoryEntry[]
+  configurations?: ProductConfiguration[]
   createdAt: number
 }
 

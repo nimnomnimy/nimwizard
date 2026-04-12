@@ -3,8 +3,9 @@ import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import CurrencyBar from '../components/ui/CurrencyBar'
 import ProductDrawer from '../components/deals/ProductDrawer'
+import ProductConfigEditor from '../components/products/ProductConfigEditor'
 import { useResizable } from '../hooks/useResizable'
-import type { DealProduct, ProductCategory } from '../types'
+import type { DealProduct, ProductCategory, ProductConfiguration } from '../types'
 
 const CATEGORY_COLORS: Record<ProductCategory, string> = {
   'Software':              'bg-blue-100 text-blue-700',
@@ -19,7 +20,8 @@ const CATEGORIES: ProductCategory[] = [
 ]
 
 export default function ProductsPage() {
-  const products = useAppStore(s => s.dealProducts)
+  const products      = useAppStore(s => s.dealProducts)
+  const updateProduct = useAppStore(s => s.updateDealProduct)
   const fmt           = useCurrency(s => s.fmt)
   const fmtAud        = useCurrency(s => s.fmtAud)
   const showSecondary = useCurrency(s => s.showSecondary)
@@ -30,6 +32,12 @@ export default function ProductsPage() {
   const [filterType, setFilterType] = useState<'all' | 'one-time' | 'recurring'>('all')
   const [activeId, setActiveId] = useState<string | null>(null)
   const left = useResizable({ initial: 260, min: 180, max: 400 })
+
+  function handleConfigsChange(productId: string, configs: ProductConfiguration[]) {
+    const p = products.find(x => x.id === productId)
+    if (!p) return
+    updateProduct({ ...p, configurations: configs })
+  }
 
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
@@ -286,6 +294,14 @@ export default function ProductsPage() {
             )}
 
             <p className="text-xs text-slate-400">Created {new Date(active.createdAt).toLocaleDateString('en-AU')}</p>
+
+            {/* ── Configurations ── */}
+            <div className="border-t border-slate-100 pt-4">
+              <ProductConfigEditor
+                configs={active.configurations ?? []}
+                onChange={cfgs => handleConfigsChange(active.id, cfgs)}
+              />
+            </div>
           </div>
         )}
       </div>
