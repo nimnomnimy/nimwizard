@@ -122,6 +122,9 @@ export default function ProductsPage() {
   const fmt           = useCurrency(s => s.fmt)
   const fmtAud        = useCurrency(s => s.fmtAud)
   const showSecondary = useCurrency(s => s.showSecondary)
+  // Subscribe to these so the product list re-renders when currency/rate changes
+  useCurrency(s => s.currency)
+  useCurrency(s => s.usdToAudRate)
 
   // null = new product form, string = existing product, undefined = nothing selected
   const [activeId, setActiveId]     = useState<string | null | undefined>(undefined)
@@ -432,24 +435,38 @@ export default function ProductsPage() {
               )}
               {filtered.map(p => {
                 const { primary, secondary, sub } = priceDisplay(p)
+                const isActive = activeId === p.id
                 return (
-                  <button key={p.id} onClick={() => setActiveId(p.id)}
-                    className={`w-full text-left px-3 py-2 rounded-xl text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-                    <div className="flex items-start justify-between gap-1">
-                      <p className="font-semibold text-slate-800 truncate flex-1 text-xs">{p.name}</p>
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-xs font-bold text-slate-700">{primary}</p>
-                        {secondary && <p className="text-[10px] text-slate-400">{secondary}</p>}
+                  <div key={p.id} className={`rounded-xl border transition-colors ${isActive ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-slate-50'}`}>
+                    <button onClick={() => setActiveId(p.id)} className="w-full text-left px-3 pt-2 pb-1">
+                      <div className="flex items-start justify-between gap-1">
+                        <p className="font-semibold text-slate-800 truncate flex-1 text-xs">{p.name}</p>
+                        <div className="text-right flex-shrink-0">
+                          <p className="text-xs font-bold text-slate-700">{primary}</p>
+                          {secondary && <p className="text-[10px] text-slate-400">{secondary}</p>}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[p.category]}`}>{p.category}</span>
-                      {p.pricingType === 'recurring' && (
-                        <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">Recurring</span>
-                      )}
-                      {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
-                    </div>
-                  </button>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[p.category]}`}>{p.category}</span>
+                        {p.pricingType === 'recurring' && (
+                          <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">Recurring</span>
+                        )}
+                        {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
+                      </div>
+                    </button>
+                    {isActive && (
+                      <div className="flex gap-1 px-3 pb-2">
+                        <button type="button" onClick={handleClone}
+                          className="text-[10px] px-2 py-0.5 rounded border border-slate-200 text-slate-500 hover:bg-slate-100 transition-colors font-medium">
+                          Clone
+                        </button>
+                        <button type="button" onClick={handleDelete}
+                          className="text-[10px] px-2 py-0.5 rounded border border-red-200 text-red-400 hover:bg-red-50 transition-colors font-medium">
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -496,7 +513,6 @@ export default function ProductsPage() {
               configs={existing?.configurations ?? []}
               set={set}
               onSave={handleSave}
-              onDelete={handleDelete}
               onDeleteHistoryIds={ids => {
                 if (!existing) return
                 const filtered = (existing.priceHistory ?? []).filter(h => !ids.includes(h.id))
@@ -504,7 +520,6 @@ export default function ProductsPage() {
                 showToast(`${ids.length} record${ids.length > 1 ? 's' : ''} deleted`)
               }}
               onConfigsChange={cfgs => existing && handleConfigsChange(existing.id, cfgs)}
-              onClone={handleClone}
               nameRef={nameRef}
             />
           )}
@@ -518,7 +533,7 @@ export default function ProductsPage() {
 
 function ProductDetailPane({
   form, dirty, isNew, existing, configs,
-  set, onSave, onDelete, onDeleteHistoryIds, onConfigsChange, onClone,
+  set, onSave, onDeleteHistoryIds, onConfigsChange,
   nameRef,
 }: {
   productId: string | null
@@ -529,8 +544,6 @@ function ProductDetailPane({
   configs: ProductConfiguration[]
   set: <K extends keyof FormState>(k: K, v: FormState[K]) => void
   onSave: (e?: React.FormEvent) => void
-  onDelete: () => void
-  onClone: () => void
   onDeleteHistoryIds: (ids: string[]) => void
   onConfigsChange: (cfgs: ProductConfiguration[]) => void
   nameRef: React.RefObject<HTMLInputElement | null>
@@ -545,38 +558,24 @@ function ProductDetailPane({
           onChange={onConfigsChange}
           hideConfigName
           headerSlot={
-            <>
-              {/* Product name — grows to fill available space */}
-              <input
-                ref={nameRef}
-                type="text"
-                value={form.name}
-                onChange={e => set('name', e.target.value)}
-                placeholder="Product name…"
-                required
-                className="text-base font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 flex-1 min-w-0 placeholder:text-slate-300"
-              />
-              {/* Save / Clone / Delete */}
-              {!isNew && (
-                <button type="button" onClick={onClone}
-                  className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors flex-shrink-0">
-                  Clone
-                </button>
-              )}
-              {!isNew && (
-                <button type="button" onClick={onDelete}
-                  className="px-2.5 py-1 rounded-lg border border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors flex-shrink-0">
-                  Delete
-                </button>
-              )}
-              <button
-                type="submit"
-                disabled={!dirty && !isNew}
-                className="px-3 py-1 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0">
-                Save
-              </button>
-              <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
-            </>
+            /* Product name — grows to fill available space */
+            <input
+              ref={nameRef}
+              type="text"
+              value={form.name}
+              onChange={e => set('name', e.target.value)}
+              placeholder="Product name…"
+              required
+              className="text-base font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 flex-1 min-w-0 placeholder:text-slate-300"
+            />
+          }
+          saveSlot={
+            <button
+              type="submit"
+              disabled={!dirty && !isNew}
+              className="text-[11px] px-3 py-1 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0">
+              Save
+            </button>
           }
         />
 

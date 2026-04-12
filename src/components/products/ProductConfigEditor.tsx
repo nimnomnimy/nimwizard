@@ -187,11 +187,12 @@ interface Props {
   onActiveConfigChange?: (id: string | null) => void
   hideConfigName?: boolean        // hides the config name editor in the toolbar (product name acts as config name)
   headerSlot?: React.ReactNode    // extra content rendered at the start of the toolbar (e.g. product name input)
+  saveSlot?: React.ReactNode      // content rendered at the far right of the actions row (e.g. Save button)
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange, hideConfigName, headerSlot }: Props) {
+export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange, hideConfigName, headerSlot, saveSlot }: Props) {
   const [internalActiveId, setInternalActiveId] = useState<string | null>(configs[0]?.id ?? null)
   const activeConfigId = controlledActiveId !== undefined ? controlledActiveId : internalActiveId
   function setActiveConfigId(id: string | null) {
@@ -468,6 +469,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                 className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
                 Paste Excel
               </button>
+              {saveSlot}
             </div>
           </div>
 
