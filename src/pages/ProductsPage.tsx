@@ -30,10 +30,11 @@ const CATEGORIES: ProductCategory[] = [
 
 function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
   if (!g?.children) return 0
+  const isRecurring = g.pricingType === 'recurring'
   return g.children.reduce((s, c) => {
     if (c.type === 'row') {
       const price = field === 'cost' ? c.row.costPriceUsd : field === 'floor' ? c.row.floorPriceUsd : c.row.sellPriceUsd
-      return s + (price ?? 0) * (c.row.quantity ?? 1) * (c.row.termMonths ?? 1)
+      return s + (price ?? 0) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     }
     if (c.type === 'subgroup') return s + groupFieldTotal(c.group, field)
     return s
@@ -119,6 +120,7 @@ export default function ProductsPage() {
   const [form, setForm]             = useState<FormState>(emptyForm())
   const [dirty, setDirty]           = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
+  const justCreatedRef = useRef(false)
   const left = useResizable({ initial: 260, min: 180, max: 400 })
   const importRef = useRef<HTMLInputElement>(null)
   const [showExportMenu, setShowExportMenu] = useState(false)
@@ -134,9 +136,15 @@ export default function ProductsPage() {
       setTimeout(() => nameRef.current?.focus(), 50)
     } else if (existing) {
       setForm(productToForm(existing))
-      setDirty(false)
+      if (justCreatedRef.current) {
+        justCreatedRef.current = false
+        setDirty(true)
+        setTimeout(() => nameRef.current?.select(), 50)
+      } else {
+        setDirty(false)
+      }
     }
-  }, [activeId])
+  }, [activeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function set<K extends keyof FormState>(k: K, v: FormState[K]) {
     setForm(f => ({ ...f, [k]: v }))
@@ -147,6 +155,26 @@ export default function ProductsPage() {
     const p = products.find(x => x.id === productId)
     if (!p) return
     updateProduct({ ...p, configurations: configs })
+  }
+
+  function handleNewProduct() {
+    const newId = uid()
+    const firstConfig: ProductConfiguration = { id: uid(), name: 'Configuration 1', groups: [] }
+    const product: DealProduct = {
+      id: newId,
+      name: 'New Product',
+      category: 'Software',
+      pricingType: 'one-time',
+      costPrice: 0,
+      floorSellPrice: 0,
+      defaultSellPrice: 0,
+      priceHistory: [],
+      createdAt: Date.now(),
+      configurations: [firstConfig],
+    }
+    justCreatedRef.current = true
+    addProduct(product)
+    setActiveId(newId)
   }
 
   const filtered = products.filter(p => {
@@ -301,7 +329,7 @@ export default function ProductsPage() {
             )}
           </div>
           <button
-            onClick={() => { setActiveId(null) }}
+            onClick={handleNewProduct}
             className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors">
             + New Product
           </button>
@@ -513,7 +541,7 @@ function ProductDetailPane({
           onClick={() => onSave()}
           disabled={!dirty && !isNew}
           className="px-4 py-1.5 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          {isNew ? 'Create Product' : 'Save'}
+          Save
         </button>
       </div>
 
@@ -648,7 +676,7 @@ function ProductDetailPane({
 
 
             {/* Configurations */}
-            {!isNew && existing && (
+            {existing && (
               <div className="border-t border-slate-100 pt-4">
                 <ProductConfigEditor
                   configs={configs}
@@ -657,9 +685,6 @@ function ProductDetailPane({
                   onActiveConfigChange={setActiveConfigId}
                 />
               </div>
-            )}
-            {isNew && (
-              <p className="text-xs text-slate-400 text-center">Save the product first to add configurations.</p>
             )}
           </form>
         )}

@@ -717,7 +717,7 @@ function ConfigTableHeader({
     ? '20px 8px 90px 1fr 50px 78px 78px 78px 72px 52px 84px 28px'
     : '20px 8px 90px 1fr 50px 78px 78px 78px 84px 28px'
   return (
-    <div className={`grid text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-10' : 'pl-2'}`}
+    <div className={`grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-10' : 'pl-2'}`}
       style={{ gridTemplateColumns: cols }}>
       <span className="flex items-center">
         {showSelect && <input type="checkbox" checked={!!allSelected} onChange={onSelectAll} className="w-3 h-3 cursor-pointer" />}
