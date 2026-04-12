@@ -114,7 +114,6 @@ export default function ProductsPage() {
   // null = new product form, string = existing product, undefined = nothing selected
   const [activeId, setActiveId]     = useState<string | null | undefined>(undefined)
   const [search, setSearch]         = useState('')
-  const [filterType, setFilterType] = useState<'all' | 'one-time' | 'recurring'>('all')
   const [form, setForm]             = useState<FormState>(emptyForm())
   const [dirty, setDirty]           = useState(false)
   const nameRef = useRef<HTMLInputElement>(null)
@@ -176,11 +175,9 @@ export default function ProductsPage() {
     setActiveId(newId)
   }
 
-  const filtered = products.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
-    const matchType   = filterType === 'all' || p.pricingType === filterType
-    return matchSearch && matchType
-  }).sort((a, b) => a.name.localeCompare(b.name))
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase())
+  ).sort((a, b) => a.name.localeCompare(b.name))
 
   function priceDisplay(p: DealProduct): { primary: string; secondary?: string } {
     const cfgTotal = configsNetQtyTotal(p.configurations ?? [])
@@ -388,14 +385,6 @@ export default function ProductsPage() {
               <input value={search} onChange={e => setSearch(e.target.value)}
                 placeholder="Search products…"
                 className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              <div className="flex gap-1">
-                {(['all', 'one-time', 'recurring'] as const).map(t => (
-                  <button key={t} onClick={() => setFilterType(t)}
-                    className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors capitalize ${filterType === t ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                    {t === 'all' ? 'All' : t}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
