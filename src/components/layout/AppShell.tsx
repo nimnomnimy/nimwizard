@@ -1,24 +1,83 @@
 import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/useAppStore'
 
-const NAV = [
-  { to: '/contacts',  label: 'Contacts',  icon: ContactsIcon },
-  { to: '/org',       label: 'Org Charts', icon: OrgIcon },
-  { to: '/meetings',  label: 'Meetings',   icon: MeetingsIcon },
-  { to: '/tasks',     label: 'Tasks',      icon: TasksIcon },
-  { to: '/timelines', label: 'Timelines',  icon: TimelinesIcon },
-  { to: '/diagrams',  label: 'Diagrams',   icon: DiagramsIcon },
-  { to: '/deals',      label: 'Deal Engine',  icon: DealsIcon },
-  { to: '/configs',    label: 'Products',      icon: ConfigsIcon },
-  { to: '/pricebooks', label: 'Pricebooks',   icon: PricebookIcon },
-  { to: '/contracts',  label: 'Contracts',    icon: ContractsIcon },
+// ─── Nav structure ─────────────────────────────────────────────────────────────
+
+const GROUPS = [
+  {
+    id: 'people',
+    label: 'People',
+    icon: PeopleGroupIcon,
+    items: [
+      { to: '/contacts', label: 'Contacts', icon: ContactsIcon },
+      { to: '/org',      label: 'Org Charts', icon: OrgIcon },
+    ],
+  },
+  {
+    id: 'projects',
+    label: 'Projects',
+    icon: ProjectsGroupIcon,
+    items: [
+      { to: '/meetings',   label: 'Meetings',   icon: MeetingsIcon },
+      { to: '/tasks',      label: 'Tasks',       icon: TasksIcon },
+      { to: '/timelines',  label: 'Timelines',   icon: TimelinesIcon },
+      { to: '/diagrams',   label: 'Diagrams',    icon: DiagramsIcon },
+    ],
+  },
+  {
+    id: 'selling',
+    label: 'Selling',
+    icon: SellingGroupIcon,
+    items: [
+      { to: '/deals',      label: 'Deal Engine', icon: DealsIcon },
+      { to: '/configs',    label: 'Products',    icon: ConfigsIcon },
+      { to: '/pricebooks', label: 'Pricebooks',  icon: PricebookIcon },
+      { to: '/contracts',  label: 'Contracts',   icon: ContractsIcon },
+    ],
+  },
 ]
+
+// All item paths → which group they belong to
+function groupForPath(pathname: string): string | null {
+  for (const g of GROUPS) {
+    if (g.items.some(item => pathname === item.to || pathname.startsWith(item.to + '/'))) {
+      return g.id
+    }
+  }
+  return null
+}
+
+// ─── AppShell ──────────────────────────────────────────────────────────────────
 
 export default function AppShell() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  // Which sidebar groups are expanded (desktop)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['people', 'projects', 'selling']))
+  // Mobile bottom nav: null = top-level groups, string = drilled into a group
+  const [mobileGroup, setMobileGroup] = useState<string | null>(null)
+
   const syncing = useAppStore(s => s.syncing)
   const version = __APP_VERSION__
+  const location = useLocation()
+  const activeGroup = groupForPath(location.pathname)
+
+  function toggleGroup(id: string) {
+    setExpandedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  // When navigating, close sidebar on mobile
+  function handleNavClick() {
+    setSidebarOpen(false)
+    setMobileGroup(null)
+  }
+
+  const currentMobileGroup = mobileGroup ? GROUPS.find(g => g.id === mobileGroup) : null
 
   return (
     <div className="flex h-dvh bg-slate-100 overflow-hidden">
@@ -51,24 +110,51 @@ export default function AppShell() {
           <button onClick={() => setSidebarOpen(false)} className="lg:hidden text-white/40 hover:text-white p-1 rounded">✕</button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 p-2 flex flex-col gap-0.5 overflow-y-auto">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to} onClick={() => setSidebarOpen(false)}
-              className={({ isActive }) =>
-                `flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
-                  isActive ? 'bg-blue-500/20 text-blue-300' : 'text-white/50 hover:text-white/80 hover:bg-white/5'
-                }`
-              }>
-              <Icon />
-              {label}
-            </NavLink>
-          ))}
+        {/* Grouped nav */}
+        <nav className="flex-1 p-2 flex flex-col gap-1 overflow-y-auto">
+          {GROUPS.map(group => {
+            const isExpanded = expandedGroups.has(group.id)
+            const isGroupActive = activeGroup === group.id
+            return (
+              <div key={group.id}>
+                {/* Group header */}
+                <button
+                  onClick={() => toggleGroup(group.id)}
+                  className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors ${
+                    isGroupActive ? 'text-blue-300' : 'text-white/30 hover:text-white/60'
+                  }`}>
+                  <group.icon />
+                  <span className="flex-1 text-left">{group.label}</span>
+                  <svg width="10" height="10" viewBox="0 0 12 12" fill="none"
+                    className={`flex-shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`}>
+                    <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                  </svg>
+                </button>
+
+                {/* Group items */}
+                {isExpanded && (
+                  <div className="flex flex-col gap-0.5 pl-2 mt-0.5 mb-1">
+                    {group.items.map(({ to, label, icon: Icon }) => (
+                      <NavLink key={to} to={to} onClick={handleNavClick}
+                        className={({ isActive }) =>
+                          `flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[40px] ${
+                            isActive ? 'bg-blue-500/20 text-blue-300' : 'text-white/50 hover:text-white/80 hover:bg-white/5'
+                          }`
+                        }>
+                        <Icon />
+                        {label}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )
+          })}
         </nav>
 
         {/* Footer — Setup + version */}
         <div className="p-3 border-t border-white/5 flex flex-col gap-0.5">
-          <NavLink to="/setup" onClick={() => setSidebarOpen(false)}
+          <NavLink to="/setup" onClick={handleNavClick}
             className={({ isActive }) =>
               `flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors min-h-[44px] ${
                 isActive ? 'bg-blue-500/20 text-blue-300' : 'text-white/50 hover:text-white/80 hover:bg-white/5'
@@ -97,7 +183,6 @@ export default function AppShell() {
             </svg>
           </button>
           <span className="text-white font-bold text-base">NimWizard</span>
-          {/* Version in top-right on mobile */}
           <span className="text-[10px] text-white/30 font-mono pr-1">v{version}</span>
         </header>
 
@@ -106,25 +191,78 @@ export default function AppShell() {
           <Outlet />
         </main>
 
-        {/* Mobile bottom nav — first 5 items only */}
+        {/* Mobile bottom nav */}
         <nav className="lg:hidden flex bg-slate-900 border-t border-white/5 flex-shrink-0"
           style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
-          {NAV.slice(0, 5).map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to}
-              className={({ isActive }) =>
-                `flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] ${
-                  isActive ? 'text-blue-400' : 'text-white/40'
-                }`
-              }>
-              <Icon />
-              {label}
-            </NavLink>
-          ))}
+
+          {currentMobileGroup ? (
+            // ── Drilled into a group — show group items + Back ─────────────────
+            <>
+              {/* Back button */}
+              <button
+                onClick={() => setMobileGroup(null)}
+                className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] text-white/40 hover:text-white/70">
+                <BackIcon />
+                Back
+              </button>
+              {currentMobileGroup.items.map(({ to, label, icon: Icon }) => (
+                <NavLink key={to} to={to} onClick={handleNavClick}
+                  className={({ isActive }) =>
+                    `flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] ${
+                      isActive ? 'text-blue-400' : 'text-white/40'
+                    }`
+                  }>
+                  <Icon />
+                  {label}
+                </NavLink>
+              ))}
+            </>
+          ) : (
+            // ── Top-level: 4 group buttons + Settings ──────────────────────────
+            <>
+              {GROUPS.map(group => (
+                <button key={group.id}
+                  onClick={() => setMobileGroup(group.id)}
+                  className={`flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] ${
+                    activeGroup === group.id ? 'text-blue-400' : 'text-white/40'
+                  }`}>
+                  <group.icon />
+                  {group.label}
+                </button>
+              ))}
+              <NavLink to="/setup" onClick={handleNavClick}
+                className={({ isActive }) =>
+                  `flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] ${
+                    isActive ? 'text-blue-400' : 'text-white/40'
+                  }`
+                }>
+                <SetupIcon />
+                Settings
+              </NavLink>
+            </>
+          )}
         </nav>
       </div>
     </div>
   )
 }
+
+// ─── Group icons ───────────────────────────────────────────────────────────────
+
+function PeopleGroupIcon() {
+  return <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
+}
+function ProjectsGroupIcon() {
+  return <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M3 4a1 1 0 000 2h14a1 1 0 100-2H3zm0 4a1 1 0 000 2h8a1 1 0 100-2H3zm0 4a1 1 0 000 2h11a1 1 0 100-2H3zm0 4a1 1 0 000 2h5a1 1 0 100-2H3z" clipRule="evenodd"/></svg>
+}
+function SellingGroupIcon() {
+  return <svg width="15" height="15" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a2 2 0 00-2 2v12a2 2 0 002 2h8a2 2 0 002-2V7.414A2 2 0 0015.414 6L12 2.586A2 2 0 0010.586 2H6zm5 6a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V8z" clipRule="evenodd"/></svg>
+}
+function BackIcon() {
+  return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z" clipRule="evenodd"/></svg>
+}
+
+// ─── Item icons ────────────────────────────────────────────────────────────────
 
 function ContactsIcon() {
   return <svg width="18" height="18" viewBox="0 0 20 20" fill="currentColor"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
