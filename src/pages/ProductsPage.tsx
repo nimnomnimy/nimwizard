@@ -28,7 +28,8 @@ const CATEGORIES: ProductCategory[] = [
 
 // ─── Price calculation from configs ──────────────────────────────────────────
 
-function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
+// Subtotal for a group: net × rowQty × term, with sub-group qty applied
+function groupFieldSubtotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
   if (!g?.children) return 0
   const isRecurring = g.pricingType === 'recurring'
   return g.children.reduce((s, c) => {
@@ -37,20 +38,24 @@ function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): numb
       const price = field === 'sell' ? (basePrice ?? 0) * (1 - (c.row.discountPct ?? 0) / 100) : (basePrice ?? 0)
       return s + price * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     }
-    if (c.type === 'subgroup') return s + groupFieldTotal(c.group, field)
+    if (c.type === 'subgroup') return s + groupFieldSubtotal(c.group, field) * (c.group.qty ?? 1)
     return s
   }, 0)
 }
 
+function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
+  return groupFieldSubtotal(g, field) * (g.qty ?? 1)
+}
+
 // Net price × qty only (no term) — used for product list display
-function groupNetQtyTotal(g: ConfigGroup): number {
+function groupNetQtySubtotal(g: ConfigGroup): number {
   if (!g?.children) return 0
   return g.children.reduce((s, c) => {
     if (c.type === 'row') {
       const net = (c.row.sellPriceUsd ?? 0) * (1 - (c.row.discountPct ?? 0) / 100)
       return s + net * (c.row.quantity ?? 1)
     }
-    if (c.type === 'subgroup') return s + groupNetQtyTotal(c.group)
+    if (c.type === 'subgroup') return s + groupNetQtySubtotal(c.group) * (c.group.qty ?? 1)
     return s
   }, 0)
 }
@@ -62,7 +67,7 @@ function configsTotal(configs: ProductConfiguration[], field: 'cost' | 'floor' |
 
 function configsNetQtyTotal(configs: ProductConfiguration[]): number {
   if (!configs?.length) return 0
-  return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupNetQtyTotal(g), 0), 0)
+  return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupNetQtySubtotal(g) * (g.qty ?? 1), 0), 0)
 }
 
 // ─── Form state ───────────────────────────────────────────────────────────────

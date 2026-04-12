@@ -45,12 +45,20 @@ function rowNetUsd(row: ConfigRow): number {
   return (row.sellPriceUsd ?? 0) * (1 - (row.discountPct ?? 0) / 100)
 }
 
-function groupTotal(g: ConfigGroup): number {
+// groupSubtotal: sum of (net × rowQty × term) for rows directly/indirectly in this group,
+// WITHOUT applying the group's own qty multiplier. Used for displaying the group's "Net" field.
+function groupSubtotal(g: ConfigGroup): number {
   const isRecurring = g.pricingType === 'recurring'
   return (g.children ?? []).reduce((s, c) => {
     if (c.type === 'row') return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
-    return s + groupTotal(c.group)
+    // sub-group: subtotal × sub-group's own qty
+    return s + groupSubtotal(c.group) * (c.group.qty ?? 1)
   }, 0)
+}
+
+// groupTotal: subtotal × this group's qty — the full contribution of this group
+function groupTotal(g: ConfigGroup): number {
+  return groupSubtotal(g) * (g.qty ?? 1)
 }
 
 // Apply a discount % to every row in a group (and its sub-groups) recursively
@@ -473,13 +481,16 @@ function TopGroupBlock({
   const [labelVal, setLabelVal] = useState(group.label)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [groupDiscInput, setGroupDiscInput] = useState(() => (group.discountPct ?? 0).toFixed(1))
+  const [groupQtyInput, setGroupQtyInput] = useState(() => String(group.qty ?? 1))
   const dragChildIdx = useRef<number | null>(null)
 
   const isRecurring = group.pricingType === 'recurring'
-  const total    = groupTotal(group)
-  const dispTotal = inputIsAud ? total * usdToAudRate : total
-  const dispFmt  = inputIsAud ? fmtAud : fmt
-  const secFmt   = inputIsAud ? fmt : fmtAud
+  const subtotal   = groupSubtotal(group)         // net × rowQty × term — before group qty
+  const total      = subtotal * (group.qty ?? 1)  // × group qty
+  const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
+  const dispTotal  = inputIsAud ? total * usdToAudRate : total
+  const dispFmt    = inputIsAud ? fmtAud : fmt
+  const secFmt     = inputIsAud ? fmt : fmtAud
 
   const headerColors = ['bg-violet-50 border-b border-violet-100','bg-fuchsia-50 border-b border-fuchsia-100','bg-indigo-50 border-b border-indigo-100','bg-cyan-50 border-b border-cyan-100']
   const headerBg = headerColors[groupIndex % headerColors.length]
@@ -494,6 +505,34 @@ function TopGroupBlock({
       setGroupDiscInput(clamped.toFixed(1))
     } else {
       setGroupDiscInput((group.discountPct ?? 0).toFixed(1))
+    }
+  }
+
+  // Editing the group Net directly: back-calculate discount so that
+  // all rows get a uniform disc% that makes groupSubtotal = enteredNet
+  function applyGroupNet(val: string) {
+    const net = parseFloat(val)
+    const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
+    const netUsd = toUsd(net)
+    // sellSubtotal = sum of sell×qty×term (disc=0)
+    const sellSubtotal = (() => {
+      const gg = applyGroupDiscount(group, 0)
+      return groupSubtotal(gg)
+    })()
+    if (!isNaN(net) && sellSubtotal > 0) {
+      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSubtotal) * 100))
+      onUpdate(applyGroupDiscount(group, newDisc))
+      setGroupDiscInput(newDisc.toFixed(1))
+    }
+  }
+
+  function applyGroupQty(val: string) {
+    const q = parseInt(val)
+    if (!isNaN(q) && q > 0) {
+      onUpdate({ ...group, qty: q })
+      setGroupQtyInput(String(q))
+    } else {
+      setGroupQtyInput(String(group.qty ?? 1))
     }
   }
 
@@ -584,24 +623,56 @@ function TopGroupBlock({
           )}
         </div>
 
-        {/* Group-level discount */}
-        <div className="relative flex items-center flex-shrink-0" title="Apply discount % to all rows in this group">
-          <input
-            type="number" min="0" max="100" step="0.1"
-            value={groupDiscInput}
-            onChange={e => setGroupDiscInput(e.target.value)}
-            onBlur={e => applyGroupDisc(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') applyGroupDisc(groupDiscInput) }}
-            placeholder="0.0"
-            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-center pr-4 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
-          />
-          <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
+        {/* Disc% → Net → ×Qty → Total */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          {/* Disc % */}
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
+            <div className="relative flex items-center">
+              <input type="number" min="0" max="100" step="0.1"
+                value={groupDiscInput}
+                onChange={e => setGroupDiscInput(e.target.value)}
+                onBlur={e => applyGroupDisc(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') applyGroupDisc(groupDiscInput) }}
+                placeholder="0"
+                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+              />
+              <span className="absolute right-1 text-[9px] text-slate-400 pointer-events-none">%</span>
+            </div>
+          </div>
+          {/* Net (editable — sets disc%) */}
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
+            <input type="number" min="0" step="0.01"
+              defaultValue={dispSubtotal.toFixed(2)}
+              key={`${dispSubtotal.toFixed(2)}`}
+              onBlur={e => applyGroupNet(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyGroupNet((e.target as HTMLInputElement).value) }}
+              placeholder="0.00"
+              className="w-20 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+            />
+          </div>
+          {/* × */}
+          <span className="text-slate-400 text-xs font-bold flex-shrink-0 mt-3">×</span>
+          {/* Qty */}
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
+            <input type="number" min="1" step="1"
+              value={groupQtyInput}
+              onChange={e => setGroupQtyInput(e.target.value)}
+              onBlur={e => applyGroupQty(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyGroupQty(groupQtyInput) }}
+              placeholder="1"
+              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+            />
+          </div>
+          {/* = Total */}
+          <div className="flex flex-col items-end gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
+            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{dispFmt(dispTotal)}</span>
+            {showSecondary && <span className="text-[10px] text-slate-400">{secFmt(total)}</span>}
+          </div>
         </div>
-
-        <span className="text-xs font-bold text-slate-500 flex-shrink-0">
-          {dispFmt(dispTotal)}
-          {showSecondary && <span className="block text-[10px] text-slate-400 text-right">{secFmt(total)}</span>}
-        </span>
 
         {!group.collapsed && (
           <div className="flex gap-1 flex-shrink-0 items-center">
@@ -743,12 +814,15 @@ function SubGroupBlock({
   const [dragOver, setDragOver] = useState(false)
   const [headerDragOver, setHeaderDragOver] = useState(false)
   const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
+  const [subQtyInput, setSubQtyInput] = useState(() => String(subGroup.qty ?? 1))
   const dragChildIdx = useRef<number | null>(null)
 
   // Sub-group inherits pricing type from parent
   const isRecurring = parentIsRecurring
-  const total = groupTotal(subGroup)
-  const dispTotal = inputIsAud ? total * usdToAudRate : total
+  const subtotal   = groupSubtotal(subGroup)
+  const total      = subtotal * (subGroup.qty ?? 1)
+  const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
+  const dispTotal  = inputIsAud ? total * usdToAudRate : total
   const dispFmt = inputIsAud ? fmtAud : fmt
   const secFmt  = inputIsAud ? fmt : fmtAud
   const subBg = childIndex % 2 === 0 ? 'bg-amber-50' : 'bg-yellow-50'
@@ -765,6 +839,28 @@ function SubGroupBlock({
       setSubDiscInput(clamped.toFixed(1))
     } else {
       setSubDiscInput((subGroup.discountPct ?? 0).toFixed(1))
+    }
+  }
+
+  function applySubNet(val: string) {
+    const net = parseFloat(val)
+    const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
+    const netUsd = toUsd(net)
+    const sellSubtotal = (() => { const gg = applyGroupDiscount(subGroup, 0); return groupSubtotal(gg) })()
+    if (!isNaN(net) && sellSubtotal > 0) {
+      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSubtotal) * 100))
+      onUpdate(applyGroupDiscount(subGroup, newDisc))
+      setSubDiscInput(newDisc.toFixed(1))
+    }
+  }
+
+  function applySubQty(val: string) {
+    const q = parseInt(val)
+    if (!isNaN(q) && q > 0) {
+      onUpdate({ ...subGroup, qty: q })
+      setSubQtyInput(String(q))
+    } else {
+      setSubQtyInput(String(subGroup.qty ?? 1))
     }
   }
 
@@ -825,24 +921,51 @@ function SubGroupBlock({
           </select>
         )}
 
-        {/* Sub-group discount */}
-        <div className="relative flex items-center flex-shrink-0" title="Apply discount % to all rows in this sub-group">
-          <input
-            type="number" min="0" max="100" step="0.1"
-            value={subDiscInput}
-            onChange={e => setSubDiscInput(e.target.value)}
-            onBlur={e => applySubDisc(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') applySubDisc(subDiscInput) }}
-            placeholder="0.0"
-            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-center pr-4 focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
-          />
-          <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
+        {/* Sub-group: Disc% → Net → ×Qty → Total */}
+        <div className="flex items-center gap-1 flex-shrink-0">
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
+            <div className="relative flex items-center">
+              <input type="number" min="0" max="100" step="0.1"
+                value={subDiscInput}
+                onChange={e => setSubDiscInput(e.target.value)}
+                onBlur={e => applySubDisc(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') applySubDisc(subDiscInput) }}
+                placeholder="0"
+                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+              />
+              <span className="absolute right-1 text-[9px] text-slate-400 pointer-events-none">%</span>
+            </div>
+          </div>
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
+            <input type="number" min="0" step="0.01"
+              defaultValue={dispSubtotal.toFixed(2)}
+              key={`${dispSubtotal.toFixed(2)}`}
+              onBlur={e => applySubNet(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applySubNet((e.target as HTMLInputElement).value) }}
+              placeholder="0.00"
+              className="w-20 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+            />
+          </div>
+          <span className="text-slate-400 text-xs font-bold flex-shrink-0 mt-3">×</span>
+          <div className="flex flex-col items-center gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
+            <input type="number" min="1" step="1"
+              value={subQtyInput}
+              onChange={e => setSubQtyInput(e.target.value)}
+              onBlur={e => applySubQty(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
+              placeholder="1"
+              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+            />
+          </div>
+          <div className="flex flex-col items-end gap-0">
+            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
+            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{dispFmt(dispTotal)}</span>
+            {showSecondary && <span className="text-[10px] text-slate-400">{secFmt(total)}</span>}
+          </div>
         </div>
-
-        <span className="text-xs font-semibold text-slate-500 flex-shrink-0">
-          {dispFmt(dispTotal)}
-          {showSecondary && <span className="block text-[10px] text-slate-400 text-right">{secFmt(total)}</span>}
-        </span>
 
         {!subGroup.collapsed && (
           <div className="flex items-center gap-1">

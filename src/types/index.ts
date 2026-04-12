@@ -265,6 +265,7 @@ export interface ConfigGroup {
   pricingType: ConfigGroupPricingType   // 'one-time' or 'recurring'
   defaultUnit?: ConfigRowUnit           // default unit for recurring rows
   discountPct?: number                  // group-level discount — applied to all rows/subgroups when set
+  qty?: number                          // group-level quantity multiplier (default 1)
   children: ConfigChild[]               // rows and sub-groups interleaved in display order
 }
 
