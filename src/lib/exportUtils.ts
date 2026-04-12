@@ -1148,6 +1148,101 @@ export async function exportProductsXLSX(products: DealProduct[]) {
   await downloadXLSX(wb, 'products.xlsx')
 }
 
+/** Export a single product's configuration as an Excel file in paste-compatible format */
+export async function exportProductConfigXLSX(product: DealProduct) {
+  const wb = new ExcelJS.Workbook()
+  const configs = product.configurations ?? []
+  if (configs.length === 0) {
+    // No configs — just export a blank sheet
+    addSheetFromRows(wb, 'Config', [['ProductID', 'Description', 'Quantity', 'Cost Price', 'Floor Price', 'Sell Price', 'Disc%', 'Net Price', 'Unit', 'Term']], '6366f1')
+  } else {
+    for (const cfg of configs) {
+      const rows: (string | number)[][] = [
+        ['ProductID', 'Description', 'Quantity', 'Cost Price', 'Floor Price', 'Sell Price', 'Disc%', 'Net Price', 'Unit', 'Term'],
+      ]
+      for (const g of cfg.groups ?? []) {
+        const isRecurring = g.pricingType === 'recurring'
+        // Group header row (no prices — becomes a group header on paste)
+        rows.push(['', g.label || '', '', '', '', '', '', '', '', ''])
+        for (const child of g.children ?? []) {
+          if (child.type === 'row') {
+            const r = child.row
+            const disc = r.discountPct ?? 0
+            const net  = r.sellPriceUsd * (1 - disc / 100)
+            rows.push([
+              r.productCode ?? '',
+              r.description,
+              r.quantity,
+              r.costPriceUsd,
+              r.floorPriceUsd,
+              r.sellPriceUsd,
+              disc,
+              net,
+              isRecurring ? (r.unit ?? g.defaultUnit ?? 'months') : '',
+              isRecurring ? (r.termMonths ?? '') : '',
+            ])
+          } else if (child.type === 'subgroup') {
+            // Sub-group header
+            rows.push(['', child.group.label || '', '', '', '', '', '', '', '', ''])
+            for (const sc of child.group.children ?? []) {
+              if (sc.type !== 'row') continue
+              const r = sc.row
+              const disc = r.discountPct ?? 0
+              const net  = r.sellPriceUsd * (1 - disc / 100)
+              rows.push([
+                r.productCode ?? '',
+                r.description,
+                r.quantity,
+                r.costPriceUsd,
+                r.floorPriceUsd,
+                r.sellPriceUsd,
+                disc,
+                net,
+                isRecurring ? (r.unit ?? child.group.defaultUnit ?? g.defaultUnit ?? 'months') : '',
+                isRecurring ? (r.termMonths ?? '') : '',
+              ])
+            }
+          }
+        }
+      }
+      const safeName = (cfg.name || 'Config').replace(/[\\/*?:[\]]/g, '_').slice(0, 31)
+      const ws = wb.addWorksheet(safeName)
+      // Header row
+      const hRow = ws.addRow(rows[0] as string[])
+      hRow.font = { bold: true, color: { argb: 'FFFFFFFF' } }
+      hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6366f1' } }
+      hRow.alignment = { vertical: 'middle' }
+      hRow.height = 20
+      // Data rows
+      rows.slice(1).forEach((r, i) => {
+        const row = ws.addRow(r as (string | number)[])
+        // Group/sub-group header rows (empty prices) — bold, shaded
+        const isEmpty = !r[2] && !r[5]
+        if (isEmpty) {
+          row.font = { bold: true }
+          row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } }
+        } else if (i % 2 === 0) {
+          row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } }
+        }
+        row.alignment = { vertical: 'middle' }
+        row.height = 18
+      })
+      // Number format for price columns
+      const priceColIdxs = [3, 4, 5, 7] // Cost, Floor, Sell, Net (0-based)
+      ws.columns.forEach((col, i) => {
+        const maxLen = rows.reduce((m, r) => Math.max(m, String(r[i] ?? '').length), 0)
+        col.width = Math.min(45, Math.max(10, maxLen + 2))
+        if (priceColIdxs.includes(i)) {
+          col.numFmt = '#,##0.00'
+        }
+      })
+      ws.views = [{ state: 'frozen', ySplit: 1 }]
+    }
+  }
+  const filename = `${product.name.replace(/[\\/*?:[\]]/g, '_')}_config.xlsx`
+  await downloadXLSX(wb, filename)
+}
+
 /** Returns imported products array or throws on invalid format */
 export function importProductsJSON(json: string): DealProduct[] {
   const parsed = JSON.parse(json)

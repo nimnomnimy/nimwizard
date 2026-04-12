@@ -324,9 +324,11 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           {pasteOpen && (
             <div className="px-4 py-3 border-b border-amber-100 bg-amber-50 flex flex-col gap-2">
               <p className="text-xs text-amber-700 font-semibold">
-                Paste your Excel table. First row must be headers with at least <em>Description</em>.
-                Optional: ProductID, Quantity, Cost Price, Floor Price, Sell Price, Unit, Term.
-                Rows with no ProductID and no prices become group/sub-group headers.
+                Paste your Excel table (or use <strong>Export Config Excel</strong> to get the right format).
+                First row must be headers — required: <em>Description</em>.
+                Optional columns: <em>ProductID, Quantity, Cost Price, Floor Price, Sell Price, Disc%, Unit, Term</em>.
+                Rows with no ProductID and no prices become group or sub-group headers.
+                Disc% is ignored on paste — set it in the table after importing.
               </p>
               <textarea ref={pasteAreaRef} value={pasteText} onChange={e => { setPasteText(e.target.value); setPasteError('') }}
                 rows={5} placeholder="Paste Excel content here (Ctrl+V)…"

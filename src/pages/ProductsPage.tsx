@@ -7,7 +7,7 @@ import CurrencyBar from '../components/ui/CurrencyBar'
 import ProductConfigEditor from '../components/products/ProductConfigEditor'
 import { useResizable } from '../hooks/useResizable'
 import {
-  exportProductsJSON, exportProductsXLSX, importProductsJSON,
+  exportProductsJSON, exportProductsXLSX, exportProductConfigXLSX, importProductsJSON,
 } from '../lib/exportUtils'
 import type {
   DealProduct, PriceHistoryEntry, ProductCategory, ProductConfiguration, ConfigGroup,
@@ -186,6 +186,14 @@ export default function ProductsPage() {
   }).sort((a, b) => a.name.localeCompare(b.name))
 
   function priceDisplay(p: DealProduct): { primary: string; secondary?: string; sub?: string } {
+    const cfgTotal = configsTotal(p.configurations ?? [], 'sell')
+    if (cfgTotal > 0) {
+      return {
+        primary: fmt(cfgTotal),
+        secondary: showSecondary ? fmtAud(cfgTotal) : undefined,
+        sub: 'config total',
+      }
+    }
     if (p.pricingType === 'recurring' && p.recurringConfig) {
       const rc = p.recurringConfig
       const label = rc.period === 'monthly' ? '/mo' : '/yr'
@@ -337,15 +345,25 @@ export default function ProductsPage() {
               <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[130px] py-1"
+              <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[170px] py-1"
                 onMouseLeave={() => setShowExportMenu(false)}>
+                <p className="px-4 pt-1.5 pb-0.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">All products</p>
                 <button onClick={() => { exportProductsJSON(products); setShowExportMenu(false) }}
                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
                   Export JSON
                 </button>
                 <button onClick={() => { exportProductsXLSX(products); setShowExportMenu(false) }}
                   className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
-                  Export Excel
+                  Export Excel (all fields)
+                </button>
+                <div className="my-1 border-t border-slate-100" />
+                <p className="px-4 pt-1.5 pb-0.5 text-[10px] font-bold text-slate-400 uppercase tracking-wide">Config only</p>
+                <button
+                  onClick={() => { if (existing) { exportProductConfigXLSX(existing); setShowExportMenu(false) } }}
+                  disabled={!existing}
+                  title={!existing ? 'Select a product first' : undefined}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:text-slate-300 disabled:cursor-not-allowed">
+                  Export Config Excel
                 </button>
               </div>
             )}
