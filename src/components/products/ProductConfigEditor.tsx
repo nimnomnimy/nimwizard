@@ -42,19 +42,29 @@ function rowNetUsd(row: ConfigRow): number {
   return (row.sellPriceUsd ?? 0) * (1 - (row.discountPct ?? 0) / 100)
 }
 
-// groupSubtotal: sum of (net × rowQty × term) for rows directly/indirectly in this group,
-// WITHOUT applying the group's own qty multiplier. Used for displaying the group's "Net" field.
-// parentIsRecurring: when set, overrides g.pricingType — subgroups always inherit parent's recurring mode.
+// groupDirectNet: sum of direct row nets + subgroup subtotals (each WITHOUT their own qty).
+// This is what the NET input field should display — it matches what the user sees:
+//   group net = direct rows net + sum(subgroup displayed nets)
+// parentIsRecurring: subgroups inherit parent's recurring mode so term isn't double-counted.
+function groupDirectNet(g: ConfigGroup, parentIsRecurring?: boolean): number {
+  const isRecurring = parentIsRecurring !== undefined ? parentIsRecurring : g.pricingType === 'recurring'
+  return (g.children ?? []).reduce((s, c) => {
+    if (c.type === 'row') return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
+    // subgroup contributes its own display-net (no subgroup qty here — qty only applies in TOTAL)
+    return s + groupDirectNet(c.group, isRecurring)
+  }, 0)
+}
+
+// groupSubtotal: like groupDirectNet but DOES apply subgroup.qty — used for TOTAL calculations.
 function groupSubtotal(g: ConfigGroup, parentIsRecurring?: boolean): number {
   const isRecurring = parentIsRecurring !== undefined ? parentIsRecurring : g.pricingType === 'recurring'
   return (g.children ?? []).reduce((s, c) => {
     if (c.type === 'row') return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
-    // sub-group inherits parent's recurring mode so term isn't double-counted
     return s + groupSubtotal(c.group, isRecurring) * (c.group.qty ?? 1)
   }, 0)
 }
 
-// groupTotal: subtotal × this group's qty — the full contribution of this group
+// groupTotal: full contribution of this group = groupSubtotal × group.qty
 function groupTotal(g: ConfigGroup): number {
   return groupSubtotal(g) * (g.qty ?? 1)
 }
@@ -630,10 +640,11 @@ function TopGroupBlock({
   const selected = selectedRowIds
 
   const isRecurring = group.pricingType === 'recurring'
-  const subtotal   = groupSubtotal(group)         // net × rowQty × term — before group qty
+  const displayNet = groupDirectNet(group)         // for NET field: direct rows + subgroup display-nets (no subgroup qty)
+  const subtotal   = groupSubtotal(group)          // for TOTAL: includes subgroup qty
   const total      = subtotal * (group.qty ?? 1)  // × group qty
   // dispSubtotal is in the active input currency (for the Net editable input field)
-  const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
+  const dispSubtotal = inputIsAud ? displayNet * usdToAudRate : displayNet
 
   const headerColors = ['bg-violet-50 border-b border-violet-100','bg-fuchsia-50 border-b border-fuchsia-100','bg-indigo-50 border-b border-indigo-100','bg-cyan-50 border-b border-cyan-100']
   const headerBg = headerColors[groupIndex % headerColors.length]
@@ -657,7 +668,7 @@ function TopGroupBlock({
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const targetNetUsd = toUsd(net)
     if (isNaN(targetNetUsd)) return
-    const currentNet = groupSubtotal(group)
+    const currentNet = groupDirectNet(group)
     if (currentNet === 0) return
     const ratio = targetNetUsd / currentNet
     const scaleChildren = (children: ConfigChild[]): ConfigChild[] =>
@@ -985,11 +996,12 @@ function SubGroupBlock({
 
   const selected = selectedRowIds
 
-  const isRecurring = parentIsRecurring
-  const subtotal     = groupSubtotal(subGroup, parentIsRecurring)
+  const isRecurring  = parentIsRecurring
+  const displayNet   = groupDirectNet(subGroup, parentIsRecurring)   // NET field: no nested-subgroup qty
+  const subtotal     = groupSubtotal(subGroup, parentIsRecurring)    // TOTAL: includes nested-subgroup qty
   const total        = subtotal * (subGroup.qty ?? 1)
-  // dispSubtotal/dispTotal are in the active input currency (for the Net editable input field)
-  const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
+  // dispSubtotal is in the active input currency (for the Net editable input field)
+  const dispSubtotal = inputIsAud ? displayNet * usdToAudRate : displayNet
   const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
   // Colour theming
@@ -1017,7 +1029,7 @@ function SubGroupBlock({
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const targetNetUsd = toUsd(net)
     if (isNaN(targetNetUsd)) return
-    const currentNet = groupSubtotal(subGroup, parentIsRecurring)   // current net total in USD
+    const currentNet = groupDirectNet(subGroup, parentIsRecurring)   // current display net in USD
     if (currentNet === 0) return
     const ratio = targetNetUsd / currentNet
     // Scale every row's sellPriceUsd proportionally to preserve relative weights
