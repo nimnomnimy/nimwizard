@@ -250,6 +250,7 @@ export interface ConfigRow {
   unit?: ConfigRowUnit          // only used when group pricingType = 'recurring'
   termMonths?: number           // recurring: contract term in months
   notes?: string
+  locked?: boolean              // when true, sell price is fixed — group/subgroup net edits skip this row
 }
 
 // A child entry within a group — either a data row or a nested sub-group

@@ -69,6 +69,40 @@ function groupTotal(g: ConfigGroup): number {
   return groupSubtotal(g) * (g.qty ?? 1)
 }
 
+// Sum the net contribution of unlocked rows only (denominator for proportional scaling)
+function unlockedDirectNet(g: ConfigGroup, isRecurring: boolean): number {
+  return (g.children ?? []).reduce((s, c) => {
+    if (c.type === 'row') {
+      if (c.row.locked) return s
+      return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
+    }
+    // subgroup: contribute its unlocked net (no subgroup qty, matches display-net logic)
+    return s + unlockedDirectNet(c.group, isRecurring)
+  }, 0)
+}
+
+// Sum the net contribution of locked rows only
+function lockedDirectNet(g: ConfigGroup, isRecurring: boolean): number {
+  return (g.children ?? []).reduce((s, c) => {
+    if (c.type === 'row') {
+      if (!c.row.locked) return s
+      return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
+    }
+    return s + lockedDirectNet(c.group, isRecurring)
+  }, 0)
+}
+
+// Scale unlocked rows by ratio; locked rows are untouched.
+function scaleUnlocked(children: ConfigChild[], ratio: number): ConfigChild[] {
+  return children.map(c => {
+    if (c.type === 'row') {
+      if (c.row.locked) return c
+      return { type: 'row', row: { ...c.row, sellPriceUsd: (c.row.sellPriceUsd ?? 0) * ratio } }
+    }
+    return { type: 'subgroup', group: { ...c.group, children: scaleUnlocked(c.group.children ?? [], ratio) } }
+  })
+}
+
 // Apply a discount % to every row in a group (and its sub-groups) recursively
 function applyGroupDiscount(g: ConfigGroup, discPct: number): ConfigGroup {
   return {
@@ -184,9 +218,9 @@ function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
 }
 
 function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
-  // Fixed: checkbox(20) drag(8) | resizable cols | fixed: delete(28)
+  // Fixed: checkbox(20) drag(8) | resizable cols | fixed: lock(20) delete(24)
   const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
-  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} 28px`
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} 20px 24px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -662,21 +696,18 @@ function TopGroupBlock({
     }
   }
 
-  // Editing the group Net directly: scale all row sell prices proportionally
+  // Editing the group Net directly: scale unlocked rows proportionally; locked rows stay fixed
   function applyGroupNet(val: string) {
     const net = parseFloat(val)
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const targetNetUsd = toUsd(net)
     if (isNaN(targetNetUsd)) return
-    const currentNet = groupDirectNet(group)
-    if (currentNet === 0) return
-    const ratio = targetNetUsd / currentNet
-    const scaleChildren = (children: ConfigChild[]): ConfigChild[] =>
-      children.map(c => {
-        if (c.type === 'row') return { type: 'row', row: { ...c.row, sellPriceUsd: (c.row.sellPriceUsd ?? 0) * ratio } }
-        return { type: 'subgroup', group: { ...c.group, children: scaleChildren(c.group.children ?? []) } }
-      })
-    onUpdate({ ...group, children: scaleChildren(group.children ?? []) })
+    const locked = lockedDirectNet(group, isRecurring)
+    const unlocked = unlockedDirectNet(group, isRecurring)
+    if (unlocked === 0) return   // all rows locked — nothing to scale
+    const unlockedTarget = targetNetUsd - locked
+    const ratio = unlockedTarget / unlocked
+    onUpdate({ ...group, children: scaleUnlocked(group.children ?? [], ratio) })
   }
 
   function applyGroupQty(val: string) {
@@ -831,7 +862,8 @@ function TopGroupBlock({
           )}
         </div>
 
-        {/* Actions: reorder + delete */}
+        {/* Lock placeholder + Actions (spans 2 cols: lock + delete) */}
+        <span />
         <div className="flex items-center gap-0.5 justify-end">
           <div className="flex flex-col gap-0">
             <button onClick={() => onMoveGroup(groupIndex, groupIndex - 1)} disabled={groupIndex === 0} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
@@ -1029,16 +1061,12 @@ function SubGroupBlock({
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const targetNetUsd = toUsd(net)
     if (isNaN(targetNetUsd)) return
-    const currentNet = groupDirectNet(subGroup, parentIsRecurring)   // current display net in USD
-    if (currentNet === 0) return
-    const ratio = targetNetUsd / currentNet
-    // Scale every row's sellPriceUsd proportionally to preserve relative weights
-    const scaleChildren = (children: ConfigChild[]): ConfigChild[] =>
-      children.map(c => {
-        if (c.type === 'row') return { type: 'row', row: { ...c.row, sellPriceUsd: (c.row.sellPriceUsd ?? 0) * ratio } }
-        return { type: 'subgroup', group: { ...c.group, children: scaleChildren(c.group.children ?? []) } }
-      })
-    onUpdate({ ...subGroup, children: scaleChildren(subGroup.children ?? []) })
+    const locked = lockedDirectNet(subGroup, parentIsRecurring)
+    const unlocked = unlockedDirectNet(subGroup, parentIsRecurring)
+    if (unlocked === 0) return   // all rows locked — nothing to scale
+    const unlockedTarget = targetNetUsd - locked
+    const ratio = unlockedTarget / unlocked
+    onUpdate({ ...subGroup, children: scaleUnlocked(subGroup.children ?? [], ratio) })
   }
 
   function applySubQty(val: string) {
@@ -1209,7 +1237,8 @@ function SubGroupBlock({
           )}
         </div>
 
-        {/* Delete */}
+        {/* Lock placeholder + Delete */}
+        <span />
         <button onClick={onDelete} className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors justify-self-end">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
@@ -1299,7 +1328,8 @@ function ConfigTableHeader({
               <ColResizeHandle onResize={d => onColResize(h.wIdx, d)} />
             </span>
       ))}
-      <span />
+      <span />{/* lock col */}
+      <span />{/* delete col */}
     </div>
   )
 }
@@ -1523,6 +1553,24 @@ function ConfigRowEditor({
           {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{fmtAud(totalNetUsd)}</p>}
         </>}
       </div>
+      {/* Lock toggle */}
+      <button
+        onClick={() => setField('locked', !row.locked)}
+        title={row.locked ? 'Unlock price (will scale with group net edits)' : 'Lock price (exclude from group net scaling)'}
+        className={`p-1 rounded transition-colors ${row.locked ? 'text-amber-500 hover:text-amber-600' : 'text-slate-200 hover:text-slate-400'}`}
+      >
+        {row.locked ? (
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+            <rect x="2" y="6" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M4.5 6V4a2.5 2.5 0 015 0v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        ) : (
+          <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
+            <rect x="2" y="6" width="10" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+            <path d="M4.5 6V4a2.5 2.5 0 015 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+        )}
+      </button>
       <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
         <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
           <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
