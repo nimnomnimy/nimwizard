@@ -717,7 +717,6 @@ function SubGroupBlock({
     onUpdate({ ...subGroup, children: reorder(subGroup.children ?? [], from, to) })
   }
 
-  const rows = rowsOf(subGroup)
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   return (
