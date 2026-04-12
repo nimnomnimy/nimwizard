@@ -1,10 +1,10 @@
 /**
- * CurrencyBar — USD / AUD / BOTH toggle + FX rate input.
- * Drop into any page header. Reads/writes useCurrency store.
+ * CurrencyBar — USD / AUD / BOTH toggle + FX rate input with direction toggle.
+ * Drop into any page header. Reads/writes useCurrency store (persisted).
  */
 import { useState, useEffect } from 'react'
 import { useCurrency } from '../../store/useCurrency'
-import type { CurrencyMode } from '../../store/useCurrency'
+import type { CurrencyMode, FxDirection } from '../../store/useCurrency'
 
 interface Props {
   className?: string
@@ -17,22 +17,34 @@ const MODES: { value: CurrencyMode; label: string }[] = [
 ]
 
 export default function CurrencyBar({ className = '' }: Props) {
-  const currency    = useCurrency(s => s.currency)
-  const fxRate      = useCurrency(s => s.fxRate)
-  const setFxRate   = useCurrency(s => s.setFxRate)
-  const setCurrency = useCurrency(s => s.setCurrency)
+  const currency       = useCurrency(s => s.currency)
+  const fxDirection    = useCurrency(s => s.fxDirection)
+  const setFxRate      = useCurrency(s => s.setFxRate)
+  const setCurrency    = useCurrency(s => s.setCurrency)
+  const setFxDirection = useCurrency(s => s.setFxDirection)
+  const displayedFxRate = useCurrency(s => s.displayedFxRate)
 
-  const [fxInput, setFxInput] = useState(fxRate.toFixed(4))
+  const [fxInput, setFxInput] = useState(displayedFxRate().toFixed(4))
 
-  useEffect(() => { setFxInput(fxRate.toFixed(4)) }, [fxRate])
+  // Sync input when direction changes (e.g. 1.58 ↔ 0.6329)
+  useEffect(() => {
+    setFxInput(displayedFxRate().toFixed(4))
+  }, [fxDirection]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function commitFx(val: string) {
     const n = parseFloat(val)
     if (n > 0) setFxRate(n)
-    else setFxInput(fxRate.toFixed(4))
+    setFxInput(displayedFxRate().toFixed(4))
+  }
+
+  function toggleDirection() {
+    const next: FxDirection = fxDirection === 'usdToAud' ? 'audToUsd' : 'usdToAud'
+    setFxDirection(next)
+    // Input will update via useEffect above
   }
 
   const showAud = currency === 'AUD' || currency === 'BOTH'
+  const dirLabel = fxDirection === 'usdToAud' ? '1 USD =' : '1 AUD ='
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -53,9 +65,20 @@ export default function CurrencyBar({ className = '' }: Props) {
         ))}
       </div>
 
-      {/* FX rate — highlighted when AUD is involved */}
-      <label className="flex items-center gap-1 text-xs text-slate-500">
-        <span className="hidden sm:inline text-slate-400">FX</span>
+      {/* FX direction + rate */}
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          onClick={toggleDirection}
+          title="Toggle FX direction"
+          className={`text-[10px] font-bold px-1.5 py-1 rounded-md transition-colors flex-shrink-0 ${
+            showAud
+              ? 'bg-blue-100 text-blue-600 hover:bg-blue-200'
+              : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+          }`}
+        >
+          {dirLabel}
+        </button>
         <input
           type="number"
           min="0.0001"
@@ -69,9 +92,9 @@ export default function CurrencyBar({ className = '' }: Props) {
               ? 'border-blue-300 bg-blue-50 text-blue-700'
               : 'border-slate-200 text-slate-400'
           }`}
-          title="USD → AUD exchange rate"
+          title={fxDirection === 'usdToAud' ? '1 USD = x AUD' : '1 AUD = x USD'}
         />
-      </label>
+      </div>
     </div>
   )
 }

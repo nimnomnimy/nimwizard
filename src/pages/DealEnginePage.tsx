@@ -246,42 +246,42 @@ export default function DealEnginePage() {
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
 
                 {/* Deal header */}
-                <div className="bg-white border-b border-slate-200 px-4 py-3 flex items-center gap-3 flex-shrink-0 flex-wrap">
+                <div className="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2 flex-shrink-0 min-h-[48px]">
                   <input value={activeDeal.name}
                     onChange={e => patchDeal({ name: e.target.value })}
-                    className="text-base font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none px-1 min-w-[120px]" />
+                    className="text-sm font-bold text-slate-900 bg-transparent border-b border-transparent hover:border-slate-300 focus:border-blue-500 focus:outline-none px-1 min-w-[100px] max-w-[180px]" />
 
-                  <div className="flex items-center gap-1.5 ml-auto flex-wrap gap-y-2">
-                    {/* FX rate — synced to CurrencyBar via useEffect */}
-                    <label className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <span>Deal FX</span>
+                  <div className="flex items-center gap-2 ml-auto flex-wrap">
+                    {/* FX rate */}
+                    <label className="flex items-center gap-1 text-xs text-slate-500 flex-shrink-0">
+                      <span className="text-slate-400">FX</span>
                       <input type="number" min="0" step="0.001" value={activeDeal.globalFxRate}
                         onChange={e => {
                           const val = parseFloat(e.target.value) || DEFAULT_FX
                           patchDeal({ globalFxRate: val })
                           setFxRate(val)
                         }}
-                        className="w-20 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                        className="w-16 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                     </label>
                     {/* Budget */}
-                    <label className="flex items-center gap-1.5 text-xs text-slate-500">
-                      <span>Budget</span>
+                    <label className="flex items-center gap-1 text-xs text-slate-500 flex-shrink-0">
+                      <span className="text-slate-400">Budget</span>
                       <div className="relative">
-                        <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
+                        <span className="absolute left-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
                         <input type="number" min="0" value={activeDeal.discountBudgetUsd}
                           onChange={e => patchDeal({ discountBudgetUsd: parseFloat(e.target.value) || 0 })}
-                          className="w-24 pl-5 pr-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                          className="w-20 pl-4 pr-1 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
                       </div>
                     </label>
                     {/* Scenario compare */}
                     <button onClick={() => setShowComparison(true)}
-                      className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors">
-                      Compare Scenarios
+                      className="px-2.5 py-1 rounded-lg border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 transition-colors flex-shrink-0">
+                      Scenarios
                     </button>
                     {/* Delete deal */}
                     <button onClick={() => handleDeleteDeal(activeDeal.id, activeDeal.name)}
-                      className="px-3 py-1.5 rounded-lg border border-red-200 text-xs text-red-500 hover:bg-red-50 transition-colors">
-                      Delete Deal
+                      className="px-2.5 py-1 rounded-lg border border-red-200 text-xs text-red-500 hover:bg-red-50 transition-colors flex-shrink-0">
+                      Delete
                     </button>
                   </div>
                 </div>
@@ -291,17 +291,17 @@ export default function DealEnginePage() {
 
                   {/* Table */}
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
-                    <table className="w-full min-w-[700px] border-collapse">
+                    <div className="overflow-x-auto">
+                    <table className="w-full min-w-[640px] border-collapse">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-left">
-                          <th className="px-3 py-2.5 text-xs font-semibold text-slate-500">Product</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-20">Qty</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-32">Status</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-32">Sell/Unit</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-28 text-right">Line Total</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-28 text-right">Margin</th>
-                          <th className="px-2 py-2.5 text-xs font-semibold text-slate-500 w-24 text-center">Type</th>
-                          <th className="px-2 py-2.5 w-20"></th>
+                          <th className="px-3 py-2 text-xs font-semibold text-slate-500 min-w-[150px]">Product</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-16 text-center">Qty</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-28">Status</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-28">Sell/Unit</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-24 text-right">Total</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-24 text-right">Margin</th>
+                          <th className="px-2 py-2 w-16 text-right"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -320,6 +320,7 @@ export default function DealEnginePage() {
                         ))}
                       </tbody>
                     </table>
+                    </div>
                     <div className="px-3 py-2.5 border-t border-slate-100">
                       <button onClick={addLineItem}
                         className="flex items-center gap-1.5 text-sm text-blue-500 hover:text-blue-700 font-semibold transition-colors">

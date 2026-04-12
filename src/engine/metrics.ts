@@ -133,11 +133,21 @@ export function calcDealMetrics(deal: Deal, products: DealProduct[]): DealMetric
     : 0
 
   // Discount budget tracking
-  // Budget "used" = total discounts applied + cost of free items
-  const discountBudgetUsed = totalDiscountUsd + freeLines.reduce((acc, item) => {
+  // Budget = (((sell/unit - floor) * qty)) - discounts_given - free_items_cost
+  // Represents the net headroom above floor after accounting for discounts and free items.
+  const headroomAboveFloor = lines.reduce((acc, l) => {
+    const item    = deal.lineItems.find(i => i.id === l.lineItemId)
+    const product = item ? productMap.get(item.productId) : null
+    if (!item || !product || item.status === 'free') return acc
+    return acc + Math.max(0, (item.sellPriceUsd - product.floorSellPrice) * item.quantity)
+  }, 0)
+  const freeItemsCost = freeLines.reduce((acc, item) => {
     const p = productMap.get(item.productId)
     return acc + (p ? p.costPrice * item.quantity : 0)
   }, 0)
+  // discountBudgetUsed = headroom - discounts - free costs
+  // (positive = budget consumed; negative means priced below floor or worse)
+  const discountBudgetUsed      = headroomAboveFloor - totalDiscountUsd - freeItemsCost
   const discountBudgetRemaining = Math.max(0, deal.discountBudgetUsd - discountBudgetUsed)
 
   // Floor violations

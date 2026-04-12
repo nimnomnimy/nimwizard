@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAppStore } from '../../store/useAppStore'
 import { uid } from '../../lib/utils'
 import { showToast } from '../ui/Toast'
+import CurrencyInput from '../ui/CurrencyInput'
 import type { DealProduct, ProductCategory, PricingTier, PricingType, RecurringPeriod } from '../../types'
 
 const CATEGORIES: ProductCategory[] = [
@@ -228,24 +229,11 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
           {/* ── ONE-TIME PRICING ─────────────────────────────────────────────── */}
           {form.pricingType === 'one-time' && (
             <div className="bg-slate-50 rounded-xl p-3 flex flex-col gap-3">
-              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Pricing (USD)</p>
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Pricing</p>
               <div className="grid grid-cols-3 gap-2">
-                {([
-                  ['Cost Price', 'costPrice'],
-                  ['Floor Sell', 'floorSellPrice'],
-                  ['Default Sell', 'defaultSellPrice'],
-                ] as const).map(([label, field]) => (
-                  <div key={field} className="flex flex-col gap-1">
-                    <label className="text-[11px] font-semibold text-slate-400">{label}</label>
-                    <div className="relative">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                      <input type="number" min="0" step="0.01"
-                        value={n(form[field] as number)}
-                        onChange={e => set(field, parseFloat(e.target.value) || 0)}
-                        className="w-full pl-6 pr-2 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] bg-white" />
-                    </div>
-                  </div>
-                ))}
+                <CurrencyInput label="Cost Price"   valueUsd={form.costPrice}        onChange={v => set('costPrice', v)} />
+                <CurrencyInput label="Floor Sell"   valueUsd={form.floorSellPrice}   onChange={v => set('floorSellPrice', v)} />
+                <CurrencyInput label="Default Sell" valueUsd={form.defaultSellPrice} onChange={v => set('defaultSellPrice', v)} />
               </div>
               {form.floorSellPrice > 0 && form.costPrice > 0 && (
                 <p className="text-xs text-slate-400">
@@ -291,24 +279,11 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
               {/* Per-period pricing */}
               <div className="bg-slate-50 rounded-xl p-3 flex flex-col gap-3">
                 <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-                  Pricing per {form.recurringPeriod === 'monthly' ? 'Month' : 'Year'} (USD)
+                  Pricing per {form.recurringPeriod === 'monthly' ? 'Month' : 'Year'}
                 </p>
                 <div className="grid grid-cols-2 gap-2">
-                  {([
-                    ['Price', 'recurringPricePerPeriod'],
-                    ['Floor Price', 'recurringFloorPricePerPeriod'],
-                  ] as const).map(([label, field]) => (
-                    <div key={field} className="flex flex-col gap-1">
-                      <label className="text-[11px] font-semibold text-slate-400">{label}</label>
-                      <div className="relative">
-                        <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                        <input type="number" min="0" step="0.01"
-                          value={n(form[field] as number)}
-                          onChange={e => set(field, parseFloat(e.target.value) || 0)}
-                          className="w-full pl-6 pr-2 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] bg-white" />
-                      </div>
-                    </div>
-                  ))}
+                  <CurrencyInput label="Price"       valueUsd={form.recurringPricePerPeriod}      onChange={v => set('recurringPricePerPeriod', v)} />
+                  <CurrencyInput label="Floor Price"  valueUsd={form.recurringFloorPricePerPeriod} onChange={v => set('recurringFloorPricePerPeriod', v)} />
                 </div>
                 {form.recurringPricePerPeriod > 0 && (
                   <div className="bg-indigo-50 rounded-lg p-2.5">
@@ -325,15 +300,8 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
 
               {/* Cost (total for whole term) */}
               <div className="bg-slate-50 rounded-xl p-3 flex flex-col gap-3">
-                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Cost (Total Term, USD)</p>
-                <div className="relative">
-                  <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm">$</span>
-                  <input type="number" min="0" step="0.01"
-                    value={n(form.costPrice)}
-                    onChange={e => set('costPrice', parseFloat(e.target.value) || 0)}
-                    placeholder="Total cost for full term"
-                    className="w-full pl-6 pr-2 py-2.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[44px] bg-white" />
-                </div>
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Cost (Total Term)</p>
+                <CurrencyInput valueUsd={form.costPrice} onChange={v => set('costPrice', v)} placeholder="Total cost for full term" />
                 {form.costPrice > 0 && totalContractValue > 0 && (
                   <p className="text-xs text-slate-400">
                     Margin: <span className="font-semibold text-slate-600">
