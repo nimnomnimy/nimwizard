@@ -260,12 +260,13 @@ export type ConfigChild =
 export interface ConfigGroup {
   id: string
   label: string                 // e.g. "7371-1203-2000" or "R7 CASH"
-  description?: string
+  description?: string          // longer description shown on sub-group header row
   collapsed: boolean
   pricingType: ConfigGroupPricingType   // 'one-time' or 'recurring'
   defaultUnit?: ConfigRowUnit           // default unit for recurring rows
   discountPct?: number                  // group-level discount — applied to all rows/subgroups when set
   qty?: number                          // group-level quantity multiplier (default 1)
+  color?: string                        // sub-group highlight colour (hex, e.g. '#fef9c3')
   children: ConfigChild[]               // rows and sub-groups interleaved in display order
 }
 

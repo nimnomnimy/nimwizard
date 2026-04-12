@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import React, { useState, useCallback, useRef } from 'react'
 import { uid } from '../../lib/utils'
 import { useCurrency } from '../../store/useCurrency'
 import type {
@@ -793,8 +793,37 @@ function TopGroupBlock({
 
 // ─── Sub-group ────────────────────────────────────────────────────────────────
 
+// Preset palette for sub-group highlight colours
+const SUB_GROUP_PALETTE = [
+  '#fef9c3', // yellow-100
+  '#fde68a', // amber-200
+  '#fed7aa', // orange-200
+  '#fecaca', // red-200
+  '#fbcfe8', // pink-200
+  '#e9d5ff', // violet-200
+  '#bfdbfe', // blue-200
+  '#a7f3d0', // emerald-200
+  '#bbf7d0', // green-200
+  '#e0f2fe', // sky-100
+  '#f1f5f9', // slate-100
+  '#ffffff', // white
+]
+
+function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  return m ? { r: parseInt(m[1], 16), g: parseInt(m[2], 16), b: parseInt(m[3], 16) } : null
+}
+
+// Returns a slightly darkened version of the colour for the header bar
+function darkenHex(hex: string, amount = 15): string {
+  const c = hexToRgb(hex)
+  if (!c) return hex
+  const clamp = (v: number) => Math.max(0, Math.min(255, v))
+  return `rgb(${clamp(c.r - amount)},${clamp(c.g - amount)},${clamp(c.b - amount)})`
+}
+
 function SubGroupBlock({
-  subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
+  subGroup, childIndex: _childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
   onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
   fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize, hiddenCols,
@@ -810,25 +839,33 @@ function SubGroupBlock({
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(subGroup.label)
+  const [editDesc, setEditDesc] = useState(false)
+  const [descVal, setDescVal] = useState(subGroup.description ?? '')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const [headerDragOver, setHeaderDragOver] = useState(false)
   const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
   const [subQtyInput, setSubQtyInput] = useState(() => String(subGroup.qty ?? 1))
+  const [showColorPicker, setShowColorPicker] = useState(false)
   const dragChildIdx = useRef<number | null>(null)
 
-  // Sub-group inherits pricing type from parent
   const isRecurring = parentIsRecurring
-  const subtotal   = groupSubtotal(subGroup)
-  const total      = subtotal * (subGroup.qty ?? 1)
+  const subtotal     = groupSubtotal(subGroup)
+  const total        = subtotal * (subGroup.qty ?? 1)
   const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
-  const dispTotal  = inputIsAud ? total * usdToAudRate : total
-  const dispFmt = inputIsAud ? fmtAud : fmt
-  const secFmt  = inputIsAud ? fmt : fmtAud
-  const subBg = childIndex % 2 === 0 ? 'bg-amber-50' : 'bg-yellow-50'
+  const dispTotal    = inputIsAud ? total * usdToAudRate : total
+  const dispFmt  = inputIsAud ? fmtAud : fmt
+  const secFmt   = inputIsAud ? fmt : fmtAud
   const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
+  // Colour theming
+  const accentColor   = subGroup.color ?? '#fef9c3'
+  const headerBgStyle = { backgroundColor: darkenHex(accentColor, 12) }
+  const childBgStyle  = { backgroundColor: accentColor }
+  const borderStyle   = { borderLeftColor: darkenHex(accentColor, 40), borderLeftWidth: 3, borderLeftStyle: 'solid' as const }
+
   function commitLabel() { onUpdate({ ...subGroup, label: labelVal.trim() || subGroup.label }); setEditLabel(false) }
+  function commitDesc()  { onUpdate({ ...subGroup, description: descVal.trim() || undefined }); setEditDesc(false) }
   function addRow() { onUpdate({ ...subGroup, children: [...(subGroup.children ?? []), { type: 'row', row: emptyRow() }] }) }
 
   function applySubDisc(val: string) {
@@ -846,9 +883,9 @@ function SubGroupBlock({
     const net = parseFloat(val)
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const netUsd = toUsd(net)
-    const sellSubtotal = (() => { const gg = applyGroupDiscount(subGroup, 0); return groupSubtotal(gg) })()
-    if (!isNaN(net) && sellSubtotal > 0) {
-      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSubtotal) * 100))
+    const sellSub = (() => { const gg = applyGroupDiscount(subGroup, 0); return groupSubtotal(gg) })()
+    if (!isNaN(net) && sellSub > 0) {
+      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSub) * 100))
       onUpdate(applyGroupDiscount(subGroup, newDisc))
       setSubDiscInput(newDisc.toFixed(1))
     }
@@ -856,27 +893,20 @@ function SubGroupBlock({
 
   function applySubQty(val: string) {
     const q = parseInt(val)
-    if (!isNaN(q) && q > 0) {
-      onUpdate({ ...subGroup, qty: q })
-      setSubQtyInput(String(q))
-    } else {
-      setSubQtyInput(String(subGroup.qty ?? 1))
-    }
+    if (!isNaN(q) && q > 0) { onUpdate({ ...subGroup, qty: q }); setSubQtyInput(String(q)) }
+    else setSubQtyInput(String(subGroup.qty ?? 1))
   }
 
   function updateChild(idx: number, child: ConfigChild) {
     const next = [...(subGroup.children ?? [])]; next[idx] = child
     onUpdate({ ...subGroup, children: next })
   }
-
   function deleteChild(idx: number) {
     onUpdate({ ...subGroup, children: (subGroup.children ?? []).filter((_, i) => i !== idx) })
   }
-
   function reorderChildren(from: number, to: number) {
     onUpdate({ ...subGroup, children: reorder(subGroup.children ?? [], from, to) })
   }
-
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   return (
@@ -887,32 +917,79 @@ function SubGroupBlock({
       onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
       className={dragOver ? 'border-t-2 border-blue-400' : ''}
     >
+      {/* Sub-group header row — acts as the "product" row */}
       <div
         onDragOver={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(true) }}
         onDragLeave={e => { e.stopPropagation(); setHeaderDragOver(false) }}
         onDrop={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(false); onDropRowInto() }}
-        className={`flex items-center gap-1.5 px-3 py-1.5 pl-5 ${subBg} border-t border-slate-100 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+        style={{ ...headerBgStyle, ...(headerDragOver ? {} : {}) }}
+        className={`flex items-center gap-1.5 px-2 py-1.5 border-t border-black/10 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       >
-        {/* Drag handle for sub-group */}
-        <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-xs flex-shrink-0" title="Drag to reorder">⠿</span>
+        {/* Colour picker swatch */}
+        <div className="relative flex-shrink-0">
+          <button
+            onClick={() => setShowColorPicker(v => !v)}
+            style={{ backgroundColor: accentColor, borderColor: darkenHex(accentColor, 40) }}
+            className="w-4 h-4 rounded-sm border cursor-pointer flex-shrink-0"
+            title="Choose highlight colour"
+          />
+          {showColorPicker && (
+            <div
+              className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-2 grid grid-cols-6 gap-1"
+              onMouseLeave={() => setShowColorPicker(false)}
+            >
+              {SUB_GROUP_PALETTE.map(c => (
+                <button
+                  key={c}
+                  onClick={() => { onUpdate({ ...subGroup, color: c }); setShowColorPicker(false) }}
+                  style={{ backgroundColor: c, borderColor: darkenHex(c, 40) }}
+                  className={`w-5 h-5 rounded border hover:scale-110 transition-transform ${accentColor === c ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                  title={c}
+                />
+              ))}
+            </div>
+          )}
+        </div>
 
-        <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
+        {/* Collapse toggle */}
+        <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-500 hover:text-slate-700 flex-shrink-0">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className={`transition-transform ${subGroup.collapsed ? '-rotate-90' : ''}`}>
             <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
 
-        {editLabel ? (
-          <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
-            onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
-            className="text-xs font-semibold flex-1 border border-amber-300 rounded px-2 py-0.5 focus:outline-none bg-white" />
-        ) : (
-          <button onClick={() => { setEditLabel(true); setLabelVal(subGroup.label) }}
-            className="text-xs font-semibold text-slate-700 hover:text-amber-700 flex-1 text-left truncate">
-            {subGroup.label || '(unnamed sub-group)'}
-          </button>
-        )}
+        {/* Drag handle */}
+        <span className="cursor-grab text-slate-400 hover:text-slate-600 select-none text-xs flex-shrink-0" title="Drag to reorder">⠿</span>
 
+        {/* Code (label) */}
+        <div className="flex-shrink-0" style={{ width: colWidths[0] }}>
+          {editLabel ? (
+            <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
+              onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
+              className="w-full text-xs font-semibold border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white font-mono" />
+          ) : (
+            <button onClick={() => { setEditLabel(true); setLabelVal(subGroup.label) }}
+              className="w-full text-xs font-bold text-slate-800 hover:text-blue-700 text-left truncate font-mono">
+              {subGroup.label || '(code)'}
+            </button>
+          )}
+        </div>
+
+        {/* Description */}
+        <div className="flex-1 min-w-0">
+          {editDesc ? (
+            <input autoFocus value={descVal} onChange={e => setDescVal(e.target.value)}
+              onBlur={commitDesc} onKeyDown={e => { if (e.key === 'Enter') commitDesc(); if (e.key === 'Escape') setEditDesc(false) }}
+              className="w-full text-xs border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white" />
+          ) : (
+            <button onClick={() => { setEditDesc(true); setDescVal(subGroup.description ?? '') }}
+              className="w-full text-xs text-slate-700 hover:text-blue-700 text-left truncate italic">
+              {subGroup.description || <span className="text-slate-400 not-italic">Description…</span>}
+            </button>
+          )}
+        </div>
+
+        {/* Recurring unit */}
         {isRecurring && (
           <select value={effectiveDefaultUnit}
             onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
@@ -921,10 +998,10 @@ function SubGroupBlock({
           </select>
         )}
 
-        {/* Sub-group: Disc% → Net → ×Qty → Total */}
+        {/* Disc% → Net → ×Qty → Total */}
         <div className="flex items-center gap-1 flex-shrink-0">
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
             <div className="relative flex items-center">
               <input type="number" min="0" max="100" step="0.1"
                 value={subDiscInput}
@@ -932,68 +1009,65 @@ function SubGroupBlock({
                 onBlur={e => applySubDisc(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') applySubDisc(subDiscInput) }}
                 placeholder="0"
-                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+                className="w-12 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
               />
-              <span className="absolute right-1 text-[9px] text-slate-400 pointer-events-none">%</span>
+              <span className="absolute right-1 text-[9px] text-slate-500 pointer-events-none">%</span>
             </div>
           </div>
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
             <input type="number" min="0" step="0.01"
               defaultValue={dispSubtotal.toFixed(2)}
               key={`${dispSubtotal.toFixed(2)}`}
               onBlur={e => applySubNet(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applySubNet((e.target as HTMLInputElement).value) }}
               placeholder="0.00"
-              className="w-20 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+              className="w-20 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
           </div>
-          <span className="text-slate-400 text-xs font-bold flex-shrink-0 mt-3">×</span>
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
+          <span className="text-slate-500 text-xs font-bold flex-shrink-0 mt-3">×</span>
+          <div className="flex flex-col items-center">
+            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
             <input type="number" min="1" step="1"
               value={subQtyInput}
               onChange={e => setSubQtyInput(e.target.value)}
               onBlur={e => applySubQty(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
               placeholder="1"
-              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+              className="w-12 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-blue-400"
             />
           </div>
-          <div className="flex flex-col items-end gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
-            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{dispFmt(dispTotal)}</span>
-            {showSecondary && <span className="text-[10px] text-slate-400">{secFmt(total)}</span>}
+          <div className="flex flex-col items-end">
+            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
+            <span className="text-xs font-bold text-slate-800 whitespace-nowrap">{dispFmt(dispTotal)}</span>
+            {showSecondary && <span className="text-[10px] text-slate-500">{secFmt(total)}</span>}
           </div>
         </div>
 
+        {/* Actions */}
         {!subGroup.collapsed && (
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 flex-shrink-0">
             {selected.size > 0 && (
               <button
-                onClick={() => {
-                  const toMove = subGroup.children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
-                  onMoveRowsToParent(toMove)
-                  setSelected(new Set())
-                }}
-                title="Move selected rows to parent group"
+                onClick={() => { const toMove = subGroup.children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)); onMoveRowsToParent(toMove); setSelected(new Set()) }}
                 className="text-[11px] text-amber-700 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
                 ↑ Parent ({selected.size})
               </button>
             )}
-            <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
+            <button onClick={addRow} className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors">+Row</button>
           </div>
         )}
 
-        <button onClick={onDelete} className="text-slate-300 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
+        <button onClick={onDelete} className="text-slate-400 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
       </div>
 
+      {/* Component rows — tinted with the subgroup colour */}
       {!subGroup.collapsed && (subGroup.children ?? []).length > 0 && (
         <div>
           {(subGroup.children ?? []).map((child, ci) => {
-            if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
+            if (child.type !== 'row') return null
             return (
               <ConfigRowEditor
                 key={child.row.id} row={child.row} isRecurring={isRecurring}
@@ -1006,6 +1080,7 @@ function SubGroupBlock({
                 onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                 colWidths={colWidths} hiddenCols={hiddenCols}
+                rowBgStyle={childBgStyle} rowBorderStyle={borderStyle}
               />
             )
           })}
@@ -1067,6 +1142,7 @@ function ConfigRowEditor({
   row, isRecurring, groupDefaultUnit, inputIsAud, onChange, onDelete, selected, onToggleSelect,
   onDragStart, onDrop,
   fmt, fmtAud, showSecondary, usdToAudRate, colWidths, hiddenCols,
+  rowBgStyle, rowBorderStyle,
 }: {
   row: ConfigRow; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit; inputIsAud: boolean
   onChange: (r: ConfigRow) => void; onDelete: () => void
@@ -1074,6 +1150,8 @@ function ConfigRowEditor({
   onDragStart: () => void; onDrop: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
   colWidths: ColWidths; hiddenCols: Set<number>
+  rowBgStyle?: React.CSSProperties
+  rowBorderStyle?: React.CSSProperties
 }) {
   const [dragOver, setDragOver] = useState(false)
   const rate = usdToAudRate
@@ -1141,11 +1219,11 @@ function ConfigRowEditor({
       onDragOver={e => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
-      className={`grid items-center gap-1 py-0.5 border-b border-slate-50 last:border-0 transition-colors
-        ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'}
+      className={`grid items-center gap-1 py-0.5 border-b border-black/5 last:border-0 transition-colors
+        ${selected ? 'bg-blue-50' : ''}
         ${dragOver ? 'border-t-2 border-blue-400' : ''}
       `}
-      style={{ gridTemplateColumns: cols, paddingLeft: '8px' }}
+      style={{ gridTemplateColumns: cols, paddingLeft: '8px', ...(selected ? {} : (rowBgStyle ?? {})), ...rowBorderStyle }}
     >
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
