@@ -511,7 +511,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                     onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
                     fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                     colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
-                    selectedRowIds={selectedGroupId === group.id || selectedGroupId === null ? selectedRowIds : new Set<string>()}
+                    selectedRowIds={selectedGroupId === group.id || selectedGroupId === null || subGroupsOf(group).some(sg => sg.id === selectedGroupId) ? selectedRowIds : new Set<string>()}
                     onSelectionChange={(gId, ids) => { setSelectedGroupId(ids.size > 0 ? gId : null); setSelectedRowIds(ids) }}
                     selectedSubGroupId={selectedSubGroupId}
                     onSubGroupSelectionChange={sgId => setSelectedSubGroupId(sgId)}

@@ -538,18 +538,6 @@ function ProductDetailPane({
   fmtAud: (n: number) => string
   showSecondary: boolean
 }) {
-  const [showCostFloor, setShowCostFloor] = useState(false)
-
-  // Only use the first config for price tile calculations
-  const activeConfigs = configs.slice(0, 1)
-
-  const hasConfigs = activeConfigs.length > 0 && activeConfigs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
-
-  // Derived price tiles
-  const cost  = hasConfigs ? configsTotal(activeConfigs, 'cost')  : parsePrice(form.costPrice)
-  const floor = hasConfigs ? configsTotal(activeConfigs, 'floor') : parsePrice(form.floorSellPrice)
-  const sell  = hasConfigs ? configsTotal(activeConfigs, 'sell')  : parsePrice(form.defaultSellPrice)
-
   const recurringPrice = parsePrice(form.recurringPricePerPeriod)
   const recurringFloor = parsePrice(form.recurringFloorPricePerPeriod)
   const periods = form.recurringPeriod === 'monthly'
@@ -559,7 +547,7 @@ function ProductDetailPane({
   const historyCount = existing?.priceHistory?.length ?? 0
 
   return (
-    <div className="max-w-3xl mx-auto flex flex-col h-full">
+    <div className="flex flex-col h-full">
       {/* ── Top action bar ── */}
       <div className="flex items-center gap-2 px-6 pt-4 pb-2 flex-shrink-0 border-b border-slate-100">
         <div className="flex-1" />
@@ -617,32 +605,6 @@ function ProductDetailPane({
             </div>
 
             {/* Price tiles — one-time */}
-            {form.pricingType === 'one-time' && (
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="grid grid-cols-1 gap-3 flex-1">
-                    <PriceTile label="Default Sell" value={form.defaultSellPrice} displayFmt={fmt(sell)}
-                      secondaryFmt={showSecondary ? fmtAud(sell) : undefined}
-                      onChange={v => set('defaultSellPrice', v)} locked={hasConfigs} highlight />
-                  </div>
-                  <button type="button" onClick={() => setShowCostFloor(v => !v)}
-                    className="text-[11px] px-2 py-1 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 font-medium transition-colors flex-shrink-0 self-start mt-1">
-                    {showCostFloor ? 'Hide Cost/Floor' : 'Show Cost/Floor'}
-                  </button>
-                </div>
-                {showCostFloor && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <PriceTile label="Cost Price" value={form.costPrice} displayFmt={fmt(cost)}
-                      secondaryFmt={showSecondary ? fmtAud(cost) : undefined}
-                      onChange={v => set('costPrice', v)} locked={hasConfigs} />
-                    <PriceTile label="Floor Sell" value={form.floorSellPrice} displayFmt={fmt(floor)}
-                      secondaryFmt={showSecondary ? fmtAud(floor) : undefined}
-                      onChange={v => set('floorSellPrice', v)} locked={hasConfigs} />
-                  </div>
-                )}
-              </div>
-            )}
-
             {/* Price tiles — recurring */}
             {form.pricingType === 'recurring' && (
               <div className="flex flex-col gap-3">
@@ -693,21 +655,6 @@ function ProductDetailPane({
               </div>
             )}
 
-            {/* Margin — only when cost/floor visible */}
-            {showCostFloor && floor > 0 && cost > 0 && form.pricingType === 'one-time' && (
-              <div className="flex gap-6 px-1">
-                <div>
-                  <p className="text-[11px] text-slate-400 font-semibold uppercase">Floor Margin</p>
-                  <p className="text-lg font-bold text-slate-700">{(((floor - cost) / floor) * 100).toFixed(1)}%</p>
-                </div>
-                {sell > 0 && (
-                  <div>
-                    <p className="text-[11px] text-slate-400 font-semibold uppercase">Default Margin</p>
-                    <p className="text-lg font-bold text-green-700">{(((sell - cost) / sell) * 100).toFixed(1)}%</p>
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Configurations */}
             {existing && (
