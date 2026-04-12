@@ -793,8 +793,7 @@ function SubGroupBlock({
       </div>
 
       {!subGroup.collapsed && (subGroup.children ?? []).length > 0 && (
-        <div className="pl-4">
-          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} indent={1} colWidths={colWidths} onColResize={onColResize} />
+        <div>
           {(subGroup.children ?? []).map((child, ci) => {
             if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
             return (
@@ -821,9 +820,9 @@ function SubGroupBlock({
 // ─── Table header ─────────────────────────────────────────────────────────────
 
 function ConfigTableHeader({
-  isRecurring, indent = 0, showSelect = false, onSelectAll, allSelected, colWidths, onColResize,
+  isRecurring, showSelect = false, onSelectAll, allSelected, colWidths, onColResize,
 }: {
-  isRecurring: boolean; indent?: number; showSelect?: boolean
+  isRecurring: boolean; showSelect?: boolean
   onSelectAll?: () => void; allSelected?: boolean
   colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
 }) {
@@ -843,7 +842,7 @@ function ConfigTableHeader({
     { label: 'Total', align: 'text-right pr-1',wIdx: 8 },
   ]
   return (
-    <div className={`grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-10' : 'pl-2'}`}
+    <div className="grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 pl-2"
       style={{ gridTemplateColumns: cols }}>
       <span className="flex items-center">
         {showSelect && <input type="checkbox" checked={!!allSelected} onChange={onSelectAll} className="w-3 h-3 cursor-pointer" />}
