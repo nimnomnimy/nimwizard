@@ -13,6 +13,11 @@ import { importTimelineFromCSV, importTimelineFromXLSX } from '../lib/importTime
 import { pickFile, readFileText } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 
+function buildShareUrl(ownerUid: string, timelineId: string): string {
+  const token = btoa(`${ownerUid}:${timelineId}`)
+  return `${window.location.origin}/view/${token}`
+}
+
 type ExportMode = 'gantt' | 'table' | 'both'
 
 // Two-step export popover: pick mode then format
@@ -113,8 +118,21 @@ export default function TimelineEditorPage() {
   const { id } = useParams<{ id: string }>()
   const timelines = useAppStore(s => s.timelines)
   const updateTimeline = useAppStore(s => s.updateTimeline)
+  const uid = useAppStore(s => s.uid)
   const navigate = useNavigate()
   const timeline = timelines.find(t => t.id === id)
+  const [shareCopied, setShareCopied] = useState(false)
+
+  function handleShare() {
+    if (!uid || !timeline) return
+    const url = buildShareUrl(uid, timeline.id)
+    navigator.clipboard.writeText(url).then(() => {
+      setShareCopied(true)
+      setTimeout(() => setShareCopied(false), 2000)
+    }).catch(() => {
+      showToast(url, 'success') // fallback: show in toast
+    })
+  }
 
   if (!timeline) {
     return (
@@ -184,6 +202,24 @@ export default function TimelineEditorPage() {
             onChange={e => handleChange({ ...timeline, endDate: e.target.value })}
             className="border border-slate-200 rounded-lg px-2 py-1 text-xs text-slate-600 bg-white focus:outline-none focus:ring-1 focus:ring-blue-400" />
         </div>
+
+        {/* Share button */}
+        <button
+          onClick={handleShare}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-colors ${
+            shareCopied
+              ? 'border-green-300 bg-green-50 text-green-700'
+              : 'border-slate-200 text-slate-600 hover:bg-slate-50 active:bg-slate-100'
+          }`}
+          title="Copy view-only share link to clipboard"
+        >
+          {shareCopied ? (
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><path d="M2 7l3.5 3.5L12 3" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          ) : (
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="none"><circle cx="11" cy="2.5" r="1.5" stroke="currentColor" strokeWidth="1.4"/><circle cx="11" cy="11.5" r="1.5" stroke="currentColor" strokeWidth="1.4"/><circle cx="3" cy="7" r="1.5" stroke="currentColor" strokeWidth="1.4"/><path d="M4.3 6.3L9.7 3.2M4.3 7.7l5.4 3.1" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/></svg>
+          )}
+          <span className="hidden sm:inline">{shareCopied ? 'Copied!' : 'Share'}</span>
+        </button>
 
         {/* Import button */}
         <button

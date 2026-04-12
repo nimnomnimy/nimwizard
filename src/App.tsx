@@ -16,6 +16,7 @@ import DealEnginePage from './pages/DealEnginePage'
 import ProductsPage from './pages/ProductsPage'
 import PricebookPage from './pages/PricebookPage'
 import ContractManagerPage from './pages/ContractManagerPage'
+import TimelineViewPage from './pages/TimelineViewPage'
 
 function AppRoutes() {
   useAuth()
@@ -50,6 +51,7 @@ function AppRoutes() {
         <Route path="/setup"       element={<SetupPage />} />
       </Route>
       <Route path="/admin" element={<AdminPage />} />
+      <Route path="/view/:token" element={<TimelineViewPage />} />
       <Route path="*" element={<Navigate to="/contacts" replace />} />
     </Routes>
   )

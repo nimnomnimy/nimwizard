@@ -1,10 +1,11 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import type { Timeline, TimelineItem, TimelineMilestone, Timescale, SubTimescale, YearMode, TimelineSubItem, FreezePeriod } from '../../types'
 import { uid } from '../../lib/utils'
 import {
   parseDate, formatDate, snapDate, getColumns,
   PX_PER_DAY, addDays, getHeaderRows, diffDays,
 } from './utils/dateLayout'
+import { cascadeFromItem, computeCriticalPath } from './utils/dependencies'
 import ItemDrawer from './ItemDrawer'
 import SubTaskDrawer from '../tasks/SubTaskDrawer'
 import TimelineTable from './TimelineTable'
@@ -15,8 +16,8 @@ const LANE_HEADER_H  = 36   // lane name row height
 const BAR_ROW_H      = 40   // height of one task row
 const SUB_ROW_H      = 32   // height of one sub-item row
 const ADD_TASK_ROW_H = 28   // "+ Add task" button at bottom of label col
-// Legacy alias kept for predecessor-line calculations
-const LANE_HEIGHT    = LANE_HEADER_H
+// Legacy alias — no longer used after predecessor-line Y calculation update
+const _LANE_HEIGHT   = LANE_HEADER_H; void _LANE_HEIGHT
 const DEFAULT_LABEL_W = 180
 const MIN_LABEL_W    = 80
 const MAX_LABEL_W    = 400
@@ -163,6 +164,16 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
 
   // Table view
   const [showTable, setShowTable] = useState(false)
+
+  // Dependency features
+  const [autoSchedule,  setAutoSchedule]  = useState(false)
+  const [showCritical,  setShowCritical]  = useState(false)
+
+  // Critical path — recomputed whenever items or showCritical changes
+  const criticalIds = useMemo(
+    () => showCritical ? computeCriticalPath(timeline.items) : new Set<string>(),
+    [showCritical, timeline.items],
+  )
 
   // Column resize drag (individual column width)
   const colResizeDragRef = useRef<{ dateKey: string; startX: number; startWidth: number } | null>(null)
@@ -496,6 +507,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
             }
             return patched
           })
+          // Auto-scheduling cascade
+          if (autoSchedule && drag.kind !== 'resize-left') {
+            newItems = cascadeFromItem(newItems, drag.itemId)
+          }
           update({ items: newItems })
         }
       } else {
@@ -698,11 +713,71 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     return y
   }
 
-  const totalCanvasH = timeline.swimLanes.reduce((s, l) => s + laneH(l.id), 0)
+  // ── Sub-swimlane (category) layout ───────────────────────────────────────
+  const CAT_HEADER_H = 28  // height of a category group header row
 
-  // ── Lane Y offsets ────────────────────────────────────────────────────────
+  // Build flat render list: interleave category-header sentinels and lanes
+  type RenderRow =
+    | { kind: 'cat-header'; category: string; collapsed: boolean }
+    | { kind: 'lane'; lane: typeof timeline.swimLanes[number]; laneIdx: number }
+
+  const renderRows: RenderRow[] = useMemo(() => {
+    const rows: RenderRow[] = []
+    const seenCats = new Set<string>()
+    for (let i = 0; i < timeline.swimLanes.length; i++) {
+      const lane = timeline.swimLanes[i]
+      const cat = lane.category?.trim() || null
+      if (cat && !seenCats.has(cat)) {
+        seenCats.add(cat)
+        rows.push({ kind: 'cat-header', category: cat, collapsed: false })
+      }
+      rows.push({ kind: 'lane', lane, laneIdx: i })
+    }
+    return rows
+  }, [timeline.swimLanes])
+
+  // Collapsed category state — collapsing hides all lanes in that category
+  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set())
+  function toggleCat(cat: string) {
+    setCollapsedCats(prev => {
+      const next = new Set(prev)
+      if (next.has(cat)) { next.delete(cat) } else { next.add(cat) }
+      return next
+    })
+  }
+  function isCatCollapsed(cat: string | null | undefined) {
+    return cat ? collapsedCats.has(cat) : false
+  }
+
+  // Y offset for each render row
+  function renderRowY(rowIdx: number): number {
+    let y = 0
+    for (let i = 0; i < rowIdx; i++) {
+      const row = renderRows[i]
+      if (row.kind === 'cat-header') {
+        y += CAT_HEADER_H
+      } else {
+        const cat = row.lane.category?.trim() || null
+        if (isCatCollapsed(cat)) continue
+        y += laneH(row.lane.id)
+      }
+    }
+    return y
+  }
+
+  const totalCanvasH = renderRows.reduce((s, row) => {
+    if (row.kind === 'cat-header') return s + CAT_HEADER_H
+    const cat = row.lane.category?.trim() || null
+    if (isCatCollapsed(cat)) return s
+    return s + laneH(row.lane.id)
+  }, 0)
+
+  // ── Lane Y offsets (legacy API for predecessor lines) ─────────────────────
   function laneYOffset(laneIdx: number) {
-    return timeline.swimLanes.slice(0, laneIdx).reduce((s, l) => s + laneH(l.id), 0)
+    // Find this lane's renderRows index and sum heights before it
+    const rowIdx = renderRows.findIndex(r => r.kind === 'lane' && r.laneIdx === laneIdx)
+    if (rowIdx < 0) return 0
+    return renderRowY(rowIdx)
   }
 
   // Keep window listener refs in sync with latest render's handlers
@@ -844,6 +919,37 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           </svg>
           Table
         </button>
+
+        <button
+          onClick={() => setAutoSchedule(v => !v)}
+          title="Auto-schedule: when you drag a bar, its dependents cascade forward"
+          className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg min-h-[32px] transition-colors border ${
+            autoSchedule
+              ? 'bg-emerald-50 border-emerald-300 text-emerald-700'
+              : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'
+          }`}>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <path d="M2 6h3M7 6h3M5 6V2M7 6V10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+            <circle cx="5" cy="2" r="1.3" fill="currentColor"/>
+            <circle cx="7" cy="10" r="1.3" fill="currentColor"/>
+          </svg>
+          Auto
+        </button>
+
+        <button
+          onClick={() => setShowCritical(v => !v)}
+          title="Highlight the critical path (longest chain of dependent tasks)"
+          className={`flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg min-h-[32px] transition-colors border ${
+            showCritical
+              ? 'bg-red-50 border-red-300 text-red-600'
+              : 'bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-700'
+          }`}>
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none">
+            <path d="M1 11L6 1L11 11" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M3 7.5h6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+          </svg>
+          Critical
+        </button>
       </div>
 
       {/* ── Scrollable canvas ─────────────────────────────────────────────── */}
@@ -966,7 +1072,8 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
           </div>
 
           {/* ── Swim lanes ──────────────────────────────────────────────── */}
-          <div style={{ position:'relative', height: totalCanvasH }}>
+          <div style={{ position:'relative', height: totalCanvasH }}
+            onPointerMove={onPointerMove} onPointerUp={onPointerUp}>
 
             {/* ── Predecessor lines SVG ────────────────────────────────── */}
             <svg style={{ position:'absolute', left:0, top:0, width:'100%', height:totalCanvasH, pointerEvents:'none', zIndex:8, overflow:'visible' }}>
@@ -977,23 +1084,30 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   const predLaneIdx = timeline.swimLanes.findIndex(l => l.id === pred.swimLaneId)
                   const itemLaneIdx = timeline.swimLanes.findIndex(l => l.id === item.swimLaneId)
                   if (predLaneIdx < 0 || itemLaneIdx < 0) return null
-                  const predY = laneYOffset(predLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
-                  const itemY = laneYOffset(itemLaneIdx) + (LANE_HEIGHT - 28) / 2 + 14
+                  const predY = laneYOffset(predLaneIdx) + itemBarY(pred.swimLaneId, pred.id) + 14
+                  const itemY = laneYOffset(itemLaneIdx) + itemBarY(item.swimLaneId, item.id) + 14
                   const x1 = labelWidth + dateToPxVar(parseDate(pred.endDate))
                   const x2 = labelWidth + dateToPxVar(parseDate(item.startDate))
                   const mx = x1 + Math.max(8, (x2 - x1) * 0.5)
+                  const isCriticalEdge = showCritical && criticalIds.has(item.id) && criticalIds.has(predId)
+                  const stroke = isCriticalEdge ? '#ef4444' : '#f59e0b'
+                  const markerId = isCriticalEdge ? 'arrowhead-red' : 'arrowhead-amber'
                   return (
                     <g key={`${predId}->${item.id}`}>
                       <path d={`M ${x1} ${predY} C ${mx} ${predY} ${mx} ${itemY} ${x2} ${itemY}`}
-                        stroke="#f59e0b" strokeWidth="1.5" fill="none" strokeDasharray="5,3"
-                        markerEnd="url(#arrowhead)" />
+                        stroke={stroke} strokeWidth={isCriticalEdge ? 2 : 1.5} fill="none"
+                        strokeDasharray={isCriticalEdge ? undefined : '5,3'}
+                        markerEnd={`url(#${markerId})`} />
                     </g>
                   )
                 }).filter(Boolean)
               )}
               <defs>
-                <marker id="arrowhead" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                <marker id="arrowhead-amber" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
                   <path d="M0,0 L6,3 L0,6 Z" fill="#f59e0b" />
+                </marker>
+                <marker id="arrowhead-red" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+                  <path d="M0,0 L6,3 L0,6 Z" fill="#ef4444" />
                 </marker>
               </defs>
             </svg>
@@ -1061,9 +1175,38 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
               )
             })}
 
-            {/* Lanes */}
-            {timeline.swimLanes.map((lane, laneIdx) => {
-              const laneY      = laneYOffset(laneIdx)
+            {/* Category headers + Lanes */}
+            {renderRows.map((row, rowIdx) => {
+              if (row.kind === 'cat-header') {
+                const rowY = renderRowY(rowIdx)
+                const isCollapsed = collapsedCats.has(row.category)
+                return (
+                  <div key={`cat-${row.category}`}
+                    style={{ position:'absolute', top: rowY, left: 0, width: labelWidth + totalWidthPx, height: CAT_HEADER_H, display:'flex', zIndex: 5 }}>
+                    {/* Sticky label */}
+                    <div style={{ width: labelWidth, flexShrink: 0 }}
+                      className="sticky left-0 z-10 bg-slate-100 border-r border-b border-slate-200 flex items-center px-2 gap-1.5">
+                      <button onClick={() => toggleCat(row.category)}
+                        className="text-slate-500 hover:text-slate-700 p-0.5 flex-shrink-0">
+                        <svg width="9" height="9" viewBox="0 0 10 10" fill="none"
+                          style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition:'transform 0.15s' }}>
+                          <path d="M2 3l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                        </svg>
+                      </button>
+                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider truncate">{row.category}</span>
+                    </div>
+                    {/* Full-width tinted band */}
+                    <div className="flex-1 bg-slate-100 border-b border-slate-200" />
+                  </div>
+                )
+              }
+
+              // Lane row
+              const { lane, laneIdx: _laneIdx } = row; void _laneIdx
+              const cat = lane.category?.trim() || null
+              if (isCatCollapsed(cat)) return null
+
+              const laneY      = renderRowY(rowIdx)
               const laneHeight = laneH(lane.id)
               const laneItems  = timeline.items.filter(i => i.swimLaneId===lane.id)
               const laneGhost  = ghost?.laneId===lane.id ? ghost : null
@@ -1098,6 +1241,15 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       </div>
                       <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
                         className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 truncate" />
+                      {/* Category badge — click to set/clear */}
+                      <input
+                        type="text"
+                        value={lane.category ?? ''}
+                        onChange={e => update({ swimLanes: timeline.swimLanes.map(l => l.id===lane.id ? { ...l, category: e.target.value || undefined } : l) })}
+                        placeholder="Group…"
+                        title="Category / sub-swimlane group"
+                        className="lg:opacity-0 lg:group-hover:opacity-100 w-14 text-[9px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all flex-shrink-0"
+                      />
                       {timeline.swimLanes.length > 1 && (
                         <button onClick={()=>deleteLane(lane.id)} title="Delete lane"
                           className="lg:opacity-0 lg:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 active:text-red-500 transition-all flex-shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center">
@@ -1216,7 +1368,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                               <div style={{ position:'absolute', left:x, top:bY, width:w, height:28,
                                 borderRadius:6, backgroundColor:item.color, opacity:0.9,
                                 cursor:'grab', display:'flex', alignItems:'center', overflow:'hidden', zIndex:2,
-                                boxShadow:'0 1px 3px rgba(0,0,0,0.15)', touchAction:'none' }}
+                                boxShadow: showCritical && criticalIds.has(item.id)
+                                  ? '0 0 0 2px #ef4444, 0 1px 3px rgba(0,0,0,0.15)'
+                                  : '0 1px 3px rgba(0,0,0,0.15)',
+                                touchAction:'none' }}
                                 onPointerDown={e=>startBarDrag(e,item,'move',undefined,lane.id)}
                                 onClick={e=>{ e.stopPropagation(); setEditingItem(item); setEditingMilestone(null); setAddingForLane(lane.id); setDrawerOpen(true) }}>
                                 <div style={{ width:8, height:'100%', cursor:'ew-resize', flexShrink:0, touchAction:'none' }}
