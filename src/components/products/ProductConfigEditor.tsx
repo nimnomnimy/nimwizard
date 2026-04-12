@@ -600,7 +600,6 @@ function TopGroupBlock({
     setSelected(new Set())
   }
 
-  const rows = rowsOf(group)
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const destinations = buildDestinations(cfg, group.id)
