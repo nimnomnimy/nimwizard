@@ -44,12 +44,13 @@ function rowNetUsd(row: ConfigRow): number {
 
 // groupSubtotal: sum of (net × rowQty × term) for rows directly/indirectly in this group,
 // WITHOUT applying the group's own qty multiplier. Used for displaying the group's "Net" field.
-function groupSubtotal(g: ConfigGroup): number {
-  const isRecurring = g.pricingType === 'recurring'
+// parentIsRecurring: when set, overrides g.pricingType — subgroups always inherit parent's recurring mode.
+function groupSubtotal(g: ConfigGroup, parentIsRecurring?: boolean): number {
+  const isRecurring = parentIsRecurring !== undefined ? parentIsRecurring : g.pricingType === 'recurring'
   return (g.children ?? []).reduce((s, c) => {
     if (c.type === 'row') return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
-    // sub-group: subtotal × sub-group's own qty
-    return s + groupSubtotal(c.group) * (c.group.qty ?? 1)
+    // sub-group inherits parent's recurring mode so term isn't double-counted
+    return s + groupSubtotal(c.group, isRecurring) * (c.group.qty ?? 1)
   }, 0)
 }
 
@@ -985,7 +986,7 @@ function SubGroupBlock({
   const selected = selectedRowIds
 
   const isRecurring = parentIsRecurring
-  const subtotal     = groupSubtotal(subGroup)
+  const subtotal     = groupSubtotal(subGroup, parentIsRecurring)
   const total        = subtotal * (subGroup.qty ?? 1)
   // dispSubtotal/dispTotal are in the active input currency (for the Net editable input field)
   const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
@@ -1016,7 +1017,7 @@ function SubGroupBlock({
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
     const targetNetUsd = toUsd(net)
     if (isNaN(targetNetUsd)) return
-    const currentNet = groupSubtotal(subGroup)   // current net total in USD
+    const currentNet = groupSubtotal(subGroup, parentIsRecurring)   // current net total in USD
     if (currentNet === 0) return
     const ratio = targetNetUsd / currentNet
     // Scale every row's sellPriceUsd proportionally to preserve relative weights

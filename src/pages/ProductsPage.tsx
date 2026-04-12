@@ -29,16 +29,16 @@ const CATEGORIES: ProductCategory[] = [
 // ─── Price calculation from configs ──────────────────────────────────────────
 
 // Subtotal for a group: net × rowQty × term, with sub-group qty applied
-function groupFieldSubtotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
+function groupFieldSubtotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell', parentIsRecurring?: boolean): number {
   if (!g?.children) return 0
-  const isRecurring = g.pricingType === 'recurring'
+  const isRecurring = parentIsRecurring !== undefined ? parentIsRecurring : g.pricingType === 'recurring'
   return g.children.reduce((s, c) => {
     if (c.type === 'row') {
       const basePrice = field === 'cost' ? c.row.costPriceUsd : field === 'floor' ? c.row.floorPriceUsd : c.row.sellPriceUsd
       const price = field === 'sell' ? (basePrice ?? 0) * (1 - (c.row.discountPct ?? 0) / 100) : (basePrice ?? 0)
       return s + price * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     }
-    if (c.type === 'subgroup') return s + groupFieldSubtotal(c.group, field) * (c.group.qty ?? 1)
+    if (c.type === 'subgroup') return s + groupFieldSubtotal(c.group, field, isRecurring) * (c.group.qty ?? 1)
     return s
   }, 0)
 }
