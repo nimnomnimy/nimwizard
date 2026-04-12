@@ -446,13 +446,14 @@ export default function ProductsPage() {
                           {secondary && <p className="text-[10px] text-slate-400">{secondary}</p>}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 mt-0.5">
-                        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${CATEGORY_COLORS[p.category]}`}>{p.category}</span>
-                        {p.pricingType === 'recurring' && (
-                          <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">Recurring</span>
-                        )}
-                        {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
-                      </div>
+                      {(p.pricingType === 'recurring' || sub) && (
+                        <div className="flex items-center gap-1.5 mt-0.5">
+                          {p.pricingType === 'recurring' && (
+                            <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">Recurring</span>
+                          )}
+                          {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
+                        </div>
+                      )}
                     </button>
                     {isActive && (
                       <div className="flex gap-1 px-3 pb-2">
