@@ -50,6 +50,16 @@ function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
   return (g.children ?? []).filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
 }
 
+// Collect all row IDs in a group (and its subgroups) — used for select-all checkbox
+function collectAllRowIds(g: ConfigGroup): string[] {
+  const ids: string[] = []
+  for (const c of g.children ?? []) {
+    if (c.type === 'row') ids.push(c.row.id)
+    else ids.push(...collectAllRowIds(c.group))
+  }
+  return ids
+}
+
 function rowNetUsd(row: ConfigRow): number {
   return (row.sellPriceUsd ?? 0) * (1 - (row.discountPct ?? 0) / 100)
 }
@@ -217,11 +227,11 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 
 // ─── Column widths ────────────────────────────────────────────────────────────
 
-// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=disc%, 10=net
-const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78] as const
-type ColWidths = [number, number, number, number, number, number, number, number, number, number, number]
+// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=disc%, 10=net, 11=category
+const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78, 100] as const
+type ColWidths = [number, number, number, number, number, number, number, number, number, number, number, number]
 
-const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net'] as const
+const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net', 'Category'] as const
 // Cost (3) and Floor (4) hidden by default
 const DEFAULT_HIDDEN_COLS = new Set([3, 4])
 
@@ -232,7 +242,7 @@ function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
 function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
   // Fixed: checkbox(20) drag(8) | resizable cols | fixed: lock(20) delete(24)
   const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
-  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} 20px 24px`
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} ${colPx(w, 11, hidden)} 20px 24px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -479,6 +489,29 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                   className="text-[11px] text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap border border-red-200">
                   Delete ({selectedRowIds.size})
                 </button>
+                {/* Bulk category */}
+                <select
+                  value=""
+                  onChange={e => {
+                    if (!e.target.value) return
+                    const cat = e.target.value === '__clear__' ? undefined : e.target.value as ProductCategory
+                    const found = findGroup(activeConfig, selectedGroupId)
+                    if (!found) return
+                    const applyCategory = (children: ConfigChild[]): ConfigChild[] =>
+                      children.map(c => {
+                        if (c.type === 'row' && selectedRowIds.has(c.row.id)) return { type: 'row', row: { ...c.row, category: cat } }
+                        if (c.type === 'subgroup') return { type: 'subgroup', group: { ...c.group, children: applyCategory(c.group.children ?? []) } }
+                        return c
+                      })
+                    updateConfig(updateGroupInConfig(activeConfig, { ...found.group, children: applyCategory(found.group.children ?? []) }))
+                    e.target.value = ''
+                  }}
+                  className="text-[11px] border border-slate-300 rounded-lg px-1 py-1 bg-white focus:outline-none"
+                >
+                  <option value="">Category…</option>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                  <option value="__clear__">— clear —</option>
+                </select>
                 {(() => {
                   const dests = buildDestinations(activeConfig, selectedGroupId)
                   return dests.length > 0 ? (
@@ -769,8 +802,26 @@ function TopGroupBlock({
       <div className={`grid items-center gap-1 py-1 px-0 border-b border-black/5 ${headerBg}`}
         style={{ gridTemplateColumns: cols, paddingLeft: '8px' }}>
 
-        {/* Checkbox cell */}
-        <span />
+        {/* Checkbox cell — select-all rows in this group */}
+        {(() => {
+          const allRowIds = collectAllRowIds(group)
+          const allSelected = allRowIds.length > 0 && allRowIds.every(id => selected.has(id))
+          const someSelected = allRowIds.some(id => selected.has(id))
+          return (
+            <input type="checkbox"
+              checked={allSelected}
+              ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
+              onChange={() => {
+                if (allSelected) {
+                  onSelectionChange(group.id, new Set())
+                } else {
+                  onSelectionChange(group.id, new Set(allRowIds))
+                }
+              }}
+              className="w-3 h-3 cursor-pointer"
+            />
+          )
+        })()}
         {/* Collapse toggle (drag handle slot) */}
         <button onClick={() => onUpdate({ ...group, collapsed: !group.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0 flex items-center justify-center">
           <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform ${group.collapsed ? '-rotate-90' : ''}`}>
@@ -874,6 +925,8 @@ function TopGroupBlock({
           )}
         </div>
 
+        {/* Category placeholder */}
+        <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''} />
         {/* Lock placeholder + Actions (spans 2 cols: lock + delete) */}
         <span />
         <div className="flex items-center gap-0.5 justify-end">
@@ -1249,7 +1302,8 @@ function SubGroupBlock({
           )}
         </div>
 
-        {/* Lock placeholder + Delete */}
+        {/* Category placeholder + Lock placeholder + Delete */}
+        <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''} />
         <span />
         <button onClick={onDelete} className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors justify-self-end">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -1321,9 +1375,10 @@ function ConfigTableHeader({
       { label: 'Unit', align: 'text-center',   wIdx: 6 },
       { label: 'Term', align: 'text-center',   wIdx: 7 },
     ] : []),
-    { label: 'Disc%', align: 'text-center',    wIdx: 9 },
-    { label: 'Net',   align: 'text-right pr-1',wIdx: 10 },
-    { label: 'Total', align: 'text-right pr-1',wIdx: 8 },
+    { label: 'Disc%',    align: 'text-center',    wIdx: 9 },
+    { label: 'Net',      align: 'text-right pr-1',wIdx: 10 },
+    { label: 'Total',    align: 'text-right pr-1',wIdx: 8 },
+    { label: 'Category', align: '',               wIdx: 11 },
   ]
   return (
     <div className="grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 pl-2"
@@ -1476,30 +1531,9 @@ function ConfigRowEditor({
     >
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
-      <div className={`flex flex-col gap-0.5 ${hiddenCols.has(0) ? 'overflow-hidden' : ''}`}>
-        {!hiddenCols.has(0) && <>
-          <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
-            placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />
-          {row.category ? (
-            <button
-              type="button"
-              onClick={() => setField('category', undefined)}
-              title="Click to clear category"
-              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full truncate text-left ${CATEGORY_COLORS[row.category]}`}
-            >
-              {row.category}
-            </button>
-          ) : (
-            <select
-              value=""
-              onChange={e => e.target.value && setField('category', e.target.value as ProductCategory)}
-              className="w-full border border-dashed border-slate-200 rounded px-1 py-0.5 text-[10px] text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white/80"
-            >
-              <option value="">+ category</option>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-        </>}
+      <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(0) && <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
+          placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />}
       </div>
       <div className={hiddenCols.has(1) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(1) && <input value={row.description} onChange={e => setField('description', e.target.value)}
@@ -1585,6 +1619,30 @@ function ConfigRowEditor({
           <p className="text-xs font-semibold text-slate-700">{fmt(totalNetUsd)}</p>
           {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{fmtAud(totalNetUsd)}</p>}
         </>}
+      </div>
+      {/* Category */}
+      <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(11) && (
+          row.category ? (
+            <button
+              type="button"
+              onClick={() => setField('category', undefined)}
+              title="Click to clear category"
+              className={`w-full text-[9px] font-semibold px-1.5 py-1 rounded truncate text-left leading-none ${CATEGORY_COLORS[row.category]}`}
+            >
+              {row.category}
+            </button>
+          ) : (
+            <select
+              value=""
+              onChange={e => e.target.value && setField('category', e.target.value as ProductCategory)}
+              className="w-full border border-dashed border-slate-200 rounded px-1 py-0.5 text-[10px] text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white/80"
+            >
+              <option value="">+ cat</option>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )
+        )}
       </div>
       {/* Lock toggle */}
       <button
