@@ -260,6 +260,27 @@ export default function ProductsPage() {
     setDirty(false)
   }
 
+  function handleClone() {
+    if (!existing) return
+    const newId = uid()
+    const cloned: DealProduct = {
+      ...existing,
+      id: newId,
+      name: `${existing.name} (copy)`,
+      priceHistory: [],
+      createdAt: Date.now(),
+      configurations: (existing.configurations ?? []).map(cfg => ({
+        ...cfg,
+        id: uid(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      })),
+    }
+    addProduct(cloned)
+    setActiveId(newId)
+    showToast(`Cloned as "${cloned.name}"`, 'success')
+  }
+
   function handleDelete() {
     if (!existing) return
     if (!confirm(`Delete "${existing.name}"?`)) return
@@ -451,6 +472,7 @@ export default function ProductsPage() {
                 showToast(`${ids.length} record${ids.length > 1 ? 's' : ''} deleted`)
               }}
               onConfigsChange={cfgs => existing && handleConfigsChange(existing.id, cfgs)}
+              onClone={handleClone}
               nameRef={nameRef}
               fmt={fmt}
               fmtAud={fmtAud}
@@ -467,7 +489,7 @@ export default function ProductsPage() {
 
 function ProductDetailPane({
   form, dirty, isNew, existing, configs,
-  set, onSave, onDelete, onDeleteHistoryIds, onConfigsChange,
+  set, onSave, onDelete, onDeleteHistoryIds, onConfigsChange, onClone,
   nameRef, fmt, fmtAud, showSecondary,
 }: {
   productId: string | null
@@ -479,6 +501,7 @@ function ProductDetailPane({
   set: <K extends keyof FormState>(k: K, v: FormState[K]) => void
   onSave: (e?: React.FormEvent) => void
   onDelete: () => void
+  onClone: () => void
   onDeleteHistoryIds: (ids: string[]) => void
   onConfigsChange: (cfgs: ProductConfiguration[]) => void
   nameRef: React.RefObject<HTMLInputElement | null>
@@ -486,18 +509,10 @@ function ProductDetailPane({
   fmtAud: (n: number) => string
   showSecondary: boolean
 }) {
-  const [tab, setTab] = useState<'details' | 'history'>('details')
-  const [activeConfigId, setActiveConfigId] = useState<string | null>(configs[0]?.id ?? null)
+  const [showCostFloor, setShowCostFloor] = useState(false)
 
-  // Keep activeConfigId in sync when configs change (e.g. first config added)
-  useEffect(() => {
-    if (activeConfigId === null && configs.length > 0) setActiveConfigId(configs[0].id)
-  }, [configs]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Only use the currently selected config for price tile calculations
-  const activeConfigs = activeConfigId
-    ? configs.filter(c => c.id === activeConfigId)
-    : configs.slice(0, 1)
+  // Only use the first config for price tile calculations
+  const activeConfigs = configs.slice(0, 1)
 
   const hasConfigs = activeConfigs.length > 0 && activeConfigs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
 
@@ -518,18 +533,13 @@ function ProductDetailPane({
     <div className="max-w-3xl mx-auto flex flex-col h-full">
       {/* ── Top action bar ── */}
       <div className="flex items-center gap-2 px-6 pt-4 pb-2 flex-shrink-0 border-b border-slate-100">
-        <div className="flex-1">
-          {!isNew && (
-            <div className="flex gap-1">
-              {(['details', 'history'] as const).map(t => (
-                <button key={t} type="button" onClick={() => setTab(t)}
-                  className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${tab === t ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}>
-                  {t === 'details' ? 'Details' : `Price History${historyCount > 0 ? ` (${historyCount})` : ''}`}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        <div className="flex-1" />
+        {!isNew && (
+          <button type="button" onClick={onClone}
+            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
+            Clone
+          </button>
+        )}
         {!isNew && (
           <button type="button" onClick={onDelete}
             className="px-3 py-1.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
@@ -546,23 +556,7 @@ function ProductDetailPane({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* ── History tab ── */}
-        {!isNew && tab === 'history' && (
-          <div className="p-6">
-            {historyCount === 0 ? (
-              <p className="text-sm text-slate-400 text-center py-12">No price history yet.</p>
-            ) : (
-              <PriceHistorySection
-                history={existing!.priceHistory!}
-                onDeleteIds={onDeleteHistoryIds}
-              />
-            )}
-          </div>
-        )}
-
-        {/* ── Details tab (or new product form) ── */}
-        {(isNew || tab === 'details') && (
-          <form onSubmit={onSave} className="p-6 flex flex-col gap-6">
+        <form onSubmit={onSave} className="p-6 flex flex-col gap-6">
             {/* Name + meta header */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
@@ -595,16 +589,28 @@ function ProductDetailPane({
 
             {/* Price tiles — one-time */}
             {form.pricingType === 'one-time' && (
-              <div className="grid grid-cols-3 gap-3">
-                <PriceTile label="Cost Price" value={form.costPrice} displayFmt={fmt(cost)}
-                  secondaryFmt={showSecondary ? fmtAud(cost) : undefined}
-                  onChange={v => set('costPrice', v)} locked={hasConfigs} />
-                <PriceTile label="Floor Sell" value={form.floorSellPrice} displayFmt={fmt(floor)}
-                  secondaryFmt={showSecondary ? fmtAud(floor) : undefined}
-                  onChange={v => set('floorSellPrice', v)} locked={hasConfigs} highlight />
-                <PriceTile label="Default Sell" value={form.defaultSellPrice} displayFmt={fmt(sell)}
-                  secondaryFmt={showSecondary ? fmtAud(sell) : undefined}
-                  onChange={v => set('defaultSellPrice', v)} locked={hasConfigs} highlight />
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="grid grid-cols-1 gap-3 flex-1">
+                    <PriceTile label="Default Sell" value={form.defaultSellPrice} displayFmt={fmt(sell)}
+                      secondaryFmt={showSecondary ? fmtAud(sell) : undefined}
+                      onChange={v => set('defaultSellPrice', v)} locked={hasConfigs} highlight />
+                  </div>
+                  <button type="button" onClick={() => setShowCostFloor(v => !v)}
+                    className="text-[11px] px-2 py-1 rounded-lg border border-slate-200 text-slate-400 hover:text-slate-600 hover:border-slate-300 font-medium transition-colors flex-shrink-0 self-start mt-1">
+                    {showCostFloor ? 'Hide Cost/Floor' : 'Show Cost/Floor'}
+                  </button>
+                </div>
+                {showCostFloor && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <PriceTile label="Cost Price" value={form.costPrice} displayFmt={fmt(cost)}
+                      secondaryFmt={showSecondary ? fmtAud(cost) : undefined}
+                      onChange={v => set('costPrice', v)} locked={hasConfigs} />
+                    <PriceTile label="Floor Sell" value={form.floorSellPrice} displayFmt={fmt(floor)}
+                      secondaryFmt={showSecondary ? fmtAud(floor) : undefined}
+                      onChange={v => set('floorSellPrice', v)} locked={hasConfigs} />
+                  </div>
+                )}
               </div>
             )}
 
@@ -658,8 +664,8 @@ function ProductDetailPane({
               </div>
             )}
 
-            {/* Margin */}
-            {floor > 0 && cost > 0 && form.pricingType === 'one-time' && (
+            {/* Margin — only when cost/floor visible */}
+            {showCostFloor && floor > 0 && cost > 0 && form.pricingType === 'one-time' && (
               <div className="flex gap-6 px-1">
                 <div>
                   <p className="text-[11px] text-slate-400 font-semibold uppercase">Floor Margin</p>
@@ -674,20 +680,26 @@ function ProductDetailPane({
               </div>
             )}
 
-
             {/* Configurations */}
             {existing && (
               <div className="border-t border-slate-100 pt-4">
                 <ProductConfigEditor
                   configs={configs}
                   onChange={onConfigsChange}
-                  activeConfigId={activeConfigId}
-                  onActiveConfigChange={setActiveConfigId}
+                />
+              </div>
+            )}
+
+            {/* Price history — at the bottom */}
+            {existing && historyCount > 0 && (
+              <div className="border-t border-slate-100 pt-4">
+                <PriceHistorySection
+                  history={existing.priceHistory!}
+                  onDeleteIds={onDeleteHistoryIds}
                 />
               </div>
             )}
           </form>
-        )}
       </div>
     </div>
   )

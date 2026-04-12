@@ -139,11 +139,13 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 
 // ─── Column widths ────────────────────────────────────────────────────────────
 
-// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total
-const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84] as const
-type ColWidths = [number, number, number, number, number, number, number, number, number]
+// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=discount
+const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 64] as const
+type ColWidths = [number, number, number, number, number, number, number, number, number, number]
 
-const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total'] as const
+const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%'] as const
+// Cost (3) and Floor (4) hidden by default
+const DEFAULT_HIDDEN_COLS = new Set([3, 4])
 
 function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
   return hidden.has(idx) ? '0px' : `${w[idx]}px`
@@ -152,7 +154,7 @@ function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
 function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
   // Fixed: checkbox(20) drag(8) | resizable cols | fixed: delete(28)
   const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
-  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 8, hidden)} 28px`
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 8, hidden)} 28px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -183,7 +185,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
 
   // Column widths (resizable), hidden columns, and overall table width
   const [colWidths, setColWidths] = useState<ColWidths>([...DEFAULT_COL_WIDTHS] as ColWidths)
-  const [hiddenCols, setHiddenCols] = useState<Set<number>>(new Set())
+  const [hiddenCols, setHiddenCols] = useState<Set<number>>(new Set(DEFAULT_HIDDEN_COLS))
   const [showColMenu, setShowColMenu] = useState(false)
   const [tableWidth, setTableWidth] = useState<number | null>(null)
   const tableContainerRef = useRef<HTMLDivElement>(null)
@@ -225,8 +227,9 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
     onChange(configs.map(c => c.id === updated.id ? { ...updated, updatedAt: Date.now() } : c))
   }, [configs, onChange])
 
-  const addConfig = () => { const c = emptyConfig(); onChange([...configs, c]); setActiveConfigId(c.id) }
-  const deleteConfig = (id: string) => { const next = configs.filter(c => c.id !== id); onChange(next); if (activeConfigId === id) setActiveConfigId(next[0]?.id ?? null) }
+  // kept for potential future use (e.g. pricebook multi-config)
+  const _addConfig = () => { const c = emptyConfig(); onChange([...configs, c]); setActiveConfigId(c.id) }
+  void _addConfig
 
   function addTopGroup(cfg: ProductConfiguration) {
     updateConfig({ ...cfg, groups: [...cfg.groups, emptyGroup(`Group ${cfg.groups.length + 1}`)] })
@@ -261,35 +264,10 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
     setPasteOpen(false); setPasteText(''); setPasteError('')
   }
 
-  if (configs.length === 0 && !activeConfig) {
-    return (
-      <div className="flex flex-col gap-3">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">Configurations</p>
-          <button onClick={addConfig} className="text-xs px-2.5 py-1.5 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition-colors">+ New Config</button>
-        </div>
-        <div className="border-2 border-dashed border-slate-200 rounded-xl p-8 text-center text-slate-400 text-sm">
-          No configurations yet. Click <strong>+ New Config</strong> to create one or paste from Excel.
-        </div>
-      </div>
-    )
-  }
+  if (!activeConfig) return null
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Config tabs */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide flex-shrink-0">Configurations</p>
-        <div className="flex gap-1 flex-wrap flex-1">
-          {configs.map(c => (
-            <button key={c.id} onClick={() => setActiveConfigId(c.id)}
-              className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors border ${activeConfigId === c.id ? 'bg-blue-500 text-white border-blue-500' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300 hover:text-blue-600'}`}>
-              {c.name}
-            </button>
-          ))}
-        </div>
-        <button onClick={addConfig} className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 text-slate-600 font-semibold hover:bg-slate-200 transition-colors flex-shrink-0">+ Add</button>
-      </div>
 
       {activeConfig && (
         <div
@@ -335,10 +313,6 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
             <button onClick={() => addTopGroup(activeConfig)}
               className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
               + Group
-            </button>
-            <button onClick={() => { if (confirm(`Delete "${activeConfig.name}"?`)) deleteConfig(activeConfig.id) }}
-              className="text-[11px] px-2 py-1 rounded-lg bg-white border border-red-200 text-red-500 hover:bg-red-50 font-semibold transition-colors">
-              Delete
             </button>
           </div>
 
@@ -870,6 +844,7 @@ function ConfigTableHeader({
       { label: 'Unit', align: 'text-center',   wIdx: 6 },
       { label: 'Term', align: 'text-center',   wIdx: 7 },
     ] : []),
+    { label: 'Disc%', align: 'text-center',    wIdx: 9 },
     { label: 'Total', align: 'text-right pr-1',wIdx: 8 },
   ]
   return (
@@ -920,6 +895,33 @@ function ConfigRowEditor({
   const dispFmt   = inputIsAud ? fmtAud : fmt
   const secFmt    = inputIsAud ? fmt : fmtAud
   const belowFloor = row.floorPriceUsd > 0 && row.sellPriceUsd < row.floorPriceUsd
+
+  // Discount: relative to floor price when available, otherwise relative to sell
+  const discPct = row.floorPriceUsd > 0
+    ? (1 - row.sellPriceUsd / row.floorPriceUsd) * 100
+    : 0
+  const [discInput, setDiscInput] = useState(() => row.floorPriceUsd > 0 ? discPct.toFixed(1) : '')
+
+  // Keep discInput in sync when sell or floor changes externally
+  const prevSell = useRef(row.sellPriceUsd)
+  const prevFloor = useRef(row.floorPriceUsd)
+  if (prevSell.current !== row.sellPriceUsd || prevFloor.current !== row.floorPriceUsd) {
+    prevSell.current = row.sellPriceUsd
+    prevFloor.current = row.floorPriceUsd
+    const newDisc = row.floorPriceUsd > 0 ? ((1 - row.sellPriceUsd / row.floorPriceUsd) * 100).toFixed(1) : ''
+    if (newDisc !== discInput) setDiscInput(newDisc)
+  }
+
+  function applyDiscount(val: string) {
+    const d = parseFloat(val)
+    if (!isNaN(d) && row.floorPriceUsd > 0) {
+      const newSell = Math.max(0, row.floorPriceUsd * (1 - d / 100))
+      setField('sellPriceUsd', newSell)
+      setDiscInput(d.toFixed(1))
+    } else {
+      setDiscInput(row.floorPriceUsd > 0 ? discPct.toFixed(1) : '')
+    }
+  }
 
   function setField<K extends keyof ConfigRow>(k: K, v: ConfigRow[K]) { onChange({ ...row, [k]: v }) }
 
@@ -989,6 +991,24 @@ function ConfigRowEditor({
             placeholder="—" className={`${iCls} text-center`} />}
         </div>
       )}
+      <div className={hiddenCols.has(9) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(9) && (
+          <div className="relative flex items-center">
+            <input
+              type="number" min="-999" max="100" step="0.1"
+              value={discInput}
+              onChange={e => setDiscInput(e.target.value)}
+              onBlur={e => applyDiscount(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyDiscount(discInput) }}
+              placeholder={row.floorPriceUsd > 0 ? '0.0' : '—'}
+              disabled={row.floorPriceUsd === 0}
+              title={row.floorPriceUsd === 0 ? 'Set a floor price to enable discount' : ''}
+              className={`${iCls} text-center pr-4 ${row.floorPriceUsd === 0 ? 'bg-slate-50 text-slate-300' : ''}`}
+            />
+            <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
+          </div>
+        )}
+      </div>
       <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
         {!hiddenCols.has(8) && <>
           <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
