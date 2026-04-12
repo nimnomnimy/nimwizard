@@ -231,7 +231,8 @@ export interface PriceHistoryEntry {
 
 // ─── Product Configurations ───────────────────────────────────────────────────
 
-export type ConfigRowUnit = 'one time' | 'months' | 'years' | 'per unit' | 'per site' | 'per user'
+export type ConfigRowUnit = 'months' | 'years' | 'per unit' | 'per site' | 'per user'
+export type ConfigGroupPricingType = 'one-time' | 'recurring'
 
 export interface ConfigRow {
   id: string
@@ -242,19 +243,24 @@ export interface ConfigRow {
   costPriceUsd: number
   floorPriceUsd: number
   sellPriceUsd: number
-  unit: ConfigRowUnit
+  unit?: ConfigRowUnit          // only used when group pricingType = 'recurring'
   termMonths?: number           // recurring: contract term in months
   notes?: string
 }
+
+// A child entry within a group — either a data row or a nested sub-group
+export type ConfigChild =
+  | { type: 'row';      row:   ConfigRow   }
+  | { type: 'subgroup'; group: ConfigGroup }
 
 export interface ConfigGroup {
   id: string
   label: string                 // e.g. "7371-1203-2000" or "R7 CASH"
   description?: string
   collapsed: boolean
-  unit?: ConfigRowUnit          // default unit for all rows in this group (rows can override)
-  rows: ConfigRow[]
-  subGroups: ConfigGroup[]      // recursive — subgroups within this group
+  pricingType: ConfigGroupPricingType   // 'one-time' or 'recurring'
+  defaultUnit?: ConfigRowUnit           // default unit for recurring rows
+  children: ConfigChild[]               // rows and sub-groups interleaved in display order
 }
 
 export interface ProductConfiguration {

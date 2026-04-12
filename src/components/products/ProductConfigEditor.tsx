@@ -2,36 +2,87 @@ import { useState, useCallback, useRef } from 'react'
 import { uid } from '../../lib/utils'
 import { useCurrency } from '../../store/useCurrency'
 import type {
-  ProductConfiguration, ConfigGroup, ConfigRow, ConfigRowUnit,
+  ProductConfiguration, ConfigGroup, ConfigRow, ConfigChild,
+  ConfigRowUnit, ConfigGroupPricingType,
 } from '../../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const UNITS: ConfigRowUnit[] = ['one time', 'months', 'years', 'per unit', 'per site', 'per user']
+const RECURRING_UNITS: ConfigRowUnit[] = ['months', 'years', 'per unit', 'per site', 'per user']
 
 function emptyRow(): ConfigRow {
-  return { id: uid(), description: '', quantity: 1, costPriceUsd: 0, floorPriceUsd: 0, sellPriceUsd: 0, unit: 'one time' }
+  return { id: uid(), description: '', quantity: 1, costPriceUsd: 0, floorPriceUsd: 0, sellPriceUsd: 0 }
 }
 
-function emptyGroup(label = ''): ConfigGroup {
-  return { id: uid(), label, description: '', collapsed: false, unit: 'one time', rows: [], subGroups: [] }
+function emptyGroup(label = '', pricingType: ConfigGroupPricingType = 'one-time'): ConfigGroup {
+  return { id: uid(), label, collapsed: false, pricingType, defaultUnit: 'months', children: [] }
 }
 
 function emptyConfig(): ProductConfiguration {
   const g = emptyGroup('Group 1')
-  g.rows = [emptyRow()]
+  g.children = [{ type: 'row', row: emptyRow() }]
   return { id: uid(), name: 'New Configuration', currency: 'USD', groups: [g], createdAt: Date.now(), updatedAt: Date.now() }
 }
 
-// ─── Totals ───────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function rowTotal(row: ConfigRow): number {
-  return row.sellPriceUsd * row.quantity * (row.termMonths ?? 1)
+function reorder<T>(arr: T[], from: number, to: number): T[] {
+  const next = [...arr]
+  const [item] = next.splice(from, 1)
+  next.splice(to, 0, item)
+  return next
+}
+
+function rowsOf(g: ConfigGroup): ConfigRow[] {
+  return g.children.filter((c): c is { type: 'row'; row: ConfigRow } => c.type === 'row').map(c => c.row)
+}
+
+function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
+  return g.children.filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
 }
 
 function groupTotal(g: ConfigGroup): number {
-  return g.rows.reduce((s, r) => s + rowTotal(r), 0)
-    + g.subGroups.reduce((s, sg) => s + groupTotal(sg), 0)
+  return g.children.reduce((s, c) => {
+    if (c.type === 'row') return s + c.row.sellPriceUsd * c.row.quantity * (c.row.termMonths ?? 1)
+    return s + groupTotal(c.group)
+  }, 0)
+}
+
+// Build a flat list of move destinations for a given config, excluding the current group/subgroup
+function buildDestinations(
+  cfg: ProductConfiguration,
+  excludeGroupId: string,
+): { id: string; label: string; indent: number }[] {
+  const result: { id: string; label: string; indent: number }[] = []
+  for (const g of cfg.groups) {
+    if (g.id !== excludeGroupId) result.push({ id: g.id, label: g.label || '(group)', indent: 0 })
+    for (const c of g.children) {
+      if (c.type === 'subgroup' && c.group.id !== excludeGroupId) {
+        result.push({ id: c.group.id, label: `${g.label ? g.label + ' › ' : ''}${c.group.label || '(sub-group)'}`, indent: 1 })
+      }
+    }
+  }
+  return result
+}
+
+// Find a group by id anywhere in the config tree; returns [group, parent|null]
+function findGroup(cfg: ProductConfiguration, id: string): { group: ConfigGroup; parentGroup: ConfigGroup | null } | null {
+  for (const g of cfg.groups) {
+    if (g.id === id) return { group: g, parentGroup: null }
+    for (const c of g.children) {
+      if (c.type === 'subgroup' && c.group.id === id) return { group: c.group, parentGroup: g }
+    }
+  }
+  return null
+}
+
+// Deep-update a group anywhere in the tree by id
+function updateGroupInConfig(cfg: ProductConfiguration, updated: ConfigGroup): ProductConfiguration {
+  function updateInGroup(g: ConfigGroup): ConfigGroup {
+    if (g.id === updated.id) return updated
+    return { ...g, children: g.children.map(c => c.type === 'subgroup' ? { type: 'subgroup', group: updateInGroup(c.group) } : c) }
+  }
+  return { ...cfg, groups: cfg.groups.map(g => updateInGroup(g)) }
 }
 
 // ─── Paste parser ─────────────────────────────────────────────────────────────
@@ -56,37 +107,33 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
   let curSub: ConfigGroup | null = null
   for (let li = 1; li < lines.length; li++) {
     const c = lines[li].split('\t').map(x => x.trim())
-    const desc = iDesc >= 0 ? c[iDesc] ?? '' : ''
-    const code = iPCode >= 0 ? c[iPCode] ?? '' : ''
-    const qty  = iQty >= 0 ? parseFloat(c[iQty] ?? '1') || 1 : 1
-    const cost = iCost >= 0 ? toUsd(c[iCost] ?? '0') : 0
+    const desc  = iDesc >= 0 ? c[iDesc] ?? '' : ''
+    const code  = iPCode >= 0 ? c[iPCode] ?? '' : ''
+    const qty   = iQty >= 0 ? parseFloat(c[iQty] ?? '1') || 1 : 1
+    const cost  = iCost >= 0 ? toUsd(c[iCost] ?? '0') : 0
     const floor = iFloor >= 0 ? toUsd(c[iFloor] ?? '0') : 0
-    const sell = iSell >= 0 ? toUsd(c[iSell] ?? '0') : 0
+    const sell  = iSell >= 0 ? toUsd(c[iSell] ?? '0') : 0
     const rawUnit = (iUnit >= 0 ? c[iUnit] ?? '' : '').toLowerCase()
-    const unit: ConfigRowUnit = UNITS.find(u => u === rawUnit) ?? 'one time'
-    const term = iTerm >= 0 ? parseInt(c[iTerm] ?? '1') || undefined : undefined
+    const unit: ConfigRowUnit | undefined = RECURRING_UNITS.find(u => u === rawUnit)
+    const term  = iTerm >= 0 ? parseInt(c[iTerm] ?? '1') || undefined : undefined
     const isHeader = code === '' && desc !== '' && cost === 0 && floor === 0 && sell === 0
     if (isHeader) {
-      if (!curTop) { curTop = { ...emptyGroup(desc), rows: [] }; curSub = null; groups.push(curTop) }
-      else { curSub = { ...emptyGroup(desc), rows: [] }; curTop.subGroups.push(curSub) }
+      // Detect recurring by unit column presence
+      const pt: ConfigGroupPricingType = unit ? 'recurring' : 'one-time'
+      if (!curTop) {
+        curTop = emptyGroup(desc, pt); curTop.children = []; curSub = null; groups.push(curTop)
+      } else {
+        curSub = emptyGroup(desc, pt); curSub.children = []; curTop.children.push({ type: 'subgroup', group: curSub })
+      }
       continue
     }
     if (!desc && !code) continue
     const row: ConfigRow = { id: uid(), productCode: code || undefined, description: desc, quantity: qty, costPriceUsd: cost, floorPriceUsd: floor, sellPriceUsd: sell, unit, termMonths: term }
     const target = curSub ?? curTop
-    if (target) target.rows.push(row)
-    else { curTop = { ...emptyGroup('Group 1'), rows: [row] }; groups.push(curTop) }
+    if (target) target.children.push({ type: 'row', row })
+    else { curTop = emptyGroup('Group 1'); curTop.children = [{ type: 'row', row }]; groups.push(curTop) }
   }
   return groups.length > 0 ? { groups } : null
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function reorder<T>(arr: T[], from: number, to: number): T[] {
-  const next = [...arr]
-  const [item] = next.splice(from, 1)
-  next.splice(to, 0, item)
-  return next
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -122,20 +169,29 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
   const deleteConfig = (id: string) => { const next = configs.filter(c => c.id !== id); onChange(next); if (activeConfigId === id) setActiveConfigId(next[0]?.id ?? null) }
 
   function addTopGroup(cfg: ProductConfiguration) {
-    const g = emptyGroup(`Group ${cfg.groups.length + 1}`)
-    updateConfig({ ...cfg, groups: [...cfg.groups, g] })
+    updateConfig({ ...cfg, groups: [...cfg.groups, emptyGroup(`Group ${cfg.groups.length + 1}`)] })
   }
 
-  function updateTopGroup(cfg: ProductConfiguration, updated: ConfigGroup) {
-    updateConfig({ ...cfg, groups: cfg.groups.map(g => g.id === updated.id ? updated : g) })
+  function reorderTopGroups(cfg: ProductConfiguration, from: number, to: number) {
+    updateConfig({ ...cfg, groups: reorder(cfg.groups, from, to) })
   }
 
   function deleteTopGroup(cfg: ProductConfiguration, groupId: string) {
     updateConfig({ ...cfg, groups: cfg.groups.filter(g => g.id !== groupId) })
   }
 
-  function reorderTopGroups(cfg: ProductConfiguration, from: number, to: number) {
-    updateConfig({ ...cfg, groups: reorder(cfg.groups, from, to) })
+  // Move selected row IDs from sourceGroupId to destGroupId (append at end)
+  function moveRowsToGroup(cfg: ProductConfiguration, rowIds: Set<string>, sourceGroupId: string, destGroupId: string) {
+    const found = findGroup(cfg, sourceGroupId)
+    if (!found) return
+    const destFound = findGroup(cfg, destGroupId)
+    if (!destFound) return
+    const rowsToMove = found.group.children.filter(c => c.type === 'row' && rowIds.has(c.row.id))
+    const updatedSource: ConfigGroup = { ...found.group, children: found.group.children.filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
+    const updatedDest: ConfigGroup = { ...destFound.group, children: [...destFound.group.children, ...rowsToMove] }
+    let next = updateGroupInConfig(cfg, updatedSource)
+    next = updateGroupInConfig(next, updatedDest)
+    updateConfig(next)
   }
 
   function applyPaste(cfg: ProductConfiguration) {
@@ -215,9 +271,9 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
           {pasteOpen && (
             <div className="px-4 py-3 border-b border-amber-100 bg-amber-50 flex flex-col gap-2">
               <p className="text-xs text-amber-700 font-semibold">
-                Paste your Excel table below. First row must be headers including at least <em>Description</em>.
+                Paste your Excel table. First row must be headers with at least <em>Description</em>.
                 Optional: ProductID, Quantity, Cost Price, Floor Price, Sell Price, Unit, Term.
-                Rows with no ProductID and no prices are treated as group/sub-group headers.
+                Rows with no ProductID and no prices become group/sub-group headers.
               </p>
               <textarea ref={pasteAreaRef} value={pasteText} onChange={e => { setPasteText(e.target.value); setPasteError('') }}
                 rows={5} placeholder="Paste Excel content here (Ctrl+V)…"
@@ -242,9 +298,10 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
                   groupIndex={gi}
                   totalGroups={activeConfig.groups.length}
                   cfg={activeConfig}
-                  onUpdate={g => updateTopGroup(activeConfig, g)}
+                  onUpdate={g => updateConfig(updateGroupInConfig(activeConfig, g))}
                   onDelete={() => deleteTopGroup(activeConfig, group.id)}
                   onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
+                  onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                 />
               ))}
@@ -261,72 +318,80 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
 // ─── Top-level group ──────────────────────────────────────────────────────────
 
 function TopGroupBlock({
-  group, groupIndex, totalGroups, cfg, onUpdate, onDelete, onMoveGroup,
+  group, groupIndex, totalGroups, cfg, onUpdate, onDelete, onMoveGroup, onMoveRows,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
   group: ConfigGroup; groupIndex: number; totalGroups: number; cfg: ProductConfiguration
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
   onMoveGroup: (from: number, to: number) => void
+  onMoveRows: (rowIds: Set<string>, destGroupId: string) => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(group.label)
-  // checkboxes: rowId -> selected
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  // drag-over row index for row reordering
-  const dragRowIdx = useRef<number | null>(null)
+  const dragChildIdx = useRef<number | null>(null)
 
-  const total = groupTotal(group)
+  const isRecurring = group.pricingType === 'recurring'
+  const total    = groupTotal(group)
   const dispTotal = cfg.currency === 'AUD' ? total * usdToAudRate : total
-  const dispFmt = cfg.currency === 'AUD' ? fmtAud : fmt
-  const secFmt  = cfg.currency === 'AUD' ? fmt : fmtAud
+  const dispFmt  = cfg.currency === 'AUD' ? fmtAud : fmt
+  const secFmt   = cfg.currency === 'AUD' ? fmt : fmtAud
 
   const headerColors = ['bg-violet-50 border-b border-violet-100','bg-fuchsia-50 border-b border-fuchsia-100','bg-indigo-50 border-b border-indigo-100','bg-cyan-50 border-b border-cyan-100']
   const headerBg = headerColors[groupIndex % headerColors.length]
 
   function commitLabel() { onUpdate({ ...group, label: labelVal.trim() || group.label }); setEditLabel(false) }
-  function addRow() { onUpdate({ ...group, rows: [...group.rows, emptyRow()] }) }
-  function addSubGroup() {
-    const sg = { ...emptyGroup(`Sub-group ${group.subGroups.length + 1}`), rows: [emptyRow()] }
-    onUpdate({ ...group, subGroups: [...group.subGroups, sg] })
-  }
-  function updateRow(rowId: string, updated: ConfigRow) { onUpdate({ ...group, rows: group.rows.map(r => r.id === rowId ? updated : r) }) }
-  function deleteRow(rowId: string) { onUpdate({ ...group, rows: group.rows.filter(r => r.id !== rowId) }) }
-  function reorderRows(from: number, to: number) { onUpdate({ ...group, rows: reorder(group.rows, from, to) }) }
-  function updateSubGroup(sg: ConfigGroup) { onUpdate({ ...group, subGroups: group.subGroups.map(s => s.id === sg.id ? sg : s) }) }
-  function deleteSubGroup(sgId: string) { onUpdate({ ...group, subGroups: group.subGroups.filter(s => s.id !== sgId) }) }
 
-  // Promote selected rows into a new subgroup
+  function addRow() { onUpdate({ ...group, children: [...group.children, { type: 'row', row: emptyRow() }] }) }
+
+  function addSubGroup() {
+    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
+    sg.children = [{ type: 'row', row: emptyRow() }]
+    onUpdate({ ...group, children: [...group.children, { type: 'subgroup', group: sg }] })
+  }
+
+  function updateChild(idx: number, child: ConfigChild) {
+    const next = [...group.children]; next[idx] = child
+    onUpdate({ ...group, children: next })
+  }
+
+  function deleteChild(idx: number) {
+    onUpdate({ ...group, children: group.children.filter((_, i) => i !== idx) })
+  }
+
+  function reorderChildren(from: number, to: number) {
+    onUpdate({ ...group, children: reorder(group.children, from, to) })
+  }
+
+  // Promote selected rows into a new sub-group at the position of the first selected row
   function promoteToSubGroup() {
     if (selected.size === 0) return
-    const rowsToMove = group.rows.filter(r => selected.has(r.id))
-    const remaining  = group.rows.filter(r => !selected.has(r.id))
-    const sg = { ...emptyGroup(`Sub-group ${group.subGroups.length + 1}`), rows: rowsToMove }
-    onUpdate({ ...group, rows: remaining, subGroups: [...group.subGroups, sg] })
+    const firstIdx = group.children.findIndex(c => c.type === 'row' && selected.has(c.row.id))
+    if (firstIdx < 0) return
+    const rowsToMove = group.children.filter(c => c.type === 'row' && selected.has(c.row.id))
+    const remaining  = group.children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
+    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
+    sg.children = rowsToMove
+    // Insert the sub-group at firstIdx within the remaining list
+    const insertAt = Math.min(firstIdx, remaining.length)
+    const next = [...remaining.slice(0, insertAt), { type: 'subgroup' as const, group: sg }, ...remaining.slice(insertAt)]
+    onUpdate({ ...group, children: next })
     setSelected(new Set())
   }
 
-  // Row drag for reordering
-  function handleRowDragStart(idx: number) { dragRowIdx.current = idx }
-  function handleRowDrop(toIdx: number) {
-    if (dragRowIdx.current !== null && dragRowIdx.current !== toIdx) {
-      reorderRows(dragRowIdx.current, toIdx)
-    }
-    dragRowIdx.current = null
-  }
-
+  const rows = rowsOf(group)
+  const allRowsSelected = rows.length > 0 && rows.every(r => selected.has(r.id))
+  const toggleAll = () => { if (allRowsSelected) setSelected(new Set()); else setSelected(new Set(rows.map(r => r.id))) }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const allSelected = group.rows.length > 0 && group.rows.every(r => selected.has(r.id))
-  const toggleAll = () => { if (allSelected) setSelected(new Set()); else setSelected(new Set(group.rows.map(r => r.id))) }
 
-  const effectiveUnit = group.unit ?? 'one time'
+  const destinations = buildDestinations(cfg, group.id)
 
   return (
     <div>
-      {/* Group header */}
+      {/* Header */}
       <div className={`flex items-center gap-1.5 px-3 py-2 ${headerBg}`}>
-        <button onClick={() => onUpdate({ ...group, collapsed: !group.collapsed })}
-          className="text-slate-400 hover:text-slate-600 flex-shrink-0">
+        <button onClick={() => onUpdate({ ...group, collapsed: !group.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`transition-transform ${group.collapsed ? '-rotate-90' : ''}`}>
             <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
@@ -343,14 +408,25 @@ function TopGroupBlock({
           </button>
         )}
 
-        {/* Group-level unit selector */}
-        {!group.collapsed && (
-          <select value={effectiveUnit} onChange={e => onUpdate({ ...group, unit: e.target.value as ConfigRowUnit })}
-            title="Default unit for all rows in this group"
-            className="text-[11px] border border-slate-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-violet-400 flex-shrink-0">
-            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
-        )}
+        {/* One-time / Recurring toggle */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {(['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
+            <button key={pt} onClick={() => onUpdate({ ...group, pricingType: pt })}
+              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors capitalize ${
+                group.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-200'
+              }`}>
+              {pt === 'one-time' ? '1×' : '↻'}
+            </button>
+          ))}
+          {/* Default unit for recurring */}
+          {isRecurring && (
+            <select value={group.defaultUnit ?? 'months'}
+              onChange={e => onUpdate({ ...group, defaultUnit: e.target.value as ConfigRowUnit })}
+              className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ml-1">
+              {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          )}
+        </div>
 
         <span className="text-xs font-bold text-slate-500 flex-shrink-0">
           {dispFmt(dispTotal)}
@@ -358,26 +434,34 @@ function TopGroupBlock({
         </span>
 
         {!group.collapsed && (
-          <div className="flex gap-1 flex-shrink-0">
+          <div className="flex gap-1 flex-shrink-0 items-center">
             {selected.size > 0 && (
-              <button onClick={promoteToSubGroup} title="Move selected rows into a new sub-group"
-                className="text-[11px] text-violet-700 bg-violet-100 hover:bg-violet-200 px-1.5 py-0.5 rounded font-semibold transition-colors">
-                → Sub ({selected.size})
-              </button>
+              <>
+                <button onClick={promoteToSubGroup} title="Make selected rows a sub-group (keeps position)"
+                  className="text-[11px] text-violet-700 bg-violet-100 hover:bg-violet-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
+                  → Sub ({selected.size})
+                </button>
+                {destinations.length > 0 && (
+                  <select defaultValue="" onChange={e => { if (e.target.value) { onMoveRows(selected, e.target.value); setSelected(new Set()) } }}
+                    className="text-[11px] border border-slate-300 rounded px-1 py-0.5 bg-white focus:outline-none max-w-[110px]">
+                    <option value="">Move to…</option>
+                    {destinations.map(d => (
+                      <option key={d.id} value={d.id}>{d.indent ? '  › ' : ''}{d.label}</option>
+                    ))}
+                  </select>
+                )}
+              </>
             )}
             <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
             <button onClick={addSubGroup} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Sub</button>
           </div>
         )}
 
-        {/* Move group up/down */}
         <div className="flex flex-col gap-0 flex-shrink-0">
-          <button onClick={() => onMoveGroup(groupIndex, groupIndex - 1)} disabled={groupIndex === 0}
-            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
+          <button onClick={() => onMoveGroup(groupIndex, groupIndex - 1)} disabled={groupIndex === 0} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
             <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 7l3-4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
-          <button onClick={() => onMoveGroup(groupIndex, groupIndex + 1)} disabled={groupIndex === totalGroups - 1}
-            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
+          <button onClick={() => onMoveGroup(groupIndex, groupIndex + 1)} disabled={groupIndex === totalGroups - 1} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
             <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
           </button>
         </div>
@@ -387,39 +471,42 @@ function TopGroupBlock({
         </button>
       </div>
 
-      {!group.collapsed && (
+      {!group.collapsed && group.children.length > 0 && (
         <div>
-          {/* Rows */}
-          {group.rows.length > 0 && (
-            <div>
-              <ConfigTableHeader groupUnit={effectiveUnit} showSelect onSelectAll={toggleAll} allSelected={allSelected} />
-              {group.rows.map((row, ri) => (
+          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} />
+          {group.children.map((child, ci) => {
+            if (child.type === 'row') {
+              return (
                 <ConfigRowEditor
-                  key={row.id} row={row} cfg={cfg} groupUnit={effectiveUnit}
-                  onChange={r => updateRow(row.id, r)} onDelete={() => deleteRow(row.id)}
-                  selected={selected.has(row.id)} onToggleSelect={() => toggleSelect(row.id)}
-                  rowIndex={ri} totalRows={group.rows.length}
-                  onDragStart={() => handleRowDragStart(ri)}
-                  onDrop={() => handleRowDrop(ri)}
-                  onMoveRow={(from, to) => reorderRows(from, to)}
+                  key={child.row.id} row={child.row} cfg={cfg} isRecurring={isRecurring}
+                  groupDefaultUnit={group.defaultUnit ?? 'months'}
+                  onChange={r => updateChild(ci, { type: 'row', row: r })}
+                  onDelete={() => deleteChild(ci)}
+                  selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
+                  onDragStart={() => { dragChildIdx.current = ci }}
+                  onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                 />
-              ))}
-            </div>
-          )}
-
-          {/* Sub-groups */}
-          {group.subGroups.map((sg, sgi) => (
-            <SubGroupBlock
-              key={sg.id} subGroup={sg} subGroupIndex={sgi}
-              totalSubGroups={group.subGroups.length}
-              cfg={cfg}
-              onUpdate={updateSubGroup}
-              onDelete={() => deleteSubGroup(sg.id)}
-              onMoveSubGroup={(from, to) => onUpdate({ ...group, subGroups: reorder(group.subGroups, from, to) })}
-              fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-            />
-          ))}
+              )
+            }
+            // subgroup child
+            return (
+              <SubGroupBlock
+                key={child.group.id}
+                subGroup={child.group}
+                childIndex={ci}
+                totalChildren={group.children.length}
+                cfg={cfg}
+                parentIsRecurring={isRecurring}
+                parentDefaultUnit={group.defaultUnit ?? 'months'}
+                onUpdate={sg => updateChild(ci, { type: 'subgroup', group: sg })}
+                onDelete={() => deleteChild(ci)}
+                onDragStart={() => { dragChildIdx.current = ci }}
+                onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
+                fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+              />
+            )
+          })}
         </div>
       )}
     </div>
@@ -429,42 +516,64 @@ function TopGroupBlock({
 // ─── Sub-group ────────────────────────────────────────────────────────────────
 
 function SubGroupBlock({
-  subGroup, subGroupIndex, totalSubGroups, cfg, onUpdate, onDelete, onMoveSubGroup,
+  subGroup, childIndex, totalChildren: _totalChildren, cfg, parentIsRecurring: _parentIsRecurring, parentDefaultUnit,
+  onUpdate, onDelete, onDragStart, onDrop,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
-  subGroup: ConfigGroup; subGroupIndex: number; totalSubGroups: number; cfg: ProductConfiguration
+  subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
+  parentIsRecurring: boolean; parentDefaultUnit: ConfigRowUnit
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
-  onMoveSubGroup: (from: number, to: number) => void
+  onDragStart: () => void; onDrop: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(subGroup.label)
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const dragRowIdx = useRef<number | null>(null)
+  const [dragOver, setDragOver] = useState(false)
+  const dragChildIdx = useRef<number | null>(null)
 
+  // Sub-group inherits pricing type from parent (user can override)
+  const isRecurring = subGroup.pricingType === 'recurring'
   const total = groupTotal(subGroup)
   const dispTotal = cfg.currency === 'AUD' ? total * usdToAudRate : total
   const dispFmt = cfg.currency === 'AUD' ? fmtAud : fmt
   const secFmt  = cfg.currency === 'AUD' ? fmt : fmtAud
-  const subBg = subGroupIndex % 2 === 0 ? 'bg-amber-50' : 'bg-yellow-50'
-  const effectiveUnit = subGroup.unit ?? 'one time'
+  const subBg = childIndex % 2 === 0 ? 'bg-amber-50' : 'bg-yellow-50'
+  const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
   function commitLabel() { onUpdate({ ...subGroup, label: labelVal.trim() || subGroup.label }); setEditLabel(false) }
-  function addRow() { onUpdate({ ...subGroup, rows: [...subGroup.rows, emptyRow()] }) }
-  function updateRow(rowId: string, r: ConfigRow) { onUpdate({ ...subGroup, rows: subGroup.rows.map(x => x.id === rowId ? r : x) }) }
-  function deleteRow(rowId: string) { onUpdate({ ...subGroup, rows: subGroup.rows.filter(r => r.id !== rowId) }) }
-  function reorderRows(from: number, to: number) { onUpdate({ ...subGroup, rows: reorder(subGroup.rows, from, to) }) }
+  function addRow() { onUpdate({ ...subGroup, children: [...subGroup.children, { type: 'row', row: emptyRow() }] }) }
 
-  function handleRowDragStart(idx: number) { dragRowIdx.current = idx }
-  function handleRowDrop(toIdx: number) { if (dragRowIdx.current !== null && dragRowIdx.current !== toIdx) reorderRows(dragRowIdx.current, toIdx); dragRowIdx.current = null }
+  function updateChild(idx: number, child: ConfigChild) {
+    const next = [...subGroup.children]; next[idx] = child
+    onUpdate({ ...subGroup, children: next })
+  }
 
+  function deleteChild(idx: number) {
+    onUpdate({ ...subGroup, children: subGroup.children.filter((_, i) => i !== idx) })
+  }
+
+  function reorderChildren(from: number, to: number) {
+    onUpdate({ ...subGroup, children: reorder(subGroup.children, from, to) })
+  }
+
+  const rows = rowsOf(subGroup)
+  const allRowsSelected = rows.length > 0 && rows.every(r => selected.has(r.id))
+  const toggleAll = () => { if (allRowsSelected) setSelected(new Set()); else setSelected(new Set(rows.map(r => r.id))) }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-  const allSelected = subGroup.rows.length > 0 && subGroup.rows.every(r => selected.has(r.id))
-  const toggleAll = () => { if (allSelected) setSelected(new Set()); else setSelected(new Set(subGroup.rows.map(r => r.id))) }
 
   return (
-    <div>
-      <div className={`flex items-center gap-1.5 px-3 py-1.5 pl-6 ${subBg} border-t border-slate-100`}>
+    <div
+      draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart() }}
+      onDragOver={e => { e.preventDefault(); setDragOver(true) }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
+      className={dragOver ? 'border-t-2 border-blue-400' : ''}
+    >
+      <div className={`flex items-center gap-1.5 px-3 py-1.5 pl-5 ${subBg} border-t border-slate-100`}>
+        {/* Drag handle for sub-group */}
+        <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-xs flex-shrink-0" title="Drag to reorder">⠿</span>
+
         <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className={`transition-transform ${subGroup.collapsed ? '-rotate-90' : ''}`}>
             <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
@@ -482,13 +591,24 @@ function SubGroupBlock({
           </button>
         )}
 
-        {/* Sub-group unit */}
-        {!subGroup.collapsed && (
-          <select value={effectiveUnit} onChange={e => onUpdate({ ...subGroup, unit: e.target.value as ConfigRowUnit })}
-            className="text-[11px] border border-slate-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-amber-400 flex-shrink-0">
-            {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
-        )}
+        {/* Pricing type toggle for sub-group */}
+        <div className="flex items-center gap-0.5 flex-shrink-0">
+          {(['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
+            <button key={pt} onClick={() => onUpdate({ ...subGroup, pricingType: pt })}
+              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                subGroup.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white text-slate-300 hover:text-slate-600 border border-slate-200'
+              }`}>
+              {pt === 'one-time' ? '1×' : '↻'}
+            </button>
+          ))}
+          {isRecurring && (
+            <select value={effectiveDefaultUnit}
+              onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
+              className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ml-1">
+              {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+            </select>
+          )}
+        </div>
 
         <span className="text-xs font-semibold text-slate-500 flex-shrink-0">
           {dispFmt(dispTotal)}
@@ -499,44 +619,29 @@ function SubGroupBlock({
           <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
         )}
 
-        {/* Move sub-group */}
-        <div className="flex flex-col gap-0 flex-shrink-0">
-          <button onClick={() => onMoveSubGroup(subGroupIndex, subGroupIndex - 1)} disabled={subGroupIndex === 0}
-            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 7l3-4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <button onClick={() => onMoveSubGroup(subGroupIndex, subGroupIndex + 1)} disabled={subGroupIndex === totalSubGroups - 1}
-            className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-        </div>
-
         <button onClick={onDelete} className="text-slate-300 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
       </div>
 
-      {!subGroup.collapsed && (
+      {!subGroup.collapsed && subGroup.children.length > 0 && (
         <div className="pl-4">
-          {subGroup.rows.length === 0 && <p className="text-xs text-slate-400 px-4 py-2">No rows — click +Row above.</p>}
-          {subGroup.rows.length > 0 && (
-            <>
-              <ConfigTableHeader groupUnit={effectiveUnit} showSelect onSelectAll={toggleAll} allSelected={allSelected} indent={1} />
-              {subGroup.rows.map((row, ri) => (
-                <ConfigRowEditor
-                  key={row.id} row={row} cfg={cfg} groupUnit={effectiveUnit}
-                  onChange={r => updateRow(row.id, r)} onDelete={() => deleteRow(row.id)}
-                  selected={selected.has(row.id)} onToggleSelect={() => toggleSelect(row.id)}
-                  rowIndex={ri} totalRows={subGroup.rows.length}
-                  onDragStart={() => handleRowDragStart(ri)}
-                  onDrop={() => handleRowDrop(ri)}
-                  onMoveRow={(from, to) => reorderRows(from, to)}
-                  indent={1}
-                  fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                />
-              ))}
-            </>
-          )}
+          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} indent={1} />
+          {subGroup.children.map((child, ci) => {
+            if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
+            return (
+              <ConfigRowEditor
+                key={child.row.id} row={child.row} cfg={cfg} isRecurring={isRecurring}
+                groupDefaultUnit={effectiveDefaultUnit}
+                onChange={r => updateChild(ci, { type: 'row', row: r })}
+                onDelete={() => deleteChild(ci)}
+                selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
+                onDragStart={() => { dragChildIdx.current = ci }}
+                onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
+                fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+              />
+            )
+          })}
         </div>
       )}
     </div>
@@ -546,29 +651,30 @@ function SubGroupBlock({
 // ─── Table header ─────────────────────────────────────────────────────────────
 
 function ConfigTableHeader({
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  groupUnit: _groupUnit, indent = 0, showSelect = false, onSelectAll, allSelected,
+  isRecurring, indent = 0, showSelect = false, onSelectAll, allSelected,
 }: {
-  groupUnit: ConfigRowUnit; indent?: number; showSelect?: boolean
+  isRecurring: boolean; indent?: number; showSelect?: boolean
   onSelectAll?: () => void; allSelected?: boolean
 }) {
+  const cols = isRecurring
+    ? '20px 8px 90px 1fr 50px 78px 78px 78px 72px 52px 84px 28px'
+    : '20px 8px 90px 1fr 50px 78px 78px 78px 84px 28px'
   return (
-    <div className={`grid text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-12' : 'pl-3'}`}
-      style={{ gridTemplateColumns: '20px 6px 96px 1fr 52px 80px 80px 80px 52px 86px 28px' }}>
-      {/* checkbox */}
+    <div className={`grid text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-10' : 'pl-2'}`}
+      style={{ gridTemplateColumns: cols }}>
       <span className="flex items-center">
         {showSelect && <input type="checkbox" checked={!!allSelected} onChange={onSelectAll} className="w-3 h-3 cursor-pointer" />}
       </span>
-      {/* drag handle placeholder */}
       <span />
       <span>Code</span>
       <span>Description</span>
       <span className="text-center">Qty</span>
-      <span className="text-right pr-2">Cost</span>
-      <span className="text-right pr-2">Floor</span>
-      <span className="text-right pr-2">Sell</span>
-      <span className="text-center text-[9px]">Unit <span className="text-slate-300 normal-case">(override)</span></span>
-      <span className="text-right pr-2">Total</span>
+      <span className="text-right pr-1">Cost</span>
+      <span className="text-right pr-1">Floor</span>
+      <span className="text-right pr-1">Sell</span>
+      {isRecurring && <span className="text-center">Unit</span>}
+      {isRecurring && <span className="text-center">Term</span>}
+      <span className="text-right pr-1">Total</span>
       <span />
     </div>
   )
@@ -577,17 +683,14 @@ function ConfigTableHeader({
 // ─── Row editor ───────────────────────────────────────────────────────────────
 
 function ConfigRowEditor({
-  row, cfg, groupUnit, onChange, onDelete, selected, onToggleSelect,
-  rowIndex: _rowIndex, totalRows: _totalRows, onDragStart, onDrop, onMoveRow: _onMoveRow,
-  indent = 0, fmt, fmtAud, showSecondary, usdToAudRate,
+  row, cfg, isRecurring, groupDefaultUnit, onChange, onDelete, selected, onToggleSelect,
+  onDragStart, onDrop,
+  fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
-  row: ConfigRow; cfg: ProductConfiguration; groupUnit: ConfigRowUnit
+  row: ConfigRow; cfg: ProductConfiguration; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit
   onChange: (r: ConfigRow) => void; onDelete: () => void
   selected: boolean; onToggleSelect: () => void
-  rowIndex: number; totalRows: number
   onDragStart: () => void; onDrop: () => void
-  onMoveRow: (from: number, to: number) => void
-  indent?: number
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const [dragOver, setDragOver] = useState(false)
@@ -599,7 +702,7 @@ function ConfigRowEditor({
   const dispCost  = toDisplay(row.costPriceUsd)
   const dispFloor = toDisplay(row.floorPriceUsd)
   const dispSell  = toDisplay(row.sellPriceUsd)
-  const totalUsd  = rowTotal(row)
+  const totalUsd  = row.sellPriceUsd * row.quantity * (isRecurring ? (row.termMonths ?? 1) : 1)
   const dispTotal = toDisplay(totalUsd)
   const dispFmt   = inputIsAud ? fmtAud : fmt
   const secFmt    = inputIsAud ? fmt : fmtAud
@@ -609,77 +712,60 @@ function ConfigRowEditor({
 
   const iCls = "w-full border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
 
-  // The unit shown for this row: if it matches group default, show placeholder only
-  const rowUnit = row.unit ?? groupUnit
+  const cols = isRecurring
+    ? '20px 8px 90px 1fr 50px 78px 78px 78px 72px 52px 84px 28px'
+    : '20px 8px 90px 1fr 50px 78px 78px 78px 84px 28px'
 
   return (
     <div
-      draggable
-      onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart() }}
+      draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart() }}
       onDragOver={e => { e.preventDefault(); setDragOver(true) }}
       onDragLeave={() => setDragOver(false)}
       onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
-      className={`grid items-center gap-1 px-1 py-0.5 border-b border-slate-50 last:border-0 transition-colors
-        ${indent ? 'pl-8' : 'pl-1'}
+      className={`grid items-center gap-1 py-0.5 border-b border-slate-50 last:border-0 transition-colors
         ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'}
-        ${dragOver ? 'border-t-2 border-blue-400 bg-blue-50/50' : ''}
+        ${dragOver ? 'border-t-2 border-blue-400' : ''}
       `}
-      style={{ gridTemplateColumns: '20px 6px 96px 1fr 52px 80px 80px 80px 52px 86px 28px' }}
+      style={{ gridTemplateColumns: cols, paddingLeft: '8px' }}
     >
-      {/* Checkbox */}
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
-
-      {/* Drag handle */}
-      <span className="cursor-grab text-slate-300 hover:text-slate-500 text-center select-none" title="Drag to reorder">
-        ⠿
-      </span>
-
-      {/* Code */}
+      <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
       <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
         placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />
-
-      {/* Description */}
       <input value={row.description} onChange={e => setField('description', e.target.value)}
         placeholder="Description…" className={iCls} />
-
-      {/* Qty */}
       <input type="number" min="0" step="1" value={row.quantity || ''}
         onChange={e => setField('quantity', parseInt(e.target.value) || 0)}
         className={`${iCls} text-right`} />
-
-      {/* Cost */}
       <input type="number" min="0" step="0.01"
         value={dispCost === 0 ? '' : dispCost.toFixed(2)}
         onChange={e => setField('costPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
         placeholder="0.00" className={`${iCls} text-right`} />
-
-      {/* Floor */}
       <input type="number" min="0" step="0.01"
         value={dispFloor === 0 ? '' : dispFloor.toFixed(2)}
         onChange={e => setField('floorPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
         placeholder="0.00" className={`${iCls} text-right`} />
-
-      {/* Sell */}
       <input type="number" min="0" step="0.01"
         value={dispSell === 0 ? '' : dispSell.toFixed(2)}
         onChange={e => setField('sellPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
-        placeholder="0.00"
-        className={`${iCls} text-right ${belowFloor ? 'border-red-300 bg-red-50' : ''}`} />
-
-      {/* Unit override — shows group default as placeholder */}
-      <select value={rowUnit} onChange={e => setField('unit', e.target.value as ConfigRowUnit)}
-        title={`Group default: ${groupUnit}`}
-        className={`w-full border rounded px-0.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white ${rowUnit === groupUnit ? 'border-slate-100 text-slate-400' : 'border-blue-300 text-blue-700 font-semibold'}`}>
-        {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-      </select>
-
-      {/* Total */}
+        placeholder="0.00" className={`${iCls} text-right ${belowFloor ? 'border-red-300 bg-red-50' : ''}`} />
+      {isRecurring && (
+        <select value={row.unit ?? groupDefaultUnit}
+          onChange={e => setField('unit', e.target.value as ConfigRowUnit)}
+          className="w-full border border-slate-200 rounded px-0.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white">
+          {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+        </select>
+      )}
+      {isRecurring && (
+        <input type="number" min="0" step="1"
+          value={row.termMonths ?? ''}
+          onChange={e => setField('termMonths', parseInt(e.target.value) || undefined)}
+          placeholder="—" className={`${iCls} text-center`} />
+      )}
       <div className="text-right pr-1">
         <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
         {showSecondary && totalUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalUsd)}</p>}
       </div>
-
-      {/* Delete */}
       <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
         <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
           <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
