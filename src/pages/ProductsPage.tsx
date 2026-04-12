@@ -170,7 +170,8 @@ export default function ProductsPage() {
 
   function handleNewProduct() {
     const newId = uid()
-    const firstConfig: ProductConfiguration = { id: uid(), name: 'Configuration 1', groups: [], currency: 'USD', createdAt: Date.now(), updatedAt: Date.now() }
+    const firstGroup: ConfigGroup = { id: uid(), label: 'Group 1', collapsed: false, pricingType: 'one-time', defaultUnit: 'months', children: [] }
+    const firstConfig: ProductConfiguration = { id: uid(), name: 'New Product', groups: [firstGroup], currency: 'USD', createdAt: Date.now(), updatedAt: Date.now() }
     const product: DealProduct = {
       id: newId,
       name: 'New Product',
@@ -265,7 +266,9 @@ export default function ProductsPage() {
       fxOverride:     existing?.fxOverride,
       priceHistory:   newHistory,
       createdAt:      existing?.createdAt ?? Date.now(),
-      configurations: existing?.configurations,
+      configurations: existing?.configurations?.map((c, i) =>
+        i === 0 ? { ...c, name: form.name.trim() } : c
+      ),
     }
 
     if (existing) {
@@ -599,6 +602,7 @@ function ProductDetailPane({
                 <ProductConfigEditor
                   configs={configs}
                   onChange={onConfigsChange}
+                  hideConfigName
                 />
               </div>
             )}

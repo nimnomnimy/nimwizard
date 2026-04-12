@@ -16,7 +16,6 @@ interface Props {
 const MODES: { value: CurrencyMode; label: string }[] = [
   { value: 'USD',  label: 'USD' },
   { value: 'AUD',  label: 'AUD' },
-  { value: 'BOTH', label: 'Both' },
 ]
 
 export default function CurrencyBar({ className = '', onFxChange }: Props) {

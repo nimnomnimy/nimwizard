@@ -185,11 +185,12 @@ interface Props {
   onChange: (configs: ProductConfiguration[]) => void
   activeConfigId?: string | null
   onActiveConfigChange?: (id: string | null) => void
+  hideConfigName?: boolean   // hides the config name editor in the toolbar (product name acts as config name)
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange }: Props) {
+export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange, hideConfigName }: Props) {
   const [internalActiveId, setInternalActiveId] = useState<string | null>(configs[0]?.id ?? null)
   const activeConfigId = controlledActiveId !== undefined ? controlledActiveId : internalActiveId
   function setActiveConfigId(id: string | null) {
@@ -355,7 +356,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
         >
           {/* Toolbar */}
           <div className="px-3 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5 flex-wrap">
-            {editingConfigName === activeConfig.id ? (
+            {!hideConfigName && (editingConfigName === activeConfig.id ? (
               <input autoFocus value={nameInput} onChange={e => setNameInput(e.target.value)}
                 onBlur={() => { updateConfig({ ...activeConfig, name: nameInput.trim() || activeConfig.name }); setEditingConfigName(null) }}
                 onKeyDown={e => { if (e.key === 'Enter') { updateConfig({ ...activeConfig, name: nameInput.trim() || activeConfig.name }); setEditingConfigName(null) } if (e.key === 'Escape') setEditingConfigName(null) }}
@@ -365,10 +366,10 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                 className="text-sm font-bold text-slate-800 hover:text-blue-600 transition-colors mr-1">
                 {activeConfig.name} ✎
               </button>
-            )}
+            ))}
 
-            {/* Divider */}
-            <div className="w-px h-4 bg-slate-200 mx-0.5" />
+            {/* Divider — only shown when config name is visible */}
+            {!hideConfigName && <div className="w-px h-4 bg-slate-200 mx-0.5" />}
 
             {/* Colour picker — shown when a subgroup is selected */}
             {selectedSubGroupId && (() => {
@@ -1309,12 +1310,17 @@ function ConfigRowEditor({
   const [discInput, setDiscInput] = useState(() => discPct.toFixed(1))
   const [netInput, setNetInput] = useState(() => dispNet.toFixed(2))
 
-  // Keep inputs in sync when row changes externally
+  // Keep inputs in sync when row or currency changes externally
   const prevDisc = useRef(row.discountPct)
   const prevSell = useRef(row.sellPriceUsd)
-  if (prevDisc.current !== row.discountPct || prevSell.current !== row.sellPriceUsd) {
+  const prevInputIsAud = useRef(inputIsAud)
+  const prevRate = useRef(usdToAudRate)
+  if (prevDisc.current !== row.discountPct || prevSell.current !== row.sellPriceUsd
+      || prevInputIsAud.current !== inputIsAud || prevRate.current !== usdToAudRate) {
     prevDisc.current = row.discountPct
     prevSell.current = row.sellPriceUsd
+    prevInputIsAud.current = inputIsAud
+    prevRate.current = usdToAudRate
     setDiscInput((row.discountPct ?? 0).toFixed(1))
     setNetInput((toDisplay(row.sellPriceUsd) * (1 - (row.discountPct ?? 0) / 100)).toFixed(2))
   }
