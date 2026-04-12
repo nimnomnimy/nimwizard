@@ -252,6 +252,7 @@ export interface ConfigGroup {
   label: string                 // e.g. "7371-1203-2000" or "R7 CASH"
   description?: string
   collapsed: boolean
+  unit?: ConfigRowUnit          // default unit for all rows in this group (rows can override)
   rows: ConfigRow[]
   subGroups: ConfigGroup[]      // recursive — subgroups within this group
 }
