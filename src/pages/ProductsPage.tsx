@@ -8,7 +8,7 @@ import ProductConfigEditor from '../components/products/ProductConfigEditor'
 import { useResizable } from '../hooks/useResizable'
 import type {
   DealProduct, PriceHistoryEntry, ProductCategory, ProductConfiguration, ConfigGroup,
-  PricingTier, PricingType, RecurringPeriod,
+  PricingType, RecurringPeriod,
 } from '../types'
 
 const CATEGORY_COLORS: Record<ProductCategory, string> = {
@@ -53,7 +53,6 @@ type FormState = {
   defaultSellPrice: string
   fxOverride?: number
   fxEnabled: boolean
-  pricingTiers: PricingTier[]
   recurringPeriod: RecurringPeriod
   recurringTermMonths: number
   recurringPricePerPeriod: string
@@ -71,7 +70,6 @@ function emptyForm(): FormState {
     defaultSellPrice: '',
     fxOverride: undefined,
     fxEnabled: false,
-    pricingTiers: [],
     recurringPeriod: 'monthly',
     recurringTermMonths: 36,
     recurringPricePerPeriod: '',
@@ -91,7 +89,6 @@ function productToForm(p: DealProduct): FormState {
     defaultSellPrice: p.pricingType === 'one-time' && p.defaultSellPrice ? String(p.defaultSellPrice) : '',
     fxOverride: p.fxOverride,
     fxEnabled: p.fxOverride !== undefined,
-    pricingTiers: p.pricingTiers ? [...p.pricingTiers] : [],
     recurringPeriod: rc?.period ?? 'monthly',
     recurringTermMonths: rc?.termMonths ?? 36,
     recurringPricePerPeriod: rc?.pricePerPeriod ? String(rc.pricePerPeriod) : '',
@@ -219,7 +216,6 @@ export default function ProductsPage() {
         floorPricePerPeriod: parsePrice(form.recurringFloorPricePerPeriod),
       } : undefined,
       fxOverride:     form.fxEnabled && form.fxOverride ? Number(form.fxOverride) : undefined,
-      pricingTiers:   form.pricingTiers,
       priceHistory:   newHistory,
       createdAt:      existing?.createdAt ?? Date.now(),
       configurations: existing?.configurations,
@@ -242,19 +238,6 @@ export default function ProductsPage() {
     deleteProduct(existing.id)
     showToast(`${existing.name} deleted`)
     setActiveId(undefined)
-  }
-
-  function addTier() {
-    const tiers = form.pricingTiers
-    const lastMax = tiers.length > 0 ? (tiers[tiers.length - 1].maxQty ?? 50) : 0
-    set('pricingTiers', [...tiers, { minQty: lastMax + 1, maxQty: null, discountPercent: 5 }])
-  }
-  function updateTier(idx: number, patch: Partial<PricingTier>) {
-    const tiers = [...form.pricingTiers]; tiers[idx] = { ...tiers[idx], ...patch }
-    set('pricingTiers', tiers)
-  }
-  function removeTier(idx: number) {
-    set('pricingTiers', form.pricingTiers.filter((_, i) => i !== idx))
   }
 
   // ─── Render ─────────────────────────────────────────────────────────────────
@@ -387,9 +370,6 @@ export default function ProductsPage() {
                 showToast(`${ids.length} record${ids.length > 1 ? 's' : ''} deleted`)
               }}
               onConfigsChange={cfgs => existing && handleConfigsChange(existing.id, cfgs)}
-              addTier={addTier}
-              updateTier={updateTier}
-              removeTier={removeTier}
               nameRef={nameRef}
               fmt={fmt}
               fmtAud={fmtAud}
@@ -407,7 +387,6 @@ export default function ProductsPage() {
 function ProductDetailPane({
   form, dirty, isNew, existing, configs,
   set, onSave, onDelete, onDeleteHistoryIds, onConfigsChange,
-  addTier, updateTier, removeTier,
   nameRef, fmt, fmtAud, showSecondary,
 }: {
   productId: string | null
@@ -421,14 +400,13 @@ function ProductDetailPane({
   onDelete: () => void
   onDeleteHistoryIds: (ids: string[]) => void
   onConfigsChange: (cfgs: ProductConfiguration[]) => void
-  addTier: () => void
-  updateTier: (idx: number, patch: Partial<PricingTier>) => void
-  removeTier: (idx: number) => void
   nameRef: React.RefObject<HTMLInputElement | null>
   fmt: (n: number) => string
   fmtAud: (n: number) => string
   showSecondary: boolean
 }) {
+  const [tab, setTab] = useState<'details' | 'history'>('details')
+
   const hasConfigs = configs.length > 0 && configs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
 
   // Derived price tiles
@@ -442,309 +420,236 @@ function ProductDetailPane({
     ? form.recurringTermMonths
     : Math.ceil(form.recurringTermMonths / 12)
 
+  const historyCount = existing?.priceHistory?.length ?? 0
+
   return (
-    <form onSubmit={onSave} className="max-w-3xl mx-auto p-6 flex flex-col gap-6">
-      {/* ── Name + meta header ── */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center gap-2">
-          <select
-            value={form.category}
-            onChange={e => set('category', e.target.value as ProductCategory)}
-            className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer ${CATEGORY_COLORS[form.category]}`}
-            style={{ appearance: 'none' }}>
-            {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
-          <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-            {(['one-time', 'recurring'] as PricingType[]).map(t => (
-              <button key={t} type="button" onClick={() => set('pricingType', t)}
-                className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                {t === 'one-time' ? 'One-Time' : 'Recurring'}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <input
-          ref={nameRef}
-          type="text"
-          value={form.name}
-          onChange={e => set('name', e.target.value)}
-          placeholder="Product name…"
-          required
-          className="text-2xl font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 -ml-1 w-full placeholder:text-slate-300"
-        />
-      </div>
-
-      {/* ── Price tiles ── */}
-      {form.pricingType === 'one-time' && (
-        <div className="grid grid-cols-3 gap-3">
-          <PriceTileInput
-            label="Cost Price"
-            displayValue={fmt(cost)}
-            displaySecondary={showSecondary ? fmtAud(cost) : undefined}
-            inputValue={form.costPrice}
-            onChange={v => set('costPrice', v)}
-            locked={hasConfigs}
-          />
-          <PriceTileInput
-            label="Floor Sell"
-            displayValue={fmt(floor)}
-            displaySecondary={showSecondary ? fmtAud(floor) : undefined}
-            inputValue={form.floorSellPrice}
-            onChange={v => set('floorSellPrice', v)}
-            locked={hasConfigs}
-            highlight
-          />
-          <PriceTileInput
-            label="Default Sell"
-            displayValue={fmt(sell)}
-            displaySecondary={showSecondary ? fmtAud(sell) : undefined}
-            inputValue={form.defaultSellPrice}
-            onChange={v => set('defaultSellPrice', v)}
-            locked={hasConfigs}
-            highlight
-          />
-        </div>
-      )}
-
-      {form.pricingType === 'recurring' && (
-        <div className="flex flex-col gap-3">
-          {/* Term config */}
-          <div className="flex items-center gap-3 text-sm">
-            <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-              {(['monthly', 'annual'] as RecurringPeriod[]).map(p => (
-                <button key={p} type="button" onClick={() => set('recurringPeriod', p)}
-                  className={`text-xs px-2.5 py-1 rounded font-semibold capitalize transition-colors ${form.recurringPeriod === p ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                  {p}
-                </button>
-              ))}
-            </div>
-            <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <input type="number" min="1" step="1" value={form.recurringTermMonths || ''}
-                onChange={e => set('recurringTermMonths', parseInt(e.target.value) || 12)}
-                className="w-14 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
-              />
-              <span>months term</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <PriceTileInput
-              label={`Price / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
-              displayValue={fmt(recurringPrice)}
-              displaySecondary={showSecondary ? fmtAud(recurringPrice) : undefined}
-              inputValue={form.recurringPricePerPeriod}
-              onChange={v => set('recurringPricePerPeriod', v)}
-              locked={false}
-              highlight
-            />
-            <PriceTileInput
-              label={`Floor / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
-              displayValue={fmt(recurringFloor)}
-              displaySecondary={showSecondary ? fmtAud(recurringFloor) : undefined}
-              inputValue={form.recurringFloorPricePerPeriod}
-              onChange={v => set('recurringFloorPricePerPeriod', v)}
-              locked={false}
-            />
-          </div>
-          {recurringPrice > 0 && (
-            <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-center gap-6">
-              <div>
-                <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide">Total Contract Value</p>
-                <p className="text-base font-bold text-indigo-800">{fmt(recurringPrice * periods)}</p>
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide">Cost (full term)</p>
-                <PriceInlineInput value={form.recurringCostPrice} onChange={v => set('recurringCostPrice', v)} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Margin */}
-      {floor > 0 && cost > 0 && form.pricingType === 'one-time' && (
-        <div className="flex gap-6 px-1">
-          <div>
-            <p className="text-[11px] text-slate-400 font-semibold uppercase">Floor Margin</p>
-            <p className="text-lg font-bold text-slate-700">{(((floor - cost) / floor) * 100).toFixed(1)}%</p>
-          </div>
-          {sell > 0 && (
-            <div>
-              <p className="text-[11px] text-slate-400 font-semibold uppercase">Default Margin</p>
-              <p className="text-lg font-bold text-green-700">{(((sell - cost) / sell) * 100).toFixed(1)}%</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* FX override */}
-      <div className="flex flex-col gap-2">
-        <label className="flex items-center gap-3 cursor-pointer select-none">
-          <button type="button" role="switch" aria-checked={form.fxEnabled}
-            onClick={() => set('fxEnabled', !form.fxEnabled)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${form.fxEnabled ? 'bg-blue-500' : 'bg-slate-200'}`}>
-            <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.fxEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-          </button>
-          <span className="text-sm text-slate-600">Custom FX rate (USD → AUD)</span>
-        </label>
-        {form.fxEnabled && (
-          <input type="number" min="0" step="0.0001"
-            value={form.fxOverride ?? ''}
-            onChange={e => set('fxOverride', parseFloat(e.target.value) || undefined)}
-            placeholder="e.g. 1.58"
-            className="w-40 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-        )}
-      </div>
-
-      {/* Pricing tiers */}
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
-            {form.pricingType === 'recurring' ? 'Per-Period Tier Discounts' : 'Quantity-Based Tiers'}
-          </p>
-          <button type="button" onClick={addTier}
-            className="text-xs text-blue-500 hover:text-blue-700 font-semibold px-2 py-1 rounded-lg hover:bg-blue-50">
-            + Add Tier
-          </button>
-        </div>
-        {form.pricingTiers.length === 0 && (
-          <p className="text-xs text-slate-400 italic">No tiers — standard price applies.</p>
-        )}
-        {form.pricingTiers.map((tier, idx) => (
-          <div key={idx} className="flex items-center gap-2 bg-slate-50 rounded-xl p-2">
-            <div className="flex flex-col gap-0.5 flex-1">
-              <label className="text-[10px] text-slate-400 font-semibold">Min Qty</label>
-              <input type="number" min="1" value={tier.minQty}
-                onChange={e => updateTier(idx, { minQty: parseInt(e.target.value) || 1 })}
-                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
-            </div>
-            <div className="flex flex-col gap-0.5 flex-1">
-              <label className="text-[10px] text-slate-400 font-semibold">Max Qty</label>
-              <input type="number" min="1" value={tier.maxQty ?? ''}
-                onChange={e => updateTier(idx, { maxQty: e.target.value ? parseInt(e.target.value) : null })}
-                placeholder="∞"
-                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
-            </div>
-            <div className="flex flex-col gap-0.5 flex-1">
-              <label className="text-[10px] text-slate-400 font-semibold">Discount %</label>
-              <input type="number" min="0" max="100" step="0.5" value={tier.discountPercent}
-                onChange={e => updateTier(idx, { discountPercent: parseFloat(e.target.value) || 0 })}
-                className="w-full px-2 py-1.5 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white" />
-            </div>
-            <button type="button" onClick={() => removeTier(idx)}
-              className="text-red-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 mt-4 flex-shrink-0">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 1l10 10M11 1L1 11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+    <div className="max-w-3xl mx-auto flex flex-col h-full">
+      {/* ── Tabs (only for existing products) ── */}
+      {!isNew && (
+        <div className="flex border-b border-slate-200 px-6 pt-4 flex-shrink-0">
+          {(['details', 'history'] as const).map(t => (
+            <button key={t} type="button" onClick={() => setTab(t)}
+              className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
+              {t === 'details' ? 'Details' : `Price History${historyCount > 0 ? ` (${historyCount})` : ''}`}
             </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Price history */}
-      {!isNew && existing && (existing.priceHistory?.length ?? 0) > 0 && (
-        <PriceHistorySection
-          history={existing.priceHistory!}
-          onDeleteIds={onDeleteHistoryIds}
-        />
-
-      )}
-
-      {/* Save / delete bar */}
-      <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-        {!isNew && (
-          <button type="button" onClick={onDelete}
-            className="px-4 py-2 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
-            Delete
-          </button>
-        )}
-        <button
-          type="submit"
-          disabled={!dirty && !isNew}
-          className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          {isNew ? 'Create Product' : 'Save Changes'}
-        </button>
-      </div>
-
-      {/* ── Configurations ── */}
-      {!isNew && existing && (
-        <div className="border-t border-slate-100 pt-4">
-          <ProductConfigEditor
-            configs={configs}
-            onChange={onConfigsChange}
-          />
+          ))}
         </div>
       )}
 
-      {isNew && (
-        <p className="text-xs text-slate-400 text-center">Save the product first to add configurations.</p>
-      )}
-    </form>
+      <div className="flex-1 overflow-y-auto">
+        {/* ── History tab ── */}
+        {!isNew && tab === 'history' && (
+          <div className="p-6">
+            {historyCount === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-12">No price history yet.</p>
+            ) : (
+              <PriceHistorySection
+                history={existing!.priceHistory!}
+                onDeleteIds={onDeleteHistoryIds}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── Details tab (or new product form) ── */}
+        {(isNew || tab === 'details') && (
+          <form onSubmit={onSave} className="p-6 flex flex-col gap-6">
+            {/* Name + meta header */}
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <select
+                  value={form.category}
+                  onChange={e => set('category', e.target.value as ProductCategory)}
+                  className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer ${CATEGORY_COLORS[form.category]}`}
+                  style={{ appearance: 'none' }}>
+                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                  {(['one-time', 'recurring'] as PricingType[]).map(t => (
+                    <button key={t} type="button" onClick={() => set('pricingType', t)}
+                      className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                      {t === 'one-time' ? 'One-Time' : 'Recurring'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <input
+                ref={nameRef}
+                type="text"
+                value={form.name}
+                onChange={e => set('name', e.target.value)}
+                placeholder="Product name…"
+                required
+                className="text-2xl font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 -ml-1 w-full placeholder:text-slate-300"
+              />
+            </div>
+
+            {/* Price tiles — one-time */}
+            {form.pricingType === 'one-time' && (
+              <div className="grid grid-cols-3 gap-3">
+                <PriceTile label="Cost Price" value={form.costPrice} displayFmt={fmt(cost)}
+                  secondaryFmt={showSecondary ? fmtAud(cost) : undefined}
+                  onChange={v => set('costPrice', v)} locked={hasConfigs} />
+                <PriceTile label="Floor Sell" value={form.floorSellPrice} displayFmt={fmt(floor)}
+                  secondaryFmt={showSecondary ? fmtAud(floor) : undefined}
+                  onChange={v => set('floorSellPrice', v)} locked={hasConfigs} highlight />
+                <PriceTile label="Default Sell" value={form.defaultSellPrice} displayFmt={fmt(sell)}
+                  secondaryFmt={showSecondary ? fmtAud(sell) : undefined}
+                  onChange={v => set('defaultSellPrice', v)} locked={hasConfigs} highlight />
+              </div>
+            )}
+
+            {/* Price tiles — recurring */}
+            {form.pricingType === 'recurring' && (
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                    {(['monthly', 'annual'] as RecurringPeriod[]).map(p => (
+                      <button key={p} type="button" onClick={() => set('recurringPeriod', p)}
+                        className={`text-xs px-2.5 py-1 rounded font-semibold capitalize transition-colors ${form.recurringPeriod === p ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                        {p}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
+                    <input type="number" min="1" step="1" value={form.recurringTermMonths || ''}
+                      onChange={e => set('recurringTermMonths', parseInt(e.target.value) || 12)}
+                      className="w-14 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-center" />
+                    <span>months</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <PriceTile label={`Price / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
+                    value={form.recurringPricePerPeriod} displayFmt={fmt(recurringPrice)}
+                    secondaryFmt={showSecondary ? fmtAud(recurringPrice) : undefined}
+                    onChange={v => set('recurringPricePerPeriod', v)} locked={false} highlight />
+                  <PriceTile label={`Floor / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
+                    value={form.recurringFloorPricePerPeriod} displayFmt={fmt(recurringFloor)}
+                    secondaryFmt={showSecondary ? fmtAud(recurringFloor) : undefined}
+                    onChange={v => set('recurringFloorPricePerPeriod', v)} locked={false} />
+                </div>
+                {recurringPrice > 0 && (
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-center gap-6">
+                    <div>
+                      <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide">Total Contract Value</p>
+                      <p className="text-base font-bold text-indigo-800">{fmt(recurringPrice * periods)}</p>
+                    </div>
+                    <div>
+                      <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide">Cost (full term)</p>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-indigo-400 text-sm">$</span>
+                        <input type="text" inputMode="decimal" value={form.recurringCostPrice}
+                          onChange={e => set('recurringCostPrice', e.target.value)}
+                          placeholder="0"
+                          className="w-28 text-base font-bold text-indigo-800 bg-transparent focus:outline-none border-b border-indigo-200 focus:border-indigo-400" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Margin */}
+            {floor > 0 && cost > 0 && form.pricingType === 'one-time' && (
+              <div className="flex gap-6 px-1">
+                <div>
+                  <p className="text-[11px] text-slate-400 font-semibold uppercase">Floor Margin</p>
+                  <p className="text-lg font-bold text-slate-700">{(((floor - cost) / floor) * 100).toFixed(1)}%</p>
+                </div>
+                {sell > 0 && (
+                  <div>
+                    <p className="text-[11px] text-slate-400 font-semibold uppercase">Default Margin</p>
+                    <p className="text-lg font-bold text-green-700">{(((sell - cost) / sell) * 100).toFixed(1)}%</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* FX override */}
+            <div className="flex flex-col gap-2">
+              <label className="flex items-center gap-3 cursor-pointer select-none">
+                <button type="button" role="switch" aria-checked={form.fxEnabled}
+                  onClick={() => set('fxEnabled', !form.fxEnabled)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${form.fxEnabled ? 'bg-blue-500' : 'bg-slate-200'}`}>
+                  <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.fxEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+                </button>
+                <span className="text-sm text-slate-600">Custom FX rate (USD → AUD)</span>
+              </label>
+              {form.fxEnabled && (
+                <input type="number" min="0" step="0.0001"
+                  value={form.fxOverride ?? ''}
+                  onChange={e => set('fxOverride', parseFloat(e.target.value) || undefined)}
+                  placeholder="e.g. 1.58"
+                  className="w-40 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              )}
+            </div>
+
+            {/* Save / delete */}
+            <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
+              {!isNew && (
+                <button type="button" onClick={onDelete}
+                  className="px-4 py-2 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
+                  Delete
+                </button>
+              )}
+              <button type="submit" disabled={!dirty && !isNew}
+                className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                {isNew ? 'Create Product' : 'Save Changes'}
+              </button>
+            </div>
+
+            {/* Configurations */}
+            {!isNew && existing && (
+              <div className="border-t border-slate-100 pt-4">
+                <ProductConfigEditor configs={configs} onChange={onConfigsChange} />
+              </div>
+            )}
+            {isNew && (
+              <p className="text-xs text-slate-400 text-center">Save the product first to add configurations.</p>
+            )}
+          </form>
+        )}
+      </div>
+    </div>
   )
 }
 
-// ─── Price tile with inline edit input ────────────────────────────────────────
+// ─── Price tile ───────────────────────────────────────────────────────────────
 
-function PriceTileInput({
-  label, displayValue, displaySecondary, inputValue, onChange, locked, highlight,
+function PriceTile({
+  label, value, displayFmt, secondaryFmt, onChange, locked, highlight,
 }: {
   label: string
-  displayValue: string
-  displaySecondary?: string
-  inputValue: string
+  value: string
+  displayFmt: string
+  secondaryFmt?: string
   onChange: (v: string) => void
   locked: boolean
   highlight?: boolean
 }) {
-  const [editing, setEditing] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select()
-  }, [editing])
-
   return (
-    <div
-      className={`rounded-xl p-3 flex flex-col gap-0.5 cursor-pointer transition-colors ${highlight ? 'bg-white border border-slate-200 hover:border-blue-300' : 'bg-slate-50 hover:bg-slate-100'} ${locked ? 'cursor-default' : ''}`}
-      onClick={() => !locked && !editing && setEditing(true)}
-    >
+    <div className={`rounded-xl p-3 flex flex-col gap-0.5 transition-colors ${highlight ? 'bg-white border border-slate-200' : 'bg-slate-50'}`}>
       <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wide">{label}</p>
-      {locked || !editing ? (
+      {locked ? (
         <>
-          <p className="text-base font-bold text-slate-900">{displayValue}</p>
-          {displaySecondary && <p className="text-xs text-slate-400">{displaySecondary}</p>}
-          {locked && <p className="text-[10px] text-blue-400">from config</p>}
+          <p className="text-base font-bold text-slate-900">{displayFmt}</p>
+          {secondaryFmt && <p className="text-xs text-slate-400">{secondaryFmt}</p>}
+          <p className="text-[10px] text-blue-400">from config</p>
         </>
       ) : (
         <div className="flex items-center gap-1">
           <span className="text-slate-400 text-sm">$</span>
           <input
-            ref={inputRef}
             type="text"
             inputMode="decimal"
-            value={inputValue}
+            value={value}
             onChange={e => onChange(e.target.value)}
-            onBlur={() => setEditing(false)}
-            onKeyDown={e => { if (e.key === 'Enter' || e.key === 'Escape') setEditing(false) }}
-            className="flex-1 text-base font-bold text-slate-900 bg-transparent focus:outline-none w-full"
+            placeholder="0"
+            className="flex-1 text-base font-bold text-slate-900 bg-transparent focus:outline-none w-full min-w-0"
           />
         </div>
       )}
-    </div>
-  )
-}
-
-// Inline price input for inside other tiles
-function PriceInlineInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
-  return (
-    <div className="flex items-center gap-1 mt-0.5">
-      <span className="text-indigo-400 text-sm">$</span>
-      <input
-        type="text"
-        inputMode="decimal"
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        placeholder="0"
-        className="w-28 text-base font-bold text-indigo-800 bg-transparent focus:outline-none border-b border-indigo-200 focus:border-indigo-400"
-      />
+      {!locked && secondaryFmt && value && <p className="text-xs text-slate-400">{secondaryFmt}</p>}
     </div>
   )
 }
