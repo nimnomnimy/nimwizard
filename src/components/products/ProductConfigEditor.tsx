@@ -606,7 +606,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                     fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                     colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
                     selectedRowIds={selectedGroupId === group.id || selectedGroupId === null || subGroupsOf(group).some(sg => sg.id === selectedGroupId) ? selectedRowIds : new Set<string>()}
-                    onSelectionChange={(gId, ids) => { setSelectedGroupId(ids.size > 0 ? gId : null); setSelectedRowIds(ids) }}
+                    onSelectionChange={(gId, ids) => { setSelectedGroupId(gId); setSelectedRowIds(ids) }}
                     selectedSubGroupId={selectedSubGroupId}
                     onSubGroupSelectionChange={sgId => setSelectedSubGroupId(sgId)}
                   />
@@ -813,11 +813,8 @@ function TopGroupBlock({
               checked={allSelected}
               ref={el => { if (el) el.indeterminate = someSelected && !allSelected }}
               onChange={() => {
-                if (allSelected) {
-                  onSelectionChange(group.id, new Set())
-                } else {
-                  onSelectionChange(group.id, new Set(allRowIds))
-                }
+                // Always select this group so + Row targets it; toggle row selection
+                onSelectionChange(group.id, allSelected ? new Set() : new Set(allRowIds))
               }}
               className="w-3 h-3 cursor-pointer"
             />
@@ -953,7 +950,13 @@ function TopGroupBlock({
             colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
           />
           {(group.children ?? []).length === 0 && (
-            <div className="py-3 text-center text-slate-400 text-xs">No rows yet. Click <strong>+ Row</strong> to add one.</div>
+            <button
+              type="button"
+              onClick={() => { onSelectionChange(group.id, new Set()); onUpdate({ ...group, children: [{ type: 'row', row: emptyRow() }] }) }}
+              className="w-full py-3 text-center text-slate-400 text-xs hover:bg-slate-50 hover:text-blue-500 transition-colors cursor-pointer"
+            >
+              No rows yet — click to add one
+            </button>
           )}
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
