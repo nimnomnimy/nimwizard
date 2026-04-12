@@ -192,9 +192,27 @@ export default function ProductsPage() {
     setActiveId(newId)
   }
 
+  // Derive the set of categories a product belongs to from its config row categories
+  function productCategories(p: DealProduct): Set<ProductCategory> {
+    const cats = new Set<ProductCategory>()
+    for (const cfg of p.configurations ?? []) {
+      for (const g of cfg.groups ?? []) {
+        collectRowCategories(g, cats)
+      }
+    }
+    return cats
+  }
+
+  function collectRowCategories(g: ConfigGroup, cats: Set<ProductCategory>) {
+    for (const c of g.children ?? []) {
+      if (c.type === 'row' && c.row.category) cats.add(c.row.category)
+      else if (c.type === 'subgroup') collectRowCategories(c.group, cats)
+    }
+  }
+
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
-    const matchCat    = filterCat === 'all' || p.category === filterCat
+    const matchCat    = filterCat === 'all' || productCategories(p).has(filterCat)
     const matchType   = filterType === 'all' || p.pricingType === filterType
     return matchSearch && matchCat && matchType
   }).sort((a, b) => a.name.localeCompare(b.name))

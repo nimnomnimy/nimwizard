@@ -3,12 +3,24 @@ import { uid } from '../../lib/utils'
 import { useCurrency } from '../../store/useCurrency'
 import type {
   ProductConfiguration, ConfigGroup, ConfigRow, ConfigChild,
-  ConfigRowUnit, ConfigGroupPricingType,
+  ConfigRowUnit, ConfigGroupPricingType, ProductCategory,
 } from '../../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RECURRING_UNITS: ConfigRowUnit[] = ['months', 'years', 'per unit', 'per site', 'per user']
+
+const CATEGORIES: ProductCategory[] = [
+  'Software', 'Hardware', 'Professional Services', 'Technical Services', 'Maintenance',
+]
+
+const CATEGORY_COLORS: Record<ProductCategory, string> = {
+  'Software':              'bg-blue-100 text-blue-700',
+  'Hardware':              'bg-slate-100 text-slate-700',
+  'Professional Services': 'bg-purple-100 text-purple-700',
+  'Technical Services':    'bg-sky-100 text-sky-700',
+  'Maintenance':           'bg-green-100 text-green-700',
+}
 
 function emptyRow(): ConfigRow {
   return { id: uid(), description: '', quantity: 1, costPriceUsd: 0, floorPriceUsd: 0, sellPriceUsd: 0 }
@@ -1464,9 +1476,30 @@ function ConfigRowEditor({
     >
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
-      <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
-        {!hiddenCols.has(0) && <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
-          placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />}
+      <div className={`flex flex-col gap-0.5 ${hiddenCols.has(0) ? 'overflow-hidden' : ''}`}>
+        {!hiddenCols.has(0) && <>
+          <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
+            placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />
+          {row.category ? (
+            <button
+              type="button"
+              onClick={() => setField('category', undefined)}
+              title="Click to clear category"
+              className={`text-[9px] font-semibold px-1.5 py-0.5 rounded-full truncate text-left ${CATEGORY_COLORS[row.category]}`}
+            >
+              {row.category}
+            </button>
+          ) : (
+            <select
+              value=""
+              onChange={e => e.target.value && setField('category', e.target.value as ProductCategory)}
+              className="w-full border border-dashed border-slate-200 rounded px-1 py-0.5 text-[10px] text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white/80"
+            >
+              <option value="">+ category</option>
+              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          )}
+        </>}
       </div>
       <div className={hiddenCols.has(1) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(1) && <input value={row.description} onChange={e => setField('description', e.target.value)}

@@ -251,6 +251,7 @@ export interface ConfigRow {
   termMonths?: number           // recurring: contract term in months
   notes?: string
   locked?: boolean              // when true, sell price is fixed — group/subgroup net edits skip this row
+  category?: ProductCategory    // row-level category — product belongs to all categories present in its rows
 }
 
 // A child entry within a group — either a data row or a nested sub-group
