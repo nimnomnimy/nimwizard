@@ -143,10 +143,16 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84] as const
 type ColWidths = [number, number, number, number, number, number, number, number, number]
 
-function buildColTemplate(w: ColWidths, isRecurring: boolean): string {
+const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total'] as const
+
+function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
+  return hidden.has(idx) ? '0px' : `${w[idx]}px`
+}
+
+function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
   // Fixed: checkbox(20) drag(8) | resizable cols | fixed: delete(28)
-  const recurring = isRecurring ? `${w[6]}px ${w[7]}px ` : ''
-  return `20px 8px ${w[0]}px ${w[1]}px ${w[2]}px ${w[3]}px ${w[4]}px ${w[5]}px ${recurring}${w[8]}px 28px`
+  const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 8, hidden)} 28px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -175,10 +181,20 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
   const [pasteError, setPasteError] = useState('')
   const pasteAreaRef = useRef<HTMLTextAreaElement>(null)
 
-  // Column widths (resizable) and overall table width
+  // Column widths (resizable), hidden columns, and overall table width
   const [colWidths, setColWidths] = useState<ColWidths>([...DEFAULT_COL_WIDTHS] as ColWidths)
+  const [hiddenCols, setHiddenCols] = useState<Set<number>>(new Set())
+  const [showColMenu, setShowColMenu] = useState(false)
   const [tableWidth, setTableWidth] = useState<number | null>(null)
   const tableContainerRef = useRef<HTMLDivElement>(null)
+
+  function toggleCol(idx: number) {
+    setHiddenCols(prev => {
+      const next = new Set(prev)
+      next.has(idx) ? next.delete(idx) : next.add(idx)
+      return next
+    })
+  }
 
   function handleColResize(colIdx: number, delta: number) {
     setColWidths(prev => {
@@ -294,8 +310,26 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                 {activeConfig.name} ✎
               </button>
             )}
+            {/* Columns visibility dropdown */}
+            <div className="relative ml-auto">
+              <button onClick={() => setShowColMenu(v => !v)}
+                className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${showColMenu ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                Columns{hiddenCols.size > 0 ? ` (${hiddenCols.size} hidden)` : ''}
+              </button>
+              {showColMenu && (
+                <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 flex flex-col gap-0.5 min-w-[130px]"
+                  onMouseLeave={() => setShowColMenu(false)}>
+                  {COL_LABELS.map((label, idx) => (
+                    <label key={idx} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer text-xs text-slate-600 font-medium select-none">
+                      <input type="checkbox" checked={!hiddenCols.has(idx)} onChange={() => toggleCol(idx)} className="w-3 h-3 cursor-pointer" />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
             <button onClick={() => setPasteOpen(v => !v)}
-              className={`ml-auto text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+              className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
               Paste Excel
             </button>
             <button onClick={() => addTopGroup(activeConfig)}
@@ -345,7 +379,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                   onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
                   onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                  colWidths={colWidths} onColResize={handleColResize}
+                  colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
                 />
               ))}
             </div>
@@ -433,7 +467,7 @@ function TableWidthHandle({ onResize }: { onResize: (delta: number) => void }) {
 
 function TopGroupBlock({
   group, groupIndex, totalGroups, cfg, inputIsAud, onUpdate, onDelete, onMoveGroup, onMoveRows,
-  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize, hiddenCols,
 }: {
   group: ConfigGroup; groupIndex: number; totalGroups: number; cfg: ProductConfiguration
   inputIsAud: boolean
@@ -441,7 +475,7 @@ function TopGroupBlock({
   onMoveGroup: (from: number, to: number) => void
   onMoveRows: (rowIds: Set<string>, destGroupId: string) => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
-  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(group.label)
@@ -591,7 +625,7 @@ function TopGroupBlock({
 
       {!group.collapsed && (group.children ?? []).length > 0 && (
         <div>
-          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} colWidths={colWidths} onColResize={onColResize} />
+          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols} />
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
@@ -605,7 +639,7 @@ function TopGroupBlock({
                   onDragStart={() => { dragChildIdx.current = ci }}
                   onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                  colWidths={colWidths}
+                  colWidths={colWidths} hiddenCols={hiddenCols}
                 />
               )
             }
@@ -658,7 +692,7 @@ function TopGroupBlock({
                   dragChildIdx.current = null
                 }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                colWidths={colWidths} onColResize={onColResize}
+                colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
               />
             )
           })}
@@ -674,7 +708,7 @@ function SubGroupBlock({
   subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
   onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
-  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize, hiddenCols,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
   inputIsAud: boolean
@@ -683,7 +717,7 @@ function SubGroupBlock({
   onMoveRowsToParent: (rowChildren: ConfigChild[]) => void
   onDragStart: () => void; onDrop: () => void; onDropRowInto: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
-  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(subGroup.label)
@@ -804,7 +838,7 @@ function SubGroupBlock({
                 onDragStart={() => { dragChildIdx.current = ci }}
                 onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                colWidths={colWidths}
+                colWidths={colWidths} hiddenCols={hiddenCols}
               />
             )
           })}
@@ -817,13 +851,13 @@ function SubGroupBlock({
 // ─── Table header ─────────────────────────────────────────────────────────────
 
 function ConfigTableHeader({
-  isRecurring, showSelect = false, onSelectAll, allSelected, colWidths, onColResize,
+  isRecurring, showSelect = false, onSelectAll, allSelected, colWidths, onColResize, hiddenCols,
 }: {
   isRecurring: boolean; showSelect?: boolean
   onSelectAll?: () => void; allSelected?: boolean
-  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
 }) {
-  const cols = buildColTemplate(colWidths, isRecurring)
+  const cols = buildColTemplate(colWidths, isRecurring, hiddenCols)
   // Header labels with their colWidths index for resize
   const headers: { label: string; align: string; wIdx: number }[] = [
     { label: 'Code',  align: '',               wIdx: 0 },
@@ -846,10 +880,12 @@ function ConfigTableHeader({
       </span>
       <span />
       {headers.map(h => (
-        <span key={h.label} className={`relative ${h.align}`}>
-          {h.label}
-          <ColResizeHandle onResize={d => onColResize(h.wIdx, d)} />
-        </span>
+        hiddenCols.has(h.wIdx)
+          ? <span key={h.label} className="overflow-hidden" />
+          : <span key={h.label} className={`relative ${h.align}`}>
+              {h.label}
+              <ColResizeHandle onResize={d => onColResize(h.wIdx, d)} />
+            </span>
       ))}
       <span />
     </div>
@@ -861,14 +897,14 @@ function ConfigTableHeader({
 function ConfigRowEditor({
   row, isRecurring, groupDefaultUnit, inputIsAud, onChange, onDelete, selected, onToggleSelect,
   onDragStart, onDrop,
-  fmt, fmtAud, showSecondary, usdToAudRate, colWidths,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, hiddenCols,
 }: {
   row: ConfigRow; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit; inputIsAud: boolean
   onChange: (r: ConfigRow) => void; onDelete: () => void
   selected: boolean; onToggleSelect: () => void
   onDragStart: () => void; onDrop: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
-  colWidths: ColWidths
+  colWidths: ColWidths; hiddenCols: Set<number>
 }) {
   const [dragOver, setDragOver] = useState(false)
   const rate = usdToAudRate
@@ -889,7 +925,7 @@ function ConfigRowEditor({
 
   const iCls = "w-full border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
 
-  const cols = buildColTemplate(colWidths, isRecurring)
+  const cols = buildColTemplate(colWidths, isRecurring, hiddenCols)
 
   return (
     <div
@@ -905,41 +941,59 @@ function ConfigRowEditor({
     >
       <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
-      <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
-        placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />
-      <input value={row.description} onChange={e => setField('description', e.target.value)}
-        placeholder="Description…" className={iCls} />
-      <input type="number" min="0" step="1" value={row.quantity || ''}
-        onChange={e => setField('quantity', parseInt(e.target.value) || 0)}
-        className={`${iCls} text-right`} />
-      <input type="number" min="0" step="0.01"
-        value={dispCost === 0 ? '' : dispCost.toFixed(2)}
-        onChange={e => setField('costPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
-        placeholder="0.00" className={`${iCls} text-right`} />
-      <input type="number" min="0" step="0.01"
-        value={dispFloor === 0 ? '' : dispFloor.toFixed(2)}
-        onChange={e => setField('floorPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
-        placeholder="0.00" className={`${iCls} text-right`} />
-      <input type="number" min="0" step="0.01"
-        value={dispSell === 0 ? '' : dispSell.toFixed(2)}
-        onChange={e => setField('sellPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
-        placeholder="0.00" className={`${iCls} text-right ${belowFloor ? 'border-red-300 bg-red-50' : ''}`} />
+      <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(0) && <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
+          placeholder="Code…" className={`${iCls} font-mono text-[11px] text-slate-500`} />}
+      </div>
+      <div className={hiddenCols.has(1) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(1) && <input value={row.description} onChange={e => setField('description', e.target.value)}
+          placeholder="Description…" className={iCls} />}
+      </div>
+      <div className={hiddenCols.has(2) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(2) && <input type="number" min="0" step="1" value={row.quantity || ''}
+          onChange={e => setField('quantity', parseInt(e.target.value) || 0)}
+          className={`${iCls} text-right`} />}
+      </div>
+      <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(3) && <input type="number" min="0" step="0.01"
+          value={dispCost === 0 ? '' : dispCost.toFixed(2)}
+          onChange={e => setField('costPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          placeholder="0.00" className={`${iCls} text-right`} />}
+      </div>
+      <div className={hiddenCols.has(4) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(4) && <input type="number" min="0" step="0.01"
+          value={dispFloor === 0 ? '' : dispFloor.toFixed(2)}
+          onChange={e => setField('floorPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          placeholder="0.00" className={`${iCls} text-right`} />}
+      </div>
+      <div className={hiddenCols.has(5) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(5) && <input type="number" min="0" step="0.01"
+          value={dispSell === 0 ? '' : dispSell.toFixed(2)}
+          onChange={e => setField('sellPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          placeholder="0.00" className={`${iCls} text-right ${belowFloor ? 'border-red-300 bg-red-50' : ''}`} />}
+      </div>
       {isRecurring && (
-        <select value={row.unit ?? groupDefaultUnit}
-          onChange={e => setField('unit', e.target.value as ConfigRowUnit)}
-          className="w-full border border-slate-200 rounded px-0.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white">
-          {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-        </select>
+        <div className={hiddenCols.has(6) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(6) && <select value={row.unit ?? groupDefaultUnit}
+            onChange={e => setField('unit', e.target.value as ConfigRowUnit)}
+            className="w-full border border-slate-200 rounded px-0.5 py-1 text-[10px] focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white">
+            {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>}
+        </div>
       )}
       {isRecurring && (
-        <input type="number" min="0" step="1"
-          value={row.termMonths ?? ''}
-          onChange={e => setField('termMonths', parseInt(e.target.value) || undefined)}
-          placeholder="—" className={`${iCls} text-center`} />
+        <div className={hiddenCols.has(7) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(7) && <input type="number" min="0" step="1"
+            value={row.termMonths ?? ''}
+            onChange={e => setField('termMonths', parseInt(e.target.value) || undefined)}
+            placeholder="—" className={`${iCls} text-center`} />}
+        </div>
       )}
-      <div className="text-right pr-1">
-        <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
-        {showSecondary && totalUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalUsd)}</p>}
+      <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
+        {!hiddenCols.has(8) && <>
+          <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
+          {showSecondary && totalUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalUsd)}</p>}
+        </>}
       </div>
       <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
         <svg width="10" height="10" viewBox="0 0 14 14" fill="none">
