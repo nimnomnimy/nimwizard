@@ -33,9 +33,6 @@ function reorder<T>(arr: T[], from: number, to: number): T[] {
   return next
 }
 
-function rowsOf(g: ConfigGroup): ConfigRow[] {
-  return (g.children ?? []).filter((c): c is { type: 'row'; row: ConfigRow } => c.type === 'row').map(c => c.row)
-}
 
 function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
   return (g.children ?? []).filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
