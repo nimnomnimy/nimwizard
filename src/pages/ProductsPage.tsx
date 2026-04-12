@@ -33,8 +33,9 @@ function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): numb
   const isRecurring = g.pricingType === 'recurring'
   return g.children.reduce((s, c) => {
     if (c.type === 'row') {
-      const price = field === 'cost' ? c.row.costPriceUsd : field === 'floor' ? c.row.floorPriceUsd : c.row.sellPriceUsd
-      return s + (price ?? 0) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
+      const basePrice = field === 'cost' ? c.row.costPriceUsd : field === 'floor' ? c.row.floorPriceUsd : c.row.sellPriceUsd
+      const price = field === 'sell' ? (basePrice ?? 0) * (1 - (c.row.discountPct ?? 0) / 100) : (basePrice ?? 0)
+      return s + price * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     }
     if (c.type === 'subgroup') return s + groupFieldTotal(c.group, field)
     return s

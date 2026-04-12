@@ -41,10 +41,14 @@ function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
   return (g.children ?? []).filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
 }
 
+function rowNetUsd(row: ConfigRow): number {
+  return (row.sellPriceUsd ?? 0) * (1 - (row.discountPct ?? 0) / 100)
+}
+
 function groupTotal(g: ConfigGroup): number {
   const isRecurring = g.pricingType === 'recurring'
   return (g.children ?? []).reduce((s, c) => {
-    if (c.type === 'row') return s + (c.row.sellPriceUsd ?? 0) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
+    if (c.type === 'row') return s + rowNetUsd(c.row) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     return s + groupTotal(c.group)
   }, 0)
 }
@@ -139,11 +143,11 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 
 // ─── Column widths ────────────────────────────────────────────────────────────
 
-// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=discount
-const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 64] as const
-type ColWidths = [number, number, number, number, number, number, number, number, number, number]
+// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=disc%, 10=net
+const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78] as const
+type ColWidths = [number, number, number, number, number, number, number, number, number, number, number]
 
-const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%'] as const
+const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net'] as const
 // Cost (3) and Floor (4) hidden by default
 const DEFAULT_HIDDEN_COLS = new Set([3, 4])
 
@@ -154,7 +158,7 @@ function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
 function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
   // Fixed: checkbox(20) drag(8) | resizable cols | fixed: delete(28)
   const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
-  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 8, hidden)} 28px`
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} 28px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -845,6 +849,7 @@ function ConfigTableHeader({
       { label: 'Term', align: 'text-center',   wIdx: 7 },
     ] : []),
     { label: 'Disc%', align: 'text-center',    wIdx: 9 },
+    { label: 'Net',   align: 'text-right pr-1',wIdx: 10 },
     { label: 'Total', align: 'text-right pr-1',wIdx: 8 },
   ]
   return (
@@ -889,37 +894,49 @@ function ConfigRowEditor({
   const dispCost  = toDisplay(row.costPriceUsd)
   const dispFloor = toDisplay(row.floorPriceUsd)
   const dispSell  = toDisplay(row.sellPriceUsd)
-  // Total = displayed sell × qty × term (stays in display currency — no double-conversion)
-  const dispTotal = dispSell * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
-  const totalUsd  = row.sellPriceUsd * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
+  const discPct   = row.discountPct ?? 0
+  const dispNet   = dispSell * (1 - discPct / 100)
+  // Total = net displayed price × qty × term
+  const dispTotal = dispNet * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
+  const totalNetUsd = rowNetUsd(row) * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
   const dispFmt   = inputIsAud ? fmtAud : fmt
   const secFmt    = inputIsAud ? fmt : fmtAud
   const belowFloor = row.floorPriceUsd > 0 && row.sellPriceUsd < row.floorPriceUsd
 
-  // Discount: relative to floor price when available, otherwise relative to sell
-  const discPct = row.floorPriceUsd > 0
-    ? (1 - row.sellPriceUsd / row.floorPriceUsd) * 100
-    : 0
-  const [discInput, setDiscInput] = useState(() => row.floorPriceUsd > 0 ? discPct.toFixed(1) : '')
+  const [discInput, setDiscInput] = useState(() => discPct.toFixed(1))
+  const [netInput, setNetInput] = useState(() => dispNet.toFixed(2))
 
-  // Keep discInput in sync when sell or floor changes externally
+  // Keep inputs in sync when row changes externally
+  const prevDisc = useRef(row.discountPct)
   const prevSell = useRef(row.sellPriceUsd)
-  const prevFloor = useRef(row.floorPriceUsd)
-  if (prevSell.current !== row.sellPriceUsd || prevFloor.current !== row.floorPriceUsd) {
+  if (prevDisc.current !== row.discountPct || prevSell.current !== row.sellPriceUsd) {
+    prevDisc.current = row.discountPct
     prevSell.current = row.sellPriceUsd
-    prevFloor.current = row.floorPriceUsd
-    const newDisc = row.floorPriceUsd > 0 ? ((1 - row.sellPriceUsd / row.floorPriceUsd) * 100).toFixed(1) : ''
-    if (newDisc !== discInput) setDiscInput(newDisc)
+    setDiscInput((row.discountPct ?? 0).toFixed(1))
+    setNetInput((toDisplay(row.sellPriceUsd) * (1 - (row.discountPct ?? 0) / 100)).toFixed(2))
   }
 
   function applyDiscount(val: string) {
     const d = parseFloat(val)
-    if (!isNaN(d) && row.floorPriceUsd > 0) {
-      const newSell = Math.max(0, row.floorPriceUsd * (1 - d / 100))
-      setField('sellPriceUsd', newSell)
-      setDiscInput(d.toFixed(1))
+    if (!isNaN(d)) {
+      const clamped = Math.max(0, Math.min(100, d))
+      setField('discountPct', clamped)
+      setDiscInput(clamped.toFixed(1))
+      setNetInput((dispSell * (1 - clamped / 100)).toFixed(2))
     } else {
-      setDiscInput(row.floorPriceUsd > 0 ? discPct.toFixed(1) : '')
+      setDiscInput(discPct.toFixed(1))
+    }
+  }
+
+  function applyNet(val: string) {
+    const n = parseFloat(val)
+    if (!isNaN(n) && dispSell > 0) {
+      const newDisc = Math.max(0, Math.min(100, (1 - n / dispSell) * 100))
+      setField('discountPct', newDisc)
+      setDiscInput(newDisc.toFixed(1))
+      setNetInput((dispSell * (1 - newDisc / 100)).toFixed(2))
+    } else {
+      setNetInput(dispNet.toFixed(2))
     }
   }
 
@@ -995,24 +1012,35 @@ function ConfigRowEditor({
         {!hiddenCols.has(9) && (
           <div className="relative flex items-center">
             <input
-              type="number" min="-999" max="100" step="0.1"
+              type="number" min="0" max="100" step="0.1"
               value={discInput}
               onChange={e => setDiscInput(e.target.value)}
               onBlur={e => applyDiscount(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applyDiscount(discInput) }}
-              placeholder={row.floorPriceUsd > 0 ? '0.0' : '—'}
-              disabled={row.floorPriceUsd === 0}
-              title={row.floorPriceUsd === 0 ? 'Set a floor price to enable discount' : ''}
-              className={`${iCls} text-center pr-4 ${row.floorPriceUsd === 0 ? 'bg-slate-50 text-slate-300' : ''}`}
+              placeholder="0.0"
+              className={`${iCls} text-center pr-4`}
             />
             <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
           </div>
         )}
       </div>
+      <div className={hiddenCols.has(10) ? 'overflow-hidden' : ''}>
+        {!hiddenCols.has(10) && (
+          <input
+            type="number" min="0" step="0.01"
+            value={netInput}
+            onChange={e => setNetInput(e.target.value)}
+            onBlur={e => applyNet(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') applyNet(netInput) }}
+            placeholder="0.00"
+            className={`${iCls} text-right`}
+          />
+        )}
+      </div>
       <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
         {!hiddenCols.has(8) && <>
           <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
-          {showSecondary && totalUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalUsd)}</p>}
+          {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalNetUsd)}</p>}
         </>}
       </div>
       <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">

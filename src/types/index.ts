@@ -246,6 +246,7 @@ export interface ConfigRow {
   costPriceUsd: number
   floorPriceUsd: number
   sellPriceUsd: number
+  discountPct?: number          // discount % off sell price; net = sell * (1 - discountPct/100)
   unit?: ConfigRowUnit          // only used when group pricingType = 'recurring'
   termMonths?: number           // recurring: contract term in months
   notes?: string
