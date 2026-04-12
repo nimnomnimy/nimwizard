@@ -601,8 +601,6 @@ function TopGroupBlock({
   }
 
   const rows = rowsOf(group)
-  const allRowsSelected = rows.length > 0 && rows.every(r => selected.has(r.id))
-  const toggleAll = () => { if (allRowsSelected) setSelected(new Set()); else setSelected(new Set(rows.map(r => r.id))) }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   const destinations = buildDestinations(cfg, group.id)
