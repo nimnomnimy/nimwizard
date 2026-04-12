@@ -10,21 +10,9 @@ import {
   exportProductsJSON, exportProductsXLSX, exportProductConfigXLSX, importProductsJSON,
 } from '../lib/exportUtils'
 import type {
-  DealProduct, PriceHistoryEntry, ProductCategory, ProductConfiguration, ConfigGroup,
+  DealProduct, PriceHistoryEntry, ProductConfiguration, ConfigGroup,
   PricingType, RecurringPeriod,
 } from '../types'
-
-const CATEGORY_COLORS: Record<ProductCategory, string> = {
-  'Software':              'bg-blue-100 text-blue-700',
-  'Hardware':              'bg-slate-100 text-slate-700',
-  'Professional Services': 'bg-purple-100 text-purple-700',
-  'Technical Services':    'bg-sky-100 text-sky-700',
-  'Maintenance':           'bg-green-100 text-green-700',
-}
-
-const CATEGORIES: ProductCategory[] = [
-  'Software', 'Hardware', 'Professional Services', 'Technical Services', 'Maintenance',
-]
 
 // ─── Price calculation from configs ──────────────────────────────────────────
 
@@ -61,7 +49,6 @@ function configsNetQtyTotal(configs: ProductConfiguration[]): number {
 
 type FormState = {
   name: string
-  category: ProductCategory
   pricingType: PricingType
   costPrice: string
   floorSellPrice: string
@@ -76,7 +63,6 @@ type FormState = {
 function emptyForm(): FormState {
   return {
     name: '',
-    category: 'Software',
     pricingType: 'one-time',
     costPrice: '',
     floorSellPrice: '',
@@ -93,7 +79,6 @@ function productToForm(p: DealProduct): FormState {
   const rc = p.recurringConfig
   return {
     name: p.name,
-    category: p.category,
     pricingType: p.pricingType ?? 'one-time',
     costPrice: p.costPrice ? String(p.costPrice) : '',
     floorSellPrice: p.floorSellPrice ? String(p.floorSellPrice) : '',
@@ -129,7 +114,6 @@ export default function ProductsPage() {
   // null = new product form, string = existing product, undefined = nothing selected
   const [activeId, setActiveId]     = useState<string | null | undefined>(undefined)
   const [search, setSearch]         = useState('')
-  const [filterCat, setFilterCat]   = useState<ProductCategory | 'all'>('all')
   const [filterType, setFilterType] = useState<'all' | 'one-time' | 'recurring'>('all')
   const [form, setForm]             = useState<FormState>(emptyForm())
   const [dirty, setDirty]           = useState(false)
@@ -178,7 +162,7 @@ export default function ProductsPage() {
     const product: DealProduct = {
       id: newId,
       name: 'New Product',
-      category: 'Software',
+      category: 'Software',   // DealProduct still requires category field
       pricingType: 'one-time',
       costPrice: 0,
       floorSellPrice: 0,
@@ -192,38 +176,18 @@ export default function ProductsPage() {
     setActiveId(newId)
   }
 
-  // Derive the set of categories a product belongs to from its config row categories
-  function productCategories(p: DealProduct): Set<ProductCategory> {
-    const cats = new Set<ProductCategory>()
-    for (const cfg of p.configurations ?? []) {
-      for (const g of cfg.groups ?? []) {
-        collectRowCategories(g, cats)
-      }
-    }
-    return cats
-  }
-
-  function collectRowCategories(g: ConfigGroup, cats: Set<ProductCategory>) {
-    for (const c of g.children ?? []) {
-      if (c.type === 'row' && c.row.category) cats.add(c.row.category)
-      else if (c.type === 'subgroup') collectRowCategories(c.group, cats)
-    }
-  }
-
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
-    const matchCat    = filterCat === 'all' || productCategories(p).has(filterCat)
     const matchType   = filterType === 'all' || p.pricingType === filterType
-    return matchSearch && matchCat && matchType
+    return matchSearch && matchType
   }).sort((a, b) => a.name.localeCompare(b.name))
 
-  function priceDisplay(p: DealProduct): { primary: string; secondary?: string; sub?: string } {
+  function priceDisplay(p: DealProduct): { primary: string; secondary?: string } {
     const cfgTotal = configsNetQtyTotal(p.configurations ?? [])
     if (cfgTotal > 0) {
       return {
         primary: fmt(cfgTotal),
         secondary: showSecondary ? fmtAud(cfgTotal) : undefined,
-        sub: 'config total',
       }
     }
     if (p.pricingType === 'recurring' && p.recurringConfig) {
@@ -232,7 +196,6 @@ export default function ProductsPage() {
       return {
         primary: `${fmt(rc.pricePerPeriod)}${label}`,
         secondary: showSecondary ? `${fmtAud(rc.pricePerPeriod)}${label}` : undefined,
-        sub: `${rc.termMonths}mo term`,
       }
     }
     return {
@@ -273,7 +236,7 @@ export default function ProductsPage() {
     const product: DealProduct = {
       id:          existing?.id ?? uid(),
       name:        form.name.trim(),
-      category:    form.category,
+      category:    existing?.category ?? 'Software',
       pricingType: form.pricingType,
       costPrice,
       floorSellPrice,
@@ -433,18 +396,6 @@ export default function ProductsPage() {
                   </button>
                 ))}
               </div>
-              <div className="flex gap-1 flex-wrap">
-                <button onClick={() => setFilterCat('all')}
-                  className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${filterCat === 'all' ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
-                  All
-                </button>
-                {CATEGORIES.map(c => (
-                  <button key={c} onClick={() => setFilterCat(c)}
-                    className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${filterCat === c ? CATEGORY_COLORS[c] : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}>
-                    {c.split(' ')[0]}
-                  </button>
-                ))}
-              </div>
             </div>
 
             <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
@@ -452,11 +403,11 @@ export default function ProductsPage() {
                 <p className="text-xs text-slate-400 text-center py-8">No products match filters</p>
               )}
               {filtered.map(p => {
-                const { primary, secondary, sub } = priceDisplay(p)
+                const { primary, secondary } = priceDisplay(p)
                 const isActive = activeId === p.id
                 return (
                   <div key={p.id} className={`rounded-xl border transition-colors ${isActive ? 'bg-blue-50 border-blue-200' : 'border-transparent hover:bg-slate-50'}`}>
-                    <button onClick={() => setActiveId(p.id)} className="w-full text-left px-3 pt-2 pb-1">
+                    <button onClick={() => setActiveId(p.id)} className="w-full text-left px-3 py-2">
                       <div className="flex items-start justify-between gap-1">
                         <p className="font-semibold text-slate-800 truncate flex-1 text-xs">{p.name}</p>
                         <div className="text-right flex-shrink-0">
@@ -464,14 +415,6 @@ export default function ProductsPage() {
                           {secondary && <p className="text-[10px] text-slate-400">{secondary}</p>}
                         </div>
                       </div>
-                      {(p.pricingType === 'recurring' || sub) && (
-                        <div className="flex items-center gap-1.5 mt-0.5">
-                          {p.pricingType === 'recurring' && (
-                            <span className="text-[10px] bg-indigo-100 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">Recurring</span>
-                          )}
-                          {sub && <span className="text-[10px] text-slate-400">{sub}</span>}
-                        </div>
-                      )}
                     </button>
                     {isActive && (
                       <div className="flex gap-1 px-3 pb-2">

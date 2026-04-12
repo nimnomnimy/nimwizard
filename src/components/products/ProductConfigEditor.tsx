@@ -3,24 +3,12 @@ import { uid } from '../../lib/utils'
 import { useCurrency } from '../../store/useCurrency'
 import type {
   ProductConfiguration, ConfigGroup, ConfigRow, ConfigChild,
-  ConfigRowUnit, ConfigGroupPricingType, ProductCategory,
+  ConfigRowUnit, ConfigGroupPricingType,
 } from '../../types'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const RECURRING_UNITS: ConfigRowUnit[] = ['months', 'years', 'per unit', 'per site', 'per user']
-
-const CATEGORIES: ProductCategory[] = [
-  'Software', 'Hardware', 'Professional Services', 'Technical Services', 'Maintenance',
-]
-
-const CATEGORY_COLORS: Record<ProductCategory, string> = {
-  'Software':              'bg-blue-100 text-blue-700',
-  'Hardware':              'bg-slate-100 text-slate-700',
-  'Professional Services': 'bg-purple-100 text-purple-700',
-  'Technical Services':    'bg-sky-100 text-sky-700',
-  'Maintenance':           'bg-green-100 text-green-700',
-}
 
 function emptyRow(): ConfigRow {
   return { id: uid(), description: '', quantity: 1, costPriceUsd: 0, floorPriceUsd: 0, sellPriceUsd: 0 }
@@ -227,13 +215,13 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 
 // ─── Column widths ────────────────────────────────────────────────────────────
 
-// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=disc%, 10=net, 11=category
-const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78, 100] as const
-type ColWidths = [number, number, number, number, number, number, number, number, number, number, number, number]
+// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total, 9=disc%, 10=net
+const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78] as const
+type ColWidths = [number, number, number, number, number, number, number, number, number, number, number]
 
-const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net', 'Category'] as const
-// Cost (3), Floor (4), and Category (11) hidden by default
-const DEFAULT_HIDDEN_COLS = new Set([3, 4, 11])
+const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net'] as const
+// Cost (3) and Floor (4) hidden by default
+const DEFAULT_HIDDEN_COLS = new Set([3, 4])
 
 function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
   return hidden.has(idx) ? '0px' : `${w[idx]}px`
@@ -242,7 +230,7 @@ function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
 function buildColTemplate(w: ColWidths, isRecurring: boolean, hidden: Set<number> = new Set()): string {
   // Fixed: checkbox(20) drag(8) | resizable cols | fixed: lock(20) delete(24)
   const recurring = isRecurring ? `${colPx(w, 6, hidden)} ${colPx(w, 7, hidden)} ` : ''
-  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} ${colPx(w, 11, hidden)} 20px 24px`
+  return `20px 8px ${colPx(w, 0, hidden)} ${colPx(w, 1, hidden)} ${colPx(w, 2, hidden)} ${colPx(w, 3, hidden)} ${colPx(w, 4, hidden)} ${colPx(w, 5, hidden)} ${recurring}${colPx(w, 9, hidden)} ${colPx(w, 10, hidden)} ${colPx(w, 8, hidden)} 20px 24px`
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
@@ -489,29 +477,6 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                   className="text-[11px] text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap border border-red-200">
                   Delete ({selectedRowIds.size})
                 </button>
-                {/* Bulk category */}
-                <select
-                  value=""
-                  onChange={e => {
-                    if (!e.target.value) return
-                    const cat = e.target.value === '__clear__' ? undefined : e.target.value as ProductCategory
-                    const found = findGroup(activeConfig, selectedGroupId)
-                    if (!found) return
-                    const applyCategory = (children: ConfigChild[]): ConfigChild[] =>
-                      children.map(c => {
-                        if (c.type === 'row' && selectedRowIds.has(c.row.id)) return { type: 'row', row: { ...c.row, category: cat } }
-                        if (c.type === 'subgroup') return { type: 'subgroup', group: { ...c.group, children: applyCategory(c.group.children ?? []) } }
-                        return c
-                      })
-                    updateConfig(updateGroupInConfig(activeConfig, { ...found.group, children: applyCategory(found.group.children ?? []) }))
-                    e.target.value = ''
-                  }}
-                  className="text-[11px] border border-slate-300 rounded-lg px-1 py-1 bg-white focus:outline-none"
-                >
-                  <option value="">Category…</option>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                  <option value="__clear__">— clear —</option>
-                </select>
                 {(() => {
                   const dests = buildDestinations(activeConfig, selectedGroupId)
                   return dests.length > 0 ? (
@@ -923,8 +888,6 @@ function TopGroupBlock({
           )}
         </div>
 
-        {/* Category placeholder */}
-        <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''} />
         {/* Lock placeholder + Actions (spans 2 cols: lock + delete) */}
         <span />
         <div className="flex items-center gap-0.5 justify-end">
@@ -1306,8 +1269,7 @@ function SubGroupBlock({
           )}
         </div>
 
-        {/* Category placeholder + Lock placeholder + Delete */}
-        <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''} />
+        {/* Lock placeholder + Delete */}
         <span />
         <button onClick={onDelete} className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors justify-self-end">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
@@ -1382,7 +1344,6 @@ function ConfigTableHeader({
     { label: 'Disc%',    align: 'text-center',    wIdx: 9 },
     { label: 'Net',      align: 'text-right pr-1',wIdx: 10 },
     { label: 'Total',    align: 'text-right pr-1',wIdx: 8 },
-    { label: 'Category', align: '',               wIdx: 11 },
   ]
   return (
     <div className="grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 pl-2"
@@ -1623,30 +1584,6 @@ function ConfigRowEditor({
           <p className="text-xs font-semibold text-slate-700">{fmt(totalNetUsd)}</p>
           {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{fmtAud(totalNetUsd)}</p>}
         </>}
-      </div>
-      {/* Category */}
-      <div className={hiddenCols.has(11) ? 'overflow-hidden' : ''}>
-        {!hiddenCols.has(11) && (
-          row.category ? (
-            <button
-              type="button"
-              onClick={() => setField('category', undefined)}
-              title="Click to clear category"
-              className={`w-full text-[9px] font-semibold px-1.5 py-1 rounded truncate text-left leading-none ${CATEGORY_COLORS[row.category]}`}
-            >
-              {row.category}
-            </button>
-          ) : (
-            <select
-              value=""
-              onChange={e => e.target.value && setField('category', e.target.value as ProductCategory)}
-              className="w-full border border-dashed border-slate-200 rounded px-1 py-0.5 text-[10px] text-slate-400 focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white/80"
-            >
-              <option value="">+ cat</option>
-              {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )
-        )}
       </div>
       {/* Lock toggle */}
       <button
