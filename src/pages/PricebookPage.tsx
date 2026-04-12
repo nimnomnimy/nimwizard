@@ -15,7 +15,30 @@ function emptyEntry(): PricebookEntry {
 }
 
 function emptyPricebook(): Omit<Pricebook, 'id' | 'createdAt' | 'updatedAt'> {
-  return { customerName: '', customFxRate: undefined, notes: '', entries: [emptyEntry()], defaultUplift: emptyUplift() }
+  return { customerName: '', customFxRate: undefined, notes: '', validFrom: '', validTo: '', entries: [emptyEntry()], defaultUplift: emptyUplift() }
+}
+
+// Returns 'active' | 'upcoming' | 'expired' | 'no-dates'
+function validityStatus(p: Pricebook): 'active' | 'upcoming' | 'expired' | 'no-dates' {
+  if (!p.validFrom && !p.validTo) return 'no-dates'
+  const today = new Date().toISOString().slice(0, 10)
+  if (p.validFrom && today < p.validFrom) return 'upcoming'
+  if (p.validTo && today > p.validTo) return 'expired'
+  return 'active'
+}
+
+function validityBadge(p: Pricebook): { label: string; cls: string } | null {
+  const s = validityStatus(p)
+  if (s === 'no-dates') return null
+  if (s === 'active')   return { label: 'Active', cls: 'bg-green-100 text-green-700 border-green-200' }
+  if (s === 'upcoming') return { label: 'Upcoming', cls: 'bg-blue-100 text-blue-700 border-blue-200' }
+  return { label: 'Expired', cls: 'bg-slate-100 text-slate-500 border-slate-200' }
+}
+
+function formatDate(d: string | undefined): string {
+  if (!d) return ''
+  const [y, m, day] = d.split('-')
+  return `${day}/${m}/${y}`
 }
 
 function applyUplift(price: number, uplift: UpliftConfig | undefined): number {
@@ -109,6 +132,8 @@ export default function PricebookPage() {
       customerName: p.customerName,
       customFxRate: p.customFxRate,
       notes: p.notes ?? '',
+      validFrom: p.validFrom ?? '',
+      validTo: p.validTo ?? '',
       entries: p.entries.map(e => ({ ...e, specialTerms: e.specialTerms ?? [] })),
       defaultUplift: p.defaultUplift ? { ...p.defaultUplift } : emptyUplift(),
     })
@@ -124,6 +149,8 @@ export default function PricebookPage() {
       ...draft,
       customFxRate: useFx ? (parseFloat(fxInput) || undefined) : undefined,
       defaultUplift: draft.defaultUplift?.type === 'none' ? undefined : draft.defaultUplift,
+      validFrom: draft.validFrom?.trim() || undefined,
+      validTo: draft.validTo?.trim() || undefined,
     }
     if (editId) {
       updatePricebook({ id: editId, ...payload, createdAt: pricebooks.find(p => p.id === editId)!.createdAt, updatedAt: ts })
@@ -236,18 +263,25 @@ export default function PricebookPage() {
                   </button>
 
                   {/* Pricebooks under this customer */}
-                  {isExpanded && books.map(p => (
+                  {isExpanded && books.map(p => {
+                    const badge = validityBadge(p)
+                    return (
                     <button key={p.id} onClick={() => setActiveId(p.id)}
                       className={`w-full text-left pl-5 pr-3 py-1.5 rounded-lg text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
                       <div className="flex items-center justify-between gap-1">
                         <p className="text-xs font-semibold text-slate-700 truncate flex-1">
                           {p.notes?.trim() ? p.notes.trim() : `${p.entries.length} product${p.entries.length !== 1 ? 's' : ''}`}
                         </p>
-                        {p.customFxRate && (
-                          <span className="text-[10px] bg-blue-50 text-blue-600 font-semibold px-1 py-0.5 rounded flex-shrink-0">FX</span>
+                        {badge && (
+                          <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${badge.cls}`}>{badge.label}</span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        {(p.validFrom || p.validTo) && (
+                          <span className="text-[11px] text-slate-400">
+                            {p.validFrom ? formatDate(p.validFrom) : '∞'} – {p.validTo ? formatDate(p.validTo) : '∞'}
+                          </span>
+                        )}
                         <span className="text-[11px] text-slate-400">
                           {p.entries.length} item{p.entries.length !== 1 ? 's' : ''}
                           {p.customFxRate ? ` · ${p.customFxRate.toFixed(4)}` : ''}
@@ -259,17 +293,30 @@ export default function PricebookPage() {
                         )}
                       </div>
                     </button>
-                  ))}
+                    )
+                  })}
                 </div>
               )
             })
           ) : (
             // ── Flat list ────────────────────────────────────────────────────
-            filtered.map(p => (
+            filtered.map(p => {
+              const badge = validityBadge(p)
+              return (
               <button key={p.id} onClick={() => setActiveId(p.id)}
                 className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-                <p className="font-semibold text-slate-800 truncate text-xs">{p.customerName}</p>
+                <div className="flex items-center justify-between gap-1">
+                  <p className="font-semibold text-slate-800 truncate text-xs flex-1">{p.customerName}</p>
+                  {badge && (
+                    <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0 ${badge.cls}`}>{badge.label}</span>
+                  )}
+                </div>
                 <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  {(p.validFrom || p.validTo) && (
+                    <span className="text-[11px] text-slate-400">
+                      {p.validFrom ? formatDate(p.validFrom) : '∞'} – {p.validTo ? formatDate(p.validTo) : '∞'}
+                    </span>
+                  )}
                   <span className="text-[11px] text-slate-400">
                     {p.entries.length} product{p.entries.length !== 1 ? 's' : ''}
                     {p.customFxRate ? ` · FX ${p.customFxRate.toFixed(4)}` : ''}
@@ -281,7 +328,8 @@ export default function PricebookPage() {
                   )}
                 </div>
               </button>
-            ))
+              )
+            })
           )}
         </div>
         </div>
@@ -308,8 +356,16 @@ export default function PricebookPage() {
             {/* Header */}
             <div className="flex items-start justify-between">
               <div>
-                <h1 className="text-xl font-bold text-slate-900">{active.customerName}</h1>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h1 className="text-xl font-bold text-slate-900">{active.customerName}</h1>
+                  {(() => { const b = validityBadge(active); return b ? <span className={`text-xs font-semibold px-2 py-0.5 rounded border ${b.cls}`}>{b.label}</span> : null })()}
+                </div>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
+                  {(active.validFrom || active.validTo) && (
+                    <span className="text-xs text-slate-600 font-medium">
+                      Valid: {active.validFrom ? formatDate(active.validFrom) : '—'} → {active.validTo ? formatDate(active.validTo) : 'ongoing'}
+                    </span>
+                  )}
                   {active.customFxRate && (
                     <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full border border-blue-100">
                       Custom FX: 1 USD = {active.customFxRate.toFixed(4)} AUD
@@ -527,6 +583,38 @@ export default function PricebookPage() {
                       <span className="text-xs text-slate-600">Apply annually</span>
                     </label>
                   </div>
+                )}
+              </div>
+
+              {/* Validity window */}
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-semibold text-slate-500">Validity Period</label>
+                <div className="flex gap-3 items-center flex-wrap">
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-400">Valid From</label>
+                    <input type="date"
+                      value={draft.validFrom ?? ''}
+                      onChange={e => setDraft(d => ({ ...d, validFrom: e.target.value }))}
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  <span className="text-slate-400 text-sm mt-4">→</span>
+                  <div className="flex flex-col gap-1">
+                    <label className="text-[11px] text-slate-400">Valid To</label>
+                    <input type="date"
+                      value={draft.validTo ?? ''}
+                      onChange={e => setDraft(d => ({ ...d, validTo: e.target.value }))}
+                      min={draft.validFrom ?? undefined}
+                      className="border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  </div>
+                  {(draft.validFrom || draft.validTo) && (
+                    <button onClick={() => setDraft(d => ({ ...d, validFrom: '', validTo: '' }))}
+                      className="text-[11px] text-slate-400 hover:text-red-500 mt-4 transition-colors">
+                      Clear dates
+                    </button>
+                  )}
+                </div>
+                {draft.validFrom && draft.validTo && draft.validFrom > draft.validTo && (
+                  <p className="text-xs text-red-500">Valid From must be before Valid To.</p>
                 )}
               </div>
 

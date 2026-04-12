@@ -436,6 +436,8 @@ export interface Pricebook {
   customerName: string
   customFxRate?: number          // default USD→AUD for this pricebook
   notes?: string
+  validFrom?: string             // YYYY-MM-DD — inclusive start of validity window
+  validTo?: string               // YYYY-MM-DD — inclusive end of validity window
   defaultUplift?: UpliftConfig   // default uplift applied to all entries
   entries: PricebookEntry[]
   createdAt: number
