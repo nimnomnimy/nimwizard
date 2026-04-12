@@ -427,7 +427,7 @@ export interface PricebookEntry {
   unitPriceUsd: number
   customFxRate?: number          // USD→AUD override for this entry
   freightIncluded: boolean
-  specialTerms?: string
+  specialTerms?: string[]        // array of individual term lines
   uplift?: UpliftConfig          // optional per-entry uplift override
 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
@@ -11,7 +11,7 @@ function emptyUplift(): UpliftConfig {
 }
 
 function emptyEntry(): PricebookEntry {
-  return { id: uid(), productId: '', productName: '', unitPriceUsd: 0, freightIncluded: false }
+  return { id: uid(), productId: '', productName: '', unitPriceUsd: 0, freightIncluded: false, specialTerms: [] }
 }
 
 function emptyPricebook(): Omit<Pricebook, 'id' | 'createdAt' | 'updatedAt'> {
@@ -29,6 +29,20 @@ function upliftLabel(uplift: UpliftConfig | undefined): string | null {
   return `+${uplift.percentage}% ${tag}${uplift.applyAnnually ? '/yr' : ''}`
 }
 
+// Format a price in customer currency using the pricebook's custom FX rate.
+// If no custom rate, falls back to the global formatter.
+function fmtCustomer(
+  usd: number,
+  customFxRate: number | undefined,
+  globalFmt: (n: number) => string,
+): { primary: string; label: string } {
+  if (customFxRate) {
+    const aud = usd * customFxRate
+    return { primary: `A$${aud.toFixed(2)}`, label: `@ ${customFxRate.toFixed(4)}` }
+  }
+  return { primary: globalFmt(usd), label: '' }
+}
+
 export default function PricebookPage() {
   const pricebooks      = useAppStore(s => s.pricebooks)
   const products        = useAppStore(s => s.dealProducts)
@@ -39,7 +53,7 @@ export default function PricebookPage() {
   const fmtAud          = useCurrency(s => s.fmtAud)
   const showSecondary   = useCurrency(s => s.showSecondary)
 
-  const left = useResizable({ initial: 260, min: 180, max: 400 })
+  const left = useResizable({ initial: 260, min: 180, max: 420 })
   const [activeId, setActiveId]   = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [draft, setDraft]         = useState(emptyPricebook())
@@ -47,12 +61,39 @@ export default function PricebookPage() {
   const [search, setSearch]       = useState('')
   const [fxInput, setFxInput]     = useState('')
   const [useFx, setUseFx]         = useState(false)
+  // Left panel: grouped by customer vs flat list
+  const [groupByCustomer, setGroupByCustomer] = useState(true)
+  // Which customer groups are expanded in the left pane
+  const [expandedCustomers, setExpandedCustomers] = useState<Set<string>>(new Set())
 
-  const sorted = [...pricebooks]
-    .filter(p => p.customerName.toLowerCase().includes(search.toLowerCase()))
-    .sort((a, b) => b.createdAt - a.createdAt)
+  const filtered = useMemo(() =>
+    [...pricebooks]
+      .filter(p => p.customerName.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => a.customerName.localeCompare(b.customerName) || b.createdAt - a.createdAt),
+    [pricebooks, search]
+  )
+
+  // Group by customer name
+  const customerGroups = useMemo(() => {
+    const map = new Map<string, Pricebook[]>()
+    for (const p of filtered) {
+      const key = p.customerName.trim() || '(No Name)'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(p)
+    }
+    return [...map.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [filtered])
 
   const active = pricebooks.find(p => p.id === activeId) ?? null
+
+  function toggleCustomerExpand(name: string) {
+    setExpandedCustomers(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }
 
   function openNew() {
     setEditId(null)
@@ -68,7 +109,7 @@ export default function PricebookPage() {
       customerName: p.customerName,
       customFxRate: p.customFxRate,
       notes: p.notes ?? '',
-      entries: p.entries.map(e => ({ ...e })),
+      entries: p.entries.map(e => ({ ...e, specialTerms: e.specialTerms ?? [] })),
       defaultUplift: p.defaultUplift ? { ...p.defaultUplift } : emptyUplift(),
     })
     setFxInput(p.customFxRate?.toString() ?? '')
@@ -111,6 +152,21 @@ export default function PricebookPage() {
     setDraft(d => ({ ...d, defaultUplift: { ...(d.defaultUplift ?? emptyUplift()), ...patch } }))
   }
 
+  // Special terms helpers for modal
+  function addTerm(idx: number) {
+    const terms = [...(draft.entries[idx].specialTerms ?? []), '']
+    setEntry(idx, { specialTerms: terms })
+  }
+  function setTerm(entryIdx: number, termIdx: number, value: string) {
+    const terms = [...(draft.entries[entryIdx].specialTerms ?? [])]
+    terms[termIdx] = value
+    setEntry(entryIdx, { specialTerms: terms })
+  }
+  function removeTerm(entryIdx: number, termIdx: number) {
+    const terms = (draft.entries[entryIdx].specialTerms ?? []).filter((_, i) => i !== termIdx)
+    setEntry(entryIdx, { specialTerms: terms })
+  }
+
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-100">
       {/* Top bar */}
@@ -136,33 +192,97 @@ export default function PricebookPage() {
             </button>
           </div>
           <input value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Search…"
+            placeholder="Search customer…"
             className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+          {/* Group toggle */}
+          <div className="flex gap-1">
+            <button onClick={() => setGroupByCustomer(true)}
+              className={`flex-1 text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${groupByCustomer ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+              By Customer
+            </button>
+            <button onClick={() => setGroupByCustomer(false)}
+              className={`flex-1 text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${!groupByCustomer ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+              All
+            </button>
+          </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
-          {sorted.length === 0 && (
+        <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-0.5">
+          {filtered.length === 0 && (
             <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
               <p className="text-xs text-center">No pricebooks yet.<br/>Click + New Pricebook above.</p>
             </div>
           )}
-          {sorted.map(p => (
-            <button key={p.id} onClick={() => setActiveId(p.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-              <p className="font-semibold text-slate-800 truncate">{p.customerName}</p>
-              <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                <span className="text-[11px] text-slate-400">
-                  {p.entries.length} product{p.entries.length !== 1 ? 's' : ''}
-                  {p.customFxRate ? ` · FX ${p.customFxRate.toFixed(4)}` : ''}
-                </span>
-                {p.defaultUplift && p.defaultUplift.type !== 'none' && (
-                  <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded-full">
-                    {upliftLabel(p.defaultUplift)}
+
+          {groupByCustomer ? (
+            // ── Grouped by customer ──────────────────────────────────────────
+            customerGroups.map(([customerName, books]) => {
+              const isExpanded = expandedCustomers.has(customerName) || books.some(b => b.id === activeId)
+              const hasActive  = books.some(b => b.id === activeId)
+              return (
+                <div key={customerName}>
+                  {/* Customer heading */}
+                  <button
+                    onClick={() => toggleCustomerExpand(customerName)}
+                    className={`w-full flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-left transition-colors ${
+                      hasActive ? 'text-blue-700' : 'text-slate-700 hover:bg-slate-50'
+                    }`}>
+                    <svg width="10" height="10" viewBox="0 0 12 12" fill="none"
+                      className={`flex-shrink-0 transition-transform ${isExpanded ? '' : '-rotate-90'}`}>
+                      <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <span className="text-xs font-bold truncate flex-1">{customerName}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0">{books.length}</span>
+                  </button>
+
+                  {/* Pricebooks under this customer */}
+                  {isExpanded && books.map(p => (
+                    <button key={p.id} onClick={() => setActiveId(p.id)}
+                      className={`w-full text-left pl-5 pr-3 py-1.5 rounded-lg text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+                      <div className="flex items-center justify-between gap-1">
+                        <p className="text-xs font-semibold text-slate-700 truncate flex-1">
+                          {p.notes?.trim() ? p.notes.trim() : `${p.entries.length} product${p.entries.length !== 1 ? 's' : ''}`}
+                        </p>
+                        {p.customFxRate && (
+                          <span className="text-[10px] bg-blue-50 text-blue-600 font-semibold px-1 py-0.5 rounded flex-shrink-0">FX</span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                        <span className="text-[11px] text-slate-400">
+                          {p.entries.length} item{p.entries.length !== 1 ? 's' : ''}
+                          {p.customFxRate ? ` · ${p.customFxRate.toFixed(4)}` : ''}
+                        </span>
+                        {p.defaultUplift && p.defaultUplift.type !== 'none' && (
+                          <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded-full">
+                            {upliftLabel(p.defaultUplift)}
+                          </span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )
+            })
+          ) : (
+            // ── Flat list ────────────────────────────────────────────────────
+            filtered.map(p => (
+              <button key={p.id} onClick={() => setActiveId(p.id)}
+                className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === p.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+                <p className="font-semibold text-slate-800 truncate text-xs">{p.customerName}</p>
+                <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                  <span className="text-[11px] text-slate-400">
+                    {p.entries.length} product{p.entries.length !== 1 ? 's' : ''}
+                    {p.customFxRate ? ` · FX ${p.customFxRate.toFixed(4)}` : ''}
                   </span>
-                )}
-              </div>
-            </button>
-          ))}
+                  {p.defaultUplift && p.defaultUplift.type !== 'none' && (
+                    <span className="text-[10px] bg-amber-100 text-amber-700 font-semibold px-1.5 py-0.5 rounded-full">
+                      {upliftLabel(p.defaultUplift)}
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))
+          )}
         </div>
         </div>
         <div {...left.dragHandleProps} className="w-1.5 flex-shrink-0 cursor-col-resize group">
@@ -191,12 +311,12 @@ export default function PricebookPage() {
                 <h1 className="text-xl font-bold text-slate-900">{active.customerName}</h1>
                 <div className="flex items-center gap-3 mt-1 flex-wrap">
                   {active.customFxRate && (
-                    <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full">
-                      FX rate: {active.customFxRate.toFixed(4)} USD→AUD
+                    <span className="text-xs bg-blue-50 text-blue-700 font-semibold px-2 py-0.5 rounded-full border border-blue-100">
+                      Custom FX: 1 USD = {active.customFxRate.toFixed(4)} AUD
                     </span>
                   )}
                   {active.defaultUplift && active.defaultUplift.type !== 'none' && (
-                    <span className="text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-full">
+                    <span className="text-xs bg-amber-50 text-amber-700 font-semibold px-2 py-0.5 rounded-full border border-amber-100">
                       {upliftLabel(active.defaultUplift)}
                     </span>
                   )}
@@ -221,11 +341,17 @@ export default function PricebookPage() {
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                     <th className="px-4 py-3 text-left">Product</th>
-                    <th className="px-4 py-3 text-right">Base Price</th>
+                    <th className="px-4 py-3 text-right">Base (USD)</th>
+                    {active.customFxRate && (
+                      <th className="px-4 py-3 text-right text-blue-600">Customer Price</th>
+                    )}
+                    {!active.customFxRate && showSecondary && (
+                      <th className="px-4 py-3 text-right text-slate-400">AUD</th>
+                    )}
                     {active.defaultUplift && active.defaultUplift.type !== 'none' && (
                       <th className="px-4 py-3 text-right text-amber-600">After Uplift</th>
                     )}
-                    <th className="px-4 py-3 text-center w-28">Freight</th>
+                    <th className="px-4 py-3 text-center w-24">Freight</th>
                     <th className="px-4 py-3 text-left">Special Terms</th>
                   </tr>
                 </thead>
@@ -234,6 +360,13 @@ export default function PricebookPage() {
                     const effectiveUplift = entry.uplift ?? active.defaultUplift
                     const uplifted = applyUplift(entry.unitPriceUsd, effectiveUplift)
                     const hasUplift = active.defaultUplift && active.defaultUplift.type !== 'none'
+                    const hasCustomFx = !!active.customFxRate
+                    const { primary: custPrice, label: fxLabel } = fmtCustomer(entry.unitPriceUsd, active.customFxRate, fmt)
+                    const custUplifted = hasCustomFx && active.customFxRate
+                      ? `A$${(uplifted * active.customFxRate).toFixed(2)}`
+                      : fmt(uplifted)
+                    const terms = entry.specialTerms ?? []
+
                     return (
                       <tr key={entry.id} className="border-b border-slate-100 last:border-0 hover:bg-slate-50">
                         <td className="px-4 py-3">
@@ -242,22 +375,59 @@ export default function PricebookPage() {
                             <p className="text-[10px] text-amber-600 mt-0.5">{upliftLabel(entry.uplift)} (override)</p>
                           )}
                         </td>
+
+                        {/* Base USD price */}
                         <td className="px-4 py-3 text-right">
                           <span className="font-semibold text-slate-700">{fmt(entry.unitPriceUsd)}</span>
-                          {showSecondary && <p className="text-[10px] text-slate-400">{fmtAud(entry.unitPriceUsd)}</p>}
                         </td>
-                        {hasUplift && (
+
+                        {/* Customer currency column (only when custom FX is set) */}
+                        {hasCustomFx && (
                           <td className="px-4 py-3 text-right">
-                            <span className="font-semibold text-amber-700">{fmt(uplifted)}</span>
-                            {showSecondary && <p className="text-[10px] text-amber-400">{fmtAud(uplifted)}</p>}
+                            <span className="font-semibold text-blue-700">{custPrice}</span>
+                            {fxLabel && <p className="text-[10px] text-blue-400 mt-0.5">{fxLabel}</p>}
                           </td>
                         )}
+
+                        {/* AUD column (only when no custom FX and showSecondary) */}
+                        {!hasCustomFx && showSecondary && (
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-semibold text-slate-400">{fmtAud(entry.unitPriceUsd)}</span>
+                          </td>
+                        )}
+
+                        {/* After uplift column */}
+                        {hasUplift && (
+                          <td className="px-4 py-3 text-right">
+                            <span className="font-semibold text-amber-700">{hasCustomFx ? custUplifted : fmt(uplifted)}</span>
+                            {!hasCustomFx && showSecondary && (
+                              <p className="text-[10px] text-amber-400">{fmtAud(uplifted)}</p>
+                            )}
+                          </td>
+                        )}
+
+                        {/* Freight */}
                         <td className="px-4 py-3 text-center">
                           <span className={`inline-block px-2 py-0.5 rounded-full text-[11px] font-semibold ${entry.freightIncluded ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-500'}`}>
                             {entry.freightIncluded ? 'Included' : 'Excluded'}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-400">{entry.specialTerms || '—'}</td>
+
+                        {/* Special terms — multi-line */}
+                        <td className="px-4 py-3">
+                          {terms.length === 0 ? (
+                            <span className="text-xs text-slate-300">—</span>
+                          ) : (
+                            <ul className="flex flex-col gap-0.5">
+                              {terms.filter(t => t.trim()).map((t, i) => (
+                                <li key={i} className="text-xs text-slate-600 flex items-start gap-1">
+                                  <span className="text-slate-300 flex-shrink-0 mt-0.5">•</span>
+                                  <span>{t}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </td>
                       </tr>
                     )
                   })}
@@ -303,10 +473,19 @@ export default function PricebookPage() {
                   <span className="text-sm font-medium text-slate-700">Custom FX rate (USD→AUD)</span>
                 </div>
                 {useFx && (
-                  <input type="number" step="0.0001" value={fxInput}
-                    onChange={e => setFxInput(e.target.value)}
-                    placeholder="e.g. 1.5800"
-                    className="w-40 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-slate-500">1 USD =</span>
+                    <input type="number" step="0.0001" value={fxInput}
+                      onChange={e => setFxInput(e.target.value)}
+                      placeholder="e.g. 1.5800"
+                      className="w-32 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    <span className="text-xs text-slate-500">AUD</span>
+                    {fxInput && parseFloat(fxInput) > 0 && (
+                      <span className="text-[11px] text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
+                        A$1 = {(1 / parseFloat(fxInput)).toFixed(4)} USD
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
 
@@ -370,7 +549,7 @@ export default function PricebookPage() {
                 {draft.entries.map((entry, idx) => (
                   <div key={entry.id} className="bg-slate-50 rounded-xl p-3 flex flex-col gap-2">
                     <div className="flex gap-2 items-start">
-                      {/* Product */}
+                      {/* Product selector */}
                       <div className="flex-1 flex flex-col gap-1">
                         <label className="text-[11px] font-semibold text-slate-400">Product</label>
                         {products.length > 0 ? (
@@ -387,8 +566,9 @@ export default function PricebookPage() {
                             className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         )}
                       </div>
+
                       {/* Price */}
-                      <div className="w-32 flex flex-col gap-1">
+                      <div className="w-36 flex flex-col gap-1">
                         <label className="text-[11px] font-semibold text-slate-400">Unit Price (USD)</label>
                         <div className="relative">
                           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
@@ -396,7 +576,14 @@ export default function PricebookPage() {
                             onChange={e => setEntry(idx, { unitPriceUsd: parseFloat(e.target.value) || 0 })}
                             className="w-full pl-5 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
                         </div>
+                        {/* Live customer currency preview */}
+                        {useFx && fxInput && parseFloat(fxInput) > 0 && entry.unitPriceUsd > 0 && (
+                          <span className="text-[10px] text-blue-600">
+                            = A${(entry.unitPriceUsd * parseFloat(fxInput)).toFixed(2)}
+                          </span>
+                        )}
                       </div>
+
                       {/* Remove */}
                       <button onClick={() => setDraft(d => ({ ...d, entries: d.entries.filter((_, i) => i !== idx) }))}
                         className="self-end mb-0.5 p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors">
@@ -404,18 +591,39 @@ export default function PricebookPage() {
                       </button>
                     </div>
 
-                    {/* Freight + Special Terms row */}
-                    <div className="flex gap-3 items-center flex-wrap">
-                      <label className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" checked={entry.freightIncluded}
-                          onChange={e => setEntry(idx, { freightIncluded: e.target.checked })}
-                          className="rounded border-slate-300" />
-                        <span className="text-xs text-slate-600">Freight included</span>
-                      </label>
-                      <input value={entry.specialTerms ?? ''}
-                        onChange={e => setEntry(idx, { specialTerms: e.target.value })}
-                        placeholder="Special terms…"
-                        className="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                    {/* Freight */}
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input type="checkbox" checked={entry.freightIncluded}
+                        onChange={e => setEntry(idx, { freightIncluded: e.target.checked })}
+                        className="rounded border-slate-300" />
+                      <span className="text-xs text-slate-600">Freight included</span>
+                    </label>
+
+                    {/* Special terms — multi-row */}
+                    <div className="flex flex-col gap-1">
+                      <div className="flex items-center justify-between">
+                        <label className="text-[11px] font-semibold text-slate-400">Special Terms</label>
+                        <button onClick={() => addTerm(idx)}
+                          className="text-[11px] text-blue-600 hover:text-blue-700 font-semibold">+ Add Term</button>
+                      </div>
+                      {(entry.specialTerms ?? []).map((term, ti) => (
+                        <div key={ti} className="flex gap-1 items-center">
+                          <span className="text-slate-300 text-xs flex-shrink-0">•</span>
+                          <input
+                            value={term}
+                            onChange={e => setTerm(idx, ti, e.target.value)}
+                            placeholder={`Term ${ti + 1}…`}
+                            className="flex-1 border border-slate-200 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                          />
+                          <button onClick={() => removeTerm(idx, ti)}
+                            className="text-slate-300 hover:text-red-500 p-1 rounded transition-colors flex-shrink-0">
+                            <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                          </button>
+                        </div>
+                      ))}
+                      {(entry.specialTerms ?? []).length === 0 && (
+                        <p className="text-[11px] text-slate-300 italic">None — click + Add Term</p>
+                      )}
                     </div>
 
                     {/* Per-entry uplift override */}
