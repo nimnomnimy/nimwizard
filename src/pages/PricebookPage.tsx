@@ -80,7 +80,6 @@ export default function PricebookPage() {
   const addPricebook    = useAppStore(s => s.addPricebook)
   const updatePricebook = useAppStore(s => s.updatePricebook)
   const deletePricebook = useAppStore(s => s.deletePricebook)
-  const fmt             = useCurrency(s => s.fmt)
   const fmtAud          = useCurrency(s => s.fmtAud)
   const showSecondary   = useCurrency(s => s.showSecondary)
 
