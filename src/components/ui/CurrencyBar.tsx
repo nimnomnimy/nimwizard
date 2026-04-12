@@ -29,20 +29,20 @@ export default function CurrencyBar({ className = '', onFxChange }: Props) {
 
   const [fxInput, setFxInput] = useState(() => displayedFxRate().toFixed(4))
 
-  // Sync local input when mode changes (direction flips, so displayed value changes)
+  // Sync local input when mode changes
   useEffect(() => {
-    setFxInput(displayedFxRate().toFixed(4))
+    // BOTH mode always shows 1 USD = x AUD (same direction as USD mode)
+    setFxInput(currency === 'BOTH' ? usdToAudRate.toFixed(4) : displayedFxRate().toFixed(4))
   }, [currency]) // eslint-disable-line react-hooks/exhaustive-deps
 
   function commitFx(val: string) {
     const n = parseFloat(val)
     if (n > 0) {
-      setFxRate(n)
-      // notify parent so Firestore can be updated
+      setFxRate(n)  // store handles direction: AUD→1/n, USD/BOTH→n directly
       const stored = currency === 'AUD' ? 1 / n : n
       onFxChange?.(stored)
     }
-    setFxInput(displayedFxRate().toFixed(4))
+    setFxInput(currency === 'BOTH' ? usdToAudRate.toFixed(4) : displayedFxRate().toFixed(4))
   }
 
   // When mode changes, also notify parent of the stored rate (in case it wasn't saved yet)
@@ -51,7 +51,9 @@ export default function CurrencyBar({ className = '', onFxChange }: Props) {
     onFxChange?.(usdToAudRate)
   }
 
-  const showFxInput = currency !== 'BOTH'
+  // In BOTH mode show "1 USD = x AUD" (same as USD mode direction)
+  const bothLabel = `1 USD =`
+  const bothSuffix = 'AUD'
 
   return (
     <div className={`flex items-center gap-2 ${className}`}>
@@ -72,26 +74,26 @@ export default function CurrencyBar({ className = '', onFxChange }: Props) {
         ))}
       </div>
 
-      {/* FX rate */}
-      {showFxInput && (
-        <div className="flex items-center gap-1">
-          <span className="text-[10px] font-bold text-slate-500 flex-shrink-0">{fxLabel()}</span>
-          <input
-            type="number"
-            min="0.0001"
-            step="0.0001"
-            value={fxInput}
-            onChange={e => setFxInput(e.target.value)}
-            onBlur={e => commitFx(e.target.value)}
-            onKeyDown={e => { if (e.key === 'Enter') commitFx(fxInput) }}
-            className="w-20 px-2 py-1 border border-blue-300 bg-blue-50 text-blue-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
-            title={currency === 'AUD' ? '1 AUD = x USD' : '1 USD = x AUD'}
-          />
-          <span className="text-[10px] font-bold text-slate-400 flex-shrink-0">
-            {currency === 'AUD' ? 'USD' : 'AUD'}
-          </span>
-        </div>
-      )}
+      {/* FX rate — always shown, label/suffix adapts to mode */}
+      <div className="flex items-center gap-1">
+        <span className="text-[10px] font-bold text-slate-500 flex-shrink-0">
+          {currency === 'BOTH' ? bothLabel : fxLabel()}
+        </span>
+        <input
+          type="number"
+          min="0.0001"
+          step="0.0001"
+          value={fxInput}
+          onChange={e => setFxInput(e.target.value)}
+          onBlur={e => commitFx(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') commitFx(fxInput) }}
+          className="w-20 px-2 py-1 border border-blue-300 bg-blue-50 text-blue-700 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500"
+          title="FX rate"
+        />
+        <span className="text-[10px] font-bold text-slate-400 flex-shrink-0">
+          {currency === 'BOTH' ? bothSuffix : (currency === 'AUD' ? 'USD' : 'AUD')}
+        </span>
+      </div>
     </div>
   )
 }

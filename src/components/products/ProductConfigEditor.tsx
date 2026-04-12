@@ -768,8 +768,9 @@ function ConfigRowEditor({
   const dispCost  = toDisplay(row.costPriceUsd)
   const dispFloor = toDisplay(row.floorPriceUsd)
   const dispSell  = toDisplay(row.sellPriceUsd)
-  const totalUsd  = row.sellPriceUsd * row.quantity * (isRecurring ? (row.termMonths ?? 1) : 1)
-  const dispTotal = toDisplay(totalUsd)
+  // Total = displayed sell × qty × term (stays in display currency — no double-conversion)
+  const dispTotal = dispSell * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
+  const totalUsd  = row.sellPriceUsd * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
   const dispFmt   = inputIsAud ? fmtAud : fmt
   const secFmt    = inputIsAud ? fmt : fmtAud
   const belowFloor = row.floorPriceUsd > 0 && row.sellPriceUsd < row.floorPriceUsd
