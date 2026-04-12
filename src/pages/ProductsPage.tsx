@@ -47,27 +47,14 @@ function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): numb
   return groupFieldSubtotal(g, field) * (g.qty ?? 1)
 }
 
-// Net price × qty only (no term) — used for product list display
-function groupNetQtySubtotal(g: ConfigGroup): number {
-  if (!g?.children) return 0
-  return g.children.reduce((s, c) => {
-    if (c.type === 'row') {
-      const net = (c.row.sellPriceUsd ?? 0) * (1 - (c.row.discountPct ?? 0) / 100)
-      return s + net * (c.row.quantity ?? 1)
-    }
-    if (c.type === 'subgroup') return s + groupNetQtySubtotal(c.group) * (c.group.qty ?? 1)
-    return s
-  }, 0)
-}
-
 function configsTotal(configs: ProductConfiguration[], field: 'cost' | 'floor' | 'sell'): number {
   if (!configs?.length) return 0
   return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupFieldTotal(g, field), 0), 0)
 }
 
+// Matches the config editor footer: net × qty × term × groupQty — same as groupFieldTotal(g, 'sell')
 function configsNetQtyTotal(configs: ProductConfiguration[]): number {
-  if (!configs?.length) return 0
-  return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupNetQtySubtotal(g) * (g.qty ?? 1), 0), 0)
+  return configsTotal(configs, 'sell')
 }
 
 // ─── Form state ───────────────────────────────────────────────────────────────
