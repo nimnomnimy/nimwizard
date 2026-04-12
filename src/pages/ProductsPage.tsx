@@ -538,81 +538,75 @@ function ProductDetailPane({
   const historyCount = existing?.priceHistory?.length ?? 0
 
   return (
-    <div className="flex flex-col h-full">
-      {/* ── Top action bar ── */}
-      <div className="flex items-center gap-2 px-6 pt-4 pb-2 flex-shrink-0 border-b border-slate-100">
-        <div className="flex-1" />
-        {!isNew && (
-          <button type="button" onClick={onClone}
-            className="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 text-sm font-medium hover:bg-slate-50 transition-colors">
-            Clone
-          </button>
-        )}
-        {!isNew && (
-          <button type="button" onClick={onDelete}
-            className="px-3 py-1.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
-            Delete
-          </button>
-        )}
-        <button
-          type="button"
-          onClick={() => onSave()}
-          disabled={!dirty && !isNew}
-          className="px-4 py-1.5 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-          Save
-        </button>
-      </div>
-
-      <div className="flex-1 overflow-y-auto">
-        <form onSubmit={onSave} className="p-4 flex flex-col gap-4">
-            {/* Config editor (always shown — product name lives in the header slot) */}
-            <ProductConfigEditor
-              configs={configs}
-              onChange={onConfigsChange}
-              hideConfigName
-              headerSlot={
-                <div className="flex flex-col gap-1.5">
-                  <div className="flex items-center gap-2">
-                    <select
-                      value={form.category}
-                      onChange={e => set('category', e.target.value as ProductCategory)}
-                      className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer ${CATEGORY_COLORS[form.category]}`}
-                      style={{ appearance: 'none' }}>
-                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                    <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-                      {(['one-time', 'recurring'] as PricingType[]).map(t => (
-                        <button key={t} type="button" onClick={() => set('pricingType', t)}
-                          className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                          {t === 'one-time' ? 'One-Time' : 'Recurring'}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <input
-                    ref={nameRef}
-                    type="text"
-                    value={form.name}
-                    onChange={e => set('name', e.target.value)}
-                    placeholder="Product name…"
-                    required
-                    className="text-2xl font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 -ml-1 w-full placeholder:text-slate-300"
-                  />
-                </div>
-              }
-            />
-
-            {/* Price history — at the bottom */}
-            {existing && historyCount > 0 && (
-              <div className="border-t border-slate-100 pt-4">
-                <PriceHistorySection
-                  history={existing.priceHistory!}
-                  onDeleteIds={onDeleteHistoryIds}
-                />
+    <div className="flex flex-col h-full overflow-hidden">
+      <form onSubmit={onSave} className="flex flex-col h-full">
+        <ProductConfigEditor
+          configs={configs}
+          onChange={onConfigsChange}
+          hideConfigName
+          headerSlot={
+            <div className="flex items-center gap-2">
+              {/* Category + type toggles */}
+              <select
+                value={form.category}
+                onChange={e => set('category', e.target.value as ProductCategory)}
+                className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer flex-shrink-0 ${CATEGORY_COLORS[form.category]}`}
+                style={{ appearance: 'none' }}>
+                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+              <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5 flex-shrink-0">
+                {(['one-time', 'recurring'] as PricingType[]).map(t => (
+                  <button key={t} type="button" onClick={() => set('pricingType', t)}
+                    className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                    {t === 'one-time' ? 'One-Time' : 'Recurring'}
+                  </button>
+                ))}
               </div>
-            )}
-          </form>
-      </div>
+              {/* Product name — grows to fill */}
+              <input
+                ref={nameRef}
+                type="text"
+                value={form.name}
+                onChange={e => set('name', e.target.value)}
+                placeholder="Product name…"
+                required
+                className="text-lg font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-2 py-0.5 flex-1 min-w-0 placeholder:text-slate-300"
+              />
+              {/* Save / Clone / Delete inline */}
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {!isNew && (
+                  <button type="button" onClick={onClone}
+                    className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors">
+                    Clone
+                  </button>
+                )}
+                {!isNew && (
+                  <button type="button" onClick={onDelete}
+                    className="px-2.5 py-1 rounded-lg border border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors">
+                    Delete
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  disabled={!dirty && !isNew}
+                  className="px-3 py-1 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                  Save
+                </button>
+              </div>
+            </div>
+          }
+        />
+
+        {/* Price history — below the config card */}
+        {existing && historyCount > 0 && (
+          <div className="mx-4 mt-3 border border-slate-200 rounded-xl overflow-hidden">
+            <PriceHistorySection
+              history={existing.priceHistory!}
+              onDeleteIds={onDeleteHistoryIds}
+            />
+          </div>
+        )}
+      </form>
     </div>
   )
 }

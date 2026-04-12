@@ -350,17 +350,17 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
   if (!activeConfig) return null
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col flex-1 min-h-0">
 
       {activeConfig && (
         <div
           ref={tableContainerRef}
-          className="bg-white border border-slate-200 rounded-xl overflow-hidden relative"
+          className="bg-white border border-slate-200 rounded-xl overflow-hidden relative flex flex-col flex-1 min-h-0"
           style={tableWidth ? { width: tableWidth } : undefined}
         >
           {/* Header slot — product name / meta (rendered above toolbar when provided) */}
           {headerSlot && (
-            <div className="px-3 pt-3 pb-2 border-b border-slate-100">
+            <div className="px-3 py-2 border-b border-slate-200">
               {headerSlot}
             </div>
           )}
@@ -500,9 +500,9 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           {activeConfig.groups.length === 0 ? (
             <div className="p-6 text-center text-slate-400 text-sm">No groups yet. Click <strong>+ Group</strong> to add one.</div>
           ) : (
-            <div className="flex flex-col">
+            <div className="flex flex-col flex-1 min-h-0">
               {/* Scrollable groups area */}
-              <div className="divide-y divide-slate-100 overflow-y-auto" style={{ maxHeight: 520 }}>
+              <div className="divide-y divide-slate-100 overflow-y-auto flex-1 min-h-0">
                 {activeConfig.groups.map((group, gi) => (
                   <TopGroupBlock
                     key={group.id}
