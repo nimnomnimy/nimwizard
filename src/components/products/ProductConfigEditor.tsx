@@ -137,6 +137,18 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
   return groups.length > 0 ? { groups } : null
 }
 
+// ─── Column widths ────────────────────────────────────────────────────────────
+
+// Indices: 0=code, 1=desc, 2=qty, 3=cost, 4=floor, 5=sell, 6=unit, 7=term, 8=total
+const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84] as const
+type ColWidths = [number, number, number, number, number, number, number, number, number]
+
+function buildColTemplate(w: ColWidths, isRecurring: boolean): string {
+  // Fixed: checkbox(20) drag(8) | resizable cols | fixed: delete(28)
+  const recurring = isRecurring ? `${w[6]}px ${w[7]}px ` : ''
+  return `20px 8px ${w[0]}px ${w[1]}px ${w[2]}px ${w[3]}px ${w[4]}px ${w[5]}px ${recurring}${w[8]}px 28px`
+}
+
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface Props {
@@ -162,6 +174,26 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
   const [pasteText, setPasteText] = useState('')
   const [pasteError, setPasteError] = useState('')
   const pasteAreaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Column widths (resizable) and overall table width
+  const [colWidths, setColWidths] = useState<ColWidths>([...DEFAULT_COL_WIDTHS] as ColWidths)
+  const [tableWidth, setTableWidth] = useState<number | null>(null)
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+
+  function handleColResize(colIdx: number, delta: number) {
+    setColWidths(prev => {
+      const next = [...prev] as ColWidths
+      next[colIdx] = Math.max(30, prev[colIdx] + delta)
+      return next
+    })
+  }
+
+  function handleTableResize(delta: number) {
+    setTableWidth(prev => {
+      const base = prev ?? (tableContainerRef.current?.offsetWidth ?? 600)
+      return Math.max(400, base + delta)
+    })
+  }
 
   const usdToAudRate  = useCurrency(s => s.usdToAudRate)
   const currency      = useCurrency(s => s.currency)
@@ -244,7 +276,11 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
       </div>
 
       {activeConfig && (
-        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+        <div
+          ref={tableContainerRef}
+          className="bg-white border border-slate-200 rounded-xl overflow-hidden relative"
+          style={tableWidth ? { width: tableWidth } : undefined}
+        >
           {/* Toolbar */}
           <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2 flex-wrap">
             {editingConfigName === activeConfig.id ? (
@@ -309,14 +345,86 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                   onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
                   onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                  colWidths={colWidths} onColResize={handleColResize}
                 />
               ))}
             </div>
           )}
 
           <ConfigTotalsFooter config={activeConfig} inputIsAud={inputIsAud} fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate} />
+
+          {/* Table width resize handle */}
+          <TableWidthHandle onResize={handleTableResize} />
         </div>
       )}
+    </div>
+  )
+}
+
+// ─── Resize handles ───────────────────────────────────────────────────────────
+
+function ColResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
+  const startX = useRef<number | null>(null)
+
+  function onMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    startX.current = e.clientX
+    function onMove(me: MouseEvent) {
+      if (startX.current === null) return
+      const delta = me.clientX - startX.current
+      startX.current = me.clientX
+      onResize(delta)
+    }
+    function onUp() {
+      startX.current = null
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize z-10 flex items-center justify-center group"
+    >
+      <div className="w-px h-3/4 bg-transparent group-hover:bg-blue-400 transition-colors" />
+    </div>
+  )
+}
+
+function TableWidthHandle({ onResize }: { onResize: (delta: number) => void }) {
+  const startX = useRef<number | null>(null)
+  const [active, setActive] = useState(false)
+
+  function onMouseDown(e: React.MouseEvent) {
+    e.preventDefault()
+    startX.current = e.clientX
+    setActive(true)
+    function onMove(me: MouseEvent) {
+      if (startX.current === null) return
+      const delta = me.clientX - startX.current
+      startX.current = me.clientX
+      onResize(delta)
+    }
+    function onUp() {
+      startX.current = null
+      setActive(false)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      title="Drag to resize table width"
+      className={`flex items-center justify-center h-5 cursor-col-resize select-none border-t border-slate-100 transition-colors ${active ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+    >
+      <div className={`w-8 h-1 rounded-full transition-colors ${active ? 'bg-blue-400' : 'bg-slate-200 hover:bg-slate-400'}`} />
     </div>
   )
 }
@@ -325,7 +433,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
 
 function TopGroupBlock({
   group, groupIndex, totalGroups, cfg, inputIsAud, onUpdate, onDelete, onMoveGroup, onMoveRows,
-  fmt, fmtAud, showSecondary, usdToAudRate,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize,
 }: {
   group: ConfigGroup; groupIndex: number; totalGroups: number; cfg: ProductConfiguration
   inputIsAud: boolean
@@ -333,6 +441,7 @@ function TopGroupBlock({
   onMoveGroup: (from: number, to: number) => void
   onMoveRows: (rowIds: Set<string>, destGroupId: string) => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(group.label)
@@ -482,7 +591,7 @@ function TopGroupBlock({
 
       {!group.collapsed && (group.children ?? []).length > 0 && (
         <div>
-          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} />
+          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} colWidths={colWidths} onColResize={onColResize} />
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
@@ -496,6 +605,7 @@ function TopGroupBlock({
                   onDragStart={() => { dragChildIdx.current = ci }}
                   onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                  colWidths={colWidths}
                 />
               )
             }
@@ -548,6 +658,7 @@ function TopGroupBlock({
                   dragChildIdx.current = null
                 }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                colWidths={colWidths} onColResize={onColResize}
               />
             )
           })}
@@ -563,7 +674,7 @@ function SubGroupBlock({
   subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
   onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
-  fmt, fmtAud, showSecondary, usdToAudRate,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
   inputIsAud: boolean
@@ -572,6 +683,7 @@ function SubGroupBlock({
   onMoveRowsToParent: (rowChildren: ConfigChild[]) => void
   onDragStart: () => void; onDrop: () => void; onDropRowInto: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(subGroup.label)
@@ -682,7 +794,7 @@ function SubGroupBlock({
 
       {!subGroup.collapsed && (subGroup.children ?? []).length > 0 && (
         <div className="pl-4">
-          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} indent={1} />
+          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} indent={1} colWidths={colWidths} onColResize={onColResize} />
           {(subGroup.children ?? []).map((child, ci) => {
             if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
             return (
@@ -696,6 +808,7 @@ function SubGroupBlock({
                 onDragStart={() => { dragChildIdx.current = ci }}
                 onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                colWidths={colWidths}
               />
             )
           })}
@@ -708,14 +821,27 @@ function SubGroupBlock({
 // ─── Table header ─────────────────────────────────────────────────────────────
 
 function ConfigTableHeader({
-  isRecurring, indent = 0, showSelect = false, onSelectAll, allSelected,
+  isRecurring, indent = 0, showSelect = false, onSelectAll, allSelected, colWidths, onColResize,
 }: {
   isRecurring: boolean; indent?: number; showSelect?: boolean
   onSelectAll?: () => void; allSelected?: boolean
+  colWidths: ColWidths; onColResize: (idx: number, delta: number) => void
 }) {
-  const cols = isRecurring
-    ? '20px 8px 90px 1fr 50px 78px 78px 78px 72px 52px 84px 28px'
-    : '20px 8px 90px 1fr 50px 78px 78px 78px 84px 28px'
+  const cols = buildColTemplate(colWidths, isRecurring)
+  // Header labels with their colWidths index for resize
+  const headers: { label: string; align: string; wIdx: number }[] = [
+    { label: 'Code',  align: '',               wIdx: 0 },
+    { label: 'Description', align: '',         wIdx: 1 },
+    { label: 'Qty',   align: 'text-center',    wIdx: 2 },
+    { label: 'Cost',  align: 'text-right pr-1',wIdx: 3 },
+    { label: 'Floor', align: 'text-right pr-1',wIdx: 4 },
+    { label: 'Sell',  align: 'text-right pr-1',wIdx: 5 },
+    ...(isRecurring ? [
+      { label: 'Unit', align: 'text-center',   wIdx: 6 },
+      { label: 'Term', align: 'text-center',   wIdx: 7 },
+    ] : []),
+    { label: 'Total', align: 'text-right pr-1',wIdx: 8 },
+  ]
   return (
     <div className={`grid gap-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide bg-slate-50 border-t border-b border-slate-100 py-1 ${indent ? 'pl-10' : 'pl-2'}`}
       style={{ gridTemplateColumns: cols }}>
@@ -723,15 +849,12 @@ function ConfigTableHeader({
         {showSelect && <input type="checkbox" checked={!!allSelected} onChange={onSelectAll} className="w-3 h-3 cursor-pointer" />}
       </span>
       <span />
-      <span>Code</span>
-      <span>Description</span>
-      <span className="text-center">Qty</span>
-      <span className="text-right pr-1">Cost</span>
-      <span className="text-right pr-1">Floor</span>
-      <span className="text-right pr-1">Sell</span>
-      {isRecurring && <span className="text-center">Unit</span>}
-      {isRecurring && <span className="text-center">Term</span>}
-      <span className="text-right pr-1">Total</span>
+      {headers.map(h => (
+        <span key={h.label} className={`relative ${h.align}`}>
+          {h.label}
+          <ColResizeHandle onResize={d => onColResize(h.wIdx, d)} />
+        </span>
+      ))}
       <span />
     </div>
   )
@@ -742,13 +865,14 @@ function ConfigTableHeader({
 function ConfigRowEditor({
   row, isRecurring, groupDefaultUnit, inputIsAud, onChange, onDelete, selected, onToggleSelect,
   onDragStart, onDrop,
-  fmt, fmtAud, showSecondary, usdToAudRate,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths,
 }: {
   row: ConfigRow; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit; inputIsAud: boolean
   onChange: (r: ConfigRow) => void; onDelete: () => void
   selected: boolean; onToggleSelect: () => void
   onDragStart: () => void; onDrop: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
+  colWidths: ColWidths
 }) {
   const [dragOver, setDragOver] = useState(false)
   const rate = usdToAudRate
@@ -769,9 +893,7 @@ function ConfigRowEditor({
 
   const iCls = "w-full border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400 bg-white"
 
-  const cols = isRecurring
-    ? '20px 8px 90px 1fr 50px 78px 78px 78px 72px 52px 84px 28px'
-    : '20px 8px 90px 1fr 50px 78px 78px 78px 84px 28px'
+  const cols = buildColTemplate(colWidths, isRecurring)
 
   return (
     <div
