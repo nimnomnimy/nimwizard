@@ -26,10 +26,11 @@ const CATEGORIES: ProductCategory[] = [
 // ─── Price calculation from configs ──────────────────────────────────────────
 
 function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): number {
+  if (!g?.children) return 0
   return g.children.reduce((s, c) => {
     if (c.type === 'row') {
       const price = field === 'cost' ? c.row.costPriceUsd : field === 'floor' ? c.row.floorPriceUsd : c.row.sellPriceUsd
-      return s + price * c.row.quantity * (c.row.termMonths ?? 1)
+      return s + (price ?? 0) * (c.row.quantity ?? 1) * (c.row.termMonths ?? 1)
     }
     if (c.type === 'subgroup') return s + groupFieldTotal(c.group, field)
     return s
@@ -37,7 +38,8 @@ function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): numb
 }
 
 function configsTotal(configs: ProductConfiguration[], field: 'cost' | 'floor' | 'sell'): number {
-  return configs.reduce((s, cfg) => s + cfg.groups.reduce((gs, g) => gs + groupFieldTotal(g, field), 0), 0)
+  if (!configs?.length) return 0
+  return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupFieldTotal(g, field), 0), 0)
 }
 
 // ─── Form state ───────────────────────────────────────────────────────────────
@@ -427,7 +429,7 @@ function ProductDetailPane({
   fmtAud: (n: number) => string
   showSecondary: boolean
 }) {
-  const hasConfigs = configs.length > 0 && configs.some(c => c.groups.length > 0)
+  const hasConfigs = configs.length > 0 && configs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
 
   // Derived price tiles
   const cost  = hasConfigs ? configsTotal(configs, 'cost')  : parsePrice(form.costPrice)
