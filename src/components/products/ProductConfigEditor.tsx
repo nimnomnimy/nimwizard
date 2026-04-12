@@ -748,8 +748,18 @@ function TopGroupBlock({
           )}
         </div>
 
-        {/* Qty — empty */}
-        <div className={hiddenCols.has(2) ? 'overflow-hidden' : ''} />
+        {/* Qty — group qty multiplier */}
+        <div className={`flex items-center justify-center ${hiddenCols.has(2) ? 'overflow-hidden' : ''}`}>
+          {!hiddenCols.has(2) && (
+            <input type="number" min="1" step="1"
+              value={groupQtyInput}
+              onChange={e => setGroupQtyInput(e.target.value)}
+              onBlur={e => applyGroupQty(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applyGroupQty(groupQtyInput) }}
+              className="w-full border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white/80 font-semibold"
+            />
+          )}
+        </div>
         {/* Cost — empty */}
         <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''} />
         {/* Floor — empty */}
@@ -791,22 +801,12 @@ function TopGroupBlock({
           )}
         </div>
 
-        {/* Total + ×Qty */}
+        {/* Total */}
         <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
           {!hiddenCols.has(8) && (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-slate-400 text-[10px]">×</span>
-              <input type="number" min="1" step="1"
-                value={groupQtyInput}
-                onChange={e => setGroupQtyInput(e.target.value)}
-                onBlur={e => applyGroupQty(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') applyGroupQty(groupQtyInput) }}
-                className="w-8 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] text-center focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white/80"
-              />
-              <div className="text-right">
-                <p className="text-xs font-bold text-slate-700 whitespace-nowrap">{fmt(total)}</p>
-                {showSecondary && <p className="text-[10px] text-slate-400">{fmtAud(total)}</p>}
-              </div>
+            <div className="text-right">
+              <p className="text-xs font-bold text-slate-700 whitespace-nowrap">{fmt(total)}</p>
+              {showSecondary && <p className="text-[10px] text-slate-400">{fmtAud(total)}</p>}
             </div>
           )}
         </div>
@@ -1109,8 +1109,18 @@ function SubGroupBlock({
           ))}
         </div>
 
-        {/* Qty — empty */}
-        <div className={hiddenCols.has(2) ? 'overflow-hidden' : ''} />
+        {/* Qty — subgroup qty multiplier */}
+        <div className={`flex items-center justify-center ${hiddenCols.has(2) ? 'overflow-hidden' : ''}`}>
+          {!hiddenCols.has(2) && (
+            <input type="number" min="1" step="1"
+              value={subQtyInput}
+              onChange={e => setSubQtyInput(e.target.value)}
+              onBlur={e => applySubQty(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
+              className="w-full bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-blue-400 font-semibold"
+            />
+          )}
+        </div>
         {/* Cost — empty */}
         <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''} />
         {/* Floor — empty */}
@@ -1162,22 +1172,12 @@ function SubGroupBlock({
           )}
         </div>
 
-        {/* Total + ×Qty */}
+        {/* Total */}
         <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
           {!hiddenCols.has(8) && (
-            <div className="flex items-center justify-end gap-1">
-              <span className="text-slate-400 text-[10px]">×</span>
-              <input type="number" min="1" step="1"
-                value={subQtyInput}
-                onChange={e => setSubQtyInput(e.target.value)}
-                onBlur={e => applySubQty(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
-                className="w-8 bg-white/70 border border-black/15 rounded px-0.5 py-0.5 text-[10px] text-center focus:outline-none focus:ring-1 focus:ring-blue-400"
-              />
-              <div className="text-right">
-                <p className="text-xs font-bold text-slate-800 whitespace-nowrap">{fmt(total)}</p>
-                {showSecondary && <p className="text-[10px] text-slate-500">{fmtAud(total)}</p>}
-              </div>
+            <div className="text-right">
+              <p className="text-xs font-bold text-slate-800 whitespace-nowrap">{fmt(total)}</p>
+              {showSecondary && <p className="text-[10px] text-slate-500">{fmtAud(total)}</p>}
             </div>
           )}
         </div>
