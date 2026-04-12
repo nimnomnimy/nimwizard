@@ -508,7 +508,7 @@ function TopGroupBlock({
   function applyGroupDisc(val: string) {
     const d = parseFloat(val)
     if (!isNaN(d)) {
-      const clamped = Math.max(0, Math.min(100, d))
+      const clamped = Math.min(100, d)   // allow negative (markup), cap at 100
       onUpdate(applyGroupDiscount(group, clamped))
       setGroupDiscInput(clamped.toFixed(1))
     } else {
@@ -528,7 +528,7 @@ function TopGroupBlock({
       return groupSubtotal(gg)
     })()
     if (!isNaN(net) && sellSubtotal > 0) {
-      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSubtotal) * 100))
+      const newDisc = Math.min(100, (1 - netUsd / sellSubtotal) * 100)  // allow negative markup
       onUpdate(applyGroupDiscount(group, newDisc))
       setGroupDiscInput(newDisc.toFixed(1))
     }
@@ -648,7 +648,7 @@ function TopGroupBlock({
           <div className="flex flex-col items-center gap-0">
             <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
             <div className="relative flex items-center">
-              <input type="number" min="0" max="100" step="0.1"
+              <input type="number" max="100" step="0.1"
                 value={groupDiscInput}
                 onChange={e => setGroupDiscInput(e.target.value)}
                 onBlur={e => applyGroupDisc(e.target.value)}
@@ -896,7 +896,7 @@ function SubGroupBlock({
   function applySubDisc(val: string) {
     const d = parseFloat(val)
     if (!isNaN(d)) {
-      const clamped = Math.max(0, Math.min(100, d))
+      const clamped = Math.min(100, d)   // allow negative (markup), cap at 100
       onUpdate(applyGroupDiscount(subGroup, clamped))
       setSubDiscInput(clamped.toFixed(1))
     } else {
@@ -910,7 +910,7 @@ function SubGroupBlock({
     const netUsd = toUsd(net)
     const sellSub = (() => { const gg = applyGroupDiscount(subGroup, 0); return groupSubtotal(gg) })()
     if (!isNaN(net) && sellSub > 0) {
-      const newDisc = Math.max(0, Math.min(100, (1 - netUsd / sellSub) * 100))
+      const newDisc = Math.min(100, (1 - netUsd / sellSub) * 100)  // allow negative markup
       onUpdate(applyGroupDiscount(subGroup, newDisc))
       setSubDiscInput(newDisc.toFixed(1))
     }
@@ -1049,7 +1049,7 @@ function SubGroupBlock({
           <div className="flex flex-col items-center">
             <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
             <div className="relative flex items-center">
-              <input type="number" min="0" max="100" step="0.1"
+              <input type="number" max="100" step="0.1"
                 value={subDiscInput}
                 onChange={e => setSubDiscInput(e.target.value)}
                 onBlur={e => applySubDisc(e.target.value)}
@@ -1248,7 +1248,7 @@ function ConfigRowEditor({
   function applyDiscount(val: string) {
     const d = parseFloat(val)
     if (!isNaN(d)) {
-      const clamped = Math.max(0, Math.min(100, d))
+      const clamped = Math.min(100, d)   // allow negative (markup), cap at 100
       setField('discountPct', clamped)
       setDiscInput(clamped.toFixed(1))
       setNetInput((dispSell * (1 - clamped / 100)).toFixed(2))
@@ -1260,7 +1260,7 @@ function ConfigRowEditor({
   function applyNet(val: string) {
     const n = parseFloat(val)
     if (!isNaN(n) && dispSell > 0) {
-      const newDisc = Math.max(0, Math.min(100, (1 - n / dispSell) * 100))
+      const newDisc = Math.min(100, (1 - n / dispSell) * 100)  // allow negative markup
       setField('discountPct', newDisc)
       setDiscInput(newDisc.toFixed(1))
       setNetInput((dispSell * (1 - newDisc / 100)).toFixed(2))
@@ -1343,7 +1343,7 @@ function ConfigRowEditor({
         {!hiddenCols.has(9) && (
           <div className="relative flex items-center">
             <input
-              type="number" min="0" max="100" step="0.1"
+              type="number" max="100" step="0.1"
               value={discInput}
               onChange={e => setDiscInput(e.target.value)}
               onBlur={e => applyDiscount(e.target.value)}
