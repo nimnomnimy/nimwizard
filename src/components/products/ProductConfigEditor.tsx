@@ -652,22 +652,21 @@ function TopGroupBlock({
     }
   }
 
-  // Editing the group Net directly: back-calculate discount so that
-  // all rows get a uniform disc% that makes groupSubtotal = enteredNet
+  // Editing the group Net directly: scale all row sell prices proportionally
   function applyGroupNet(val: string) {
     const net = parseFloat(val)
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
-    const netUsd = toUsd(net)
-    // sellSubtotal = sum of sell×qty×term (disc=0)
-    const sellSubtotal = (() => {
-      const gg = applyGroupDiscount(group, 0)
-      return groupSubtotal(gg)
-    })()
-    if (!isNaN(net) && sellSubtotal > 0) {
-      const newDisc = Math.min(100, (1 - netUsd / sellSubtotal) * 100)  // allow negative markup
-      onUpdate(applyGroupDiscount(group, newDisc))
-      setGroupDiscInput(newDisc.toFixed(1))
-    }
+    const targetNetUsd = toUsd(net)
+    if (isNaN(targetNetUsd)) return
+    const currentNet = groupSubtotal(group)
+    if (currentNet === 0) return
+    const ratio = targetNetUsd / currentNet
+    const scaleChildren = (children: ConfigChild[]): ConfigChild[] =>
+      children.map(c => {
+        if (c.type === 'row') return { type: 'row', row: { ...c.row, sellPriceUsd: (c.row.sellPriceUsd ?? 0) * ratio } }
+        return { type: 'subgroup', group: { ...c.group, children: scaleChildren(c.group.children ?? []) } }
+      })
+    onUpdate({ ...group, children: scaleChildren(group.children ?? []) })
   }
 
   function applyGroupQty(val: string) {
@@ -1017,13 +1016,18 @@ function SubGroupBlock({
   function applySubNet(val: string) {
     const net = parseFloat(val)
     const toUsd = (v: number) => inputIsAud ? v / usdToAudRate : v
-    const netUsd = toUsd(net)
-    const sellSub = (() => { const gg = applyGroupDiscount(subGroup, 0); return groupSubtotal(gg) })()
-    if (!isNaN(net) && sellSub > 0) {
-      const newDisc = Math.min(100, (1 - netUsd / sellSub) * 100)  // allow negative markup
-      onUpdate(applyGroupDiscount(subGroup, newDisc))
-      setSubDiscInput(newDisc.toFixed(1))
-    }
+    const targetNetUsd = toUsd(net)
+    if (isNaN(targetNetUsd)) return
+    const currentNet = groupSubtotal(subGroup)   // current net total in USD
+    if (currentNet === 0) return
+    const ratio = targetNetUsd / currentNet
+    // Scale every row's sellPriceUsd proportionally to preserve relative weights
+    const scaleChildren = (children: ConfigChild[]): ConfigChild[] =>
+      children.map(c => {
+        if (c.type === 'row') return { type: 'row', row: { ...c.row, sellPriceUsd: (c.row.sellPriceUsd ?? 0) * ratio } }
+        return { type: 'subgroup', group: { ...c.group, children: scaleChildren(c.group.children ?? []) } }
+      })
+    onUpdate({ ...subGroup, children: scaleChildren(subGroup.children ?? []) })
   }
 
   function applySubQty(val: string) {
