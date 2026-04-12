@@ -42,8 +42,9 @@ function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
 }
 
 function groupTotal(g: ConfigGroup): number {
+  const isRecurring = g.pricingType === 'recurring'
   return (g.children ?? []).reduce((s, c) => {
-    if (c.type === 'row') return s + (c.row.sellPriceUsd ?? 0) * (c.row.quantity ?? 1) * (c.row.termMonths ?? 1)
+    if (c.type === 'row') return s + (c.row.sellPriceUsd ?? 0) * (c.row.quantity ?? 1) * (isRecurring ? (c.row.termMonths ?? 1) : 1)
     return s + groupTotal(c.group)
   }, 0)
 }
@@ -419,7 +420,7 @@ function TopGroupBlock({
         {/* One-time / Recurring toggle */}
         <div className="flex items-center gap-0.5 flex-shrink-0">
           {(['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
-            <button key={pt} onClick={() => onUpdate({ ...group, pricingType: pt })}
+            <button key={pt} onClick={() => onUpdate({ ...group, pricingType: pt, children: (group.children ?? []).map(c => c.type === 'subgroup' ? { ...c, group: { ...c.group, pricingType: pt } } : c) })}
               className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors capitalize ${
                 group.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-200'
               }`}>
@@ -560,7 +561,7 @@ function TopGroupBlock({
 
 function SubGroupBlock({
   subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
-  parentIsRecurring: _parentIsRecurring, parentDefaultUnit,
+  parentIsRecurring, parentDefaultUnit,
   onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
@@ -579,8 +580,8 @@ function SubGroupBlock({
   const [headerDragOver, setHeaderDragOver] = useState(false)
   const dragChildIdx = useRef<number | null>(null)
 
-  // Sub-group inherits pricing type from parent (user can override)
-  const isRecurring = subGroup.pricingType === 'recurring'
+  // Sub-group inherits pricing type from parent
+  const isRecurring = parentIsRecurring
   const total = groupTotal(subGroup)
   const dispTotal = inputIsAud ? total * usdToAudRate : total
   const dispFmt = inputIsAud ? fmtAud : fmt
@@ -643,24 +644,13 @@ function SubGroupBlock({
           </button>
         )}
 
-        {/* Pricing type toggle for sub-group */}
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {(['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
-            <button key={pt} onClick={() => onUpdate({ ...subGroup, pricingType: pt })}
-              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
-                subGroup.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white text-slate-300 hover:text-slate-600 border border-slate-200'
-              }`}>
-              {pt === 'one-time' ? '1×' : '↻'}
-            </button>
-          ))}
-          {isRecurring && (
-            <select value={effectiveDefaultUnit}
-              onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
-              className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ml-1">
-              {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
-          )}
-        </div>
+        {isRecurring && (
+          <select value={effectiveDefaultUnit}
+            onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
+            className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 flex-shrink-0">
+            {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        )}
 
         <span className="text-xs font-semibold text-slate-500 flex-shrink-0">
           {dispFmt(dispTotal)}
