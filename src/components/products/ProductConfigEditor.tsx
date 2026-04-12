@@ -34,16 +34,16 @@ function reorder<T>(arr: T[], from: number, to: number): T[] {
 }
 
 function rowsOf(g: ConfigGroup): ConfigRow[] {
-  return g.children.filter((c): c is { type: 'row'; row: ConfigRow } => c.type === 'row').map(c => c.row)
+  return (g.children ?? []).filter((c): c is { type: 'row'; row: ConfigRow } => c.type === 'row').map(c => c.row)
 }
 
 function subGroupsOf(g: ConfigGroup): ConfigGroup[] {
-  return g.children.filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
+  return (g.children ?? []).filter((c): c is { type: 'subgroup'; group: ConfigGroup } => c.type === 'subgroup').map(c => c.group)
 }
 
 function groupTotal(g: ConfigGroup): number {
-  return g.children.reduce((s, c) => {
-    if (c.type === 'row') return s + c.row.sellPriceUsd * c.row.quantity * (c.row.termMonths ?? 1)
+  return (g.children ?? []).reduce((s, c) => {
+    if (c.type === 'row') return s + (c.row.sellPriceUsd ?? 0) * (c.row.quantity ?? 1) * (c.row.termMonths ?? 1)
     return s + groupTotal(c.group)
   }, 0)
 }
@@ -80,7 +80,7 @@ function findGroup(cfg: ProductConfiguration, id: string): { group: ConfigGroup;
 function updateGroupInConfig(cfg: ProductConfiguration, updated: ConfigGroup): ProductConfiguration {
   function updateInGroup(g: ConfigGroup): ConfigGroup {
     if (g.id === updated.id) return updated
-    return { ...g, children: g.children.map(c => c.type === 'subgroup' ? { type: 'subgroup', group: updateInGroup(c.group) } : c) }
+    return { ...g, children: (g.children ?? []).map(c => c.type === 'subgroup' ? { type: 'subgroup', group: updateInGroup(c.group) } : c) }
   }
   return { ...cfg, groups: cfg.groups.map(g => updateInGroup(g)) }
 }
@@ -478,10 +478,10 @@ function TopGroupBlock({
         </button>
       </div>
 
-      {!group.collapsed && group.children.length > 0 && (
+      {!group.collapsed && (group.children ?? []).length > 0 && (
         <div>
           <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} />
-          {group.children.map((child, ci) => {
+          {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
                 <ConfigRowEditor
@@ -689,10 +689,10 @@ function SubGroupBlock({
         </button>
       </div>
 
-      {!subGroup.collapsed && subGroup.children.length > 0 && (
+      {!subGroup.collapsed && (subGroup.children ?? []).length > 0 && (
         <div className="pl-4">
           <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} indent={1} />
-          {subGroup.children.map((child, ci) => {
+          {(subGroup.children ?? []).map((child, ci) => {
             if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
             return (
               <ConfigRowEditor
@@ -845,7 +845,7 @@ function ConfigRowEditor({
 function ConfigTotalsFooter({ config, inputIsAud, fmt, fmtAud, showSecondary, usdToAudRate }: {
   config: ProductConfiguration; inputIsAud: boolean; fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
-  const totalUsd = config.groups.reduce((s, g) => s + groupTotal(g), 0)
+  const totalUsd = (config.groups ?? []).reduce((s, g) => s + groupTotal(g), 0)
   const dispFmt  = inputIsAud ? fmtAud : fmt
   const secFmt   = inputIsAud ? fmt : fmtAud
   const dispTotal = inputIsAud ? totalUsd * usdToAudRate : totalUsd
