@@ -392,7 +392,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
             </div>
           )}
 
-          <ConfigTotalsFooter config={activeConfig} inputIsAud={inputIsAud} fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate} />
+          <ConfigTotalsFooter config={activeConfig} fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} />
 
           {/* Table width resize handle */}
           <TableWidthHandle onResize={handleTableResize} />
@@ -495,10 +495,8 @@ function TopGroupBlock({
   const isRecurring = group.pricingType === 'recurring'
   const subtotal   = groupSubtotal(group)         // net × rowQty × term — before group qty
   const total      = subtotal * (group.qty ?? 1)  // × group qty
+  // dispSubtotal is in the active input currency (for the Net editable input field)
   const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
-  const dispTotal  = inputIsAud ? total * usdToAudRate : total
-  const dispFmt    = inputIsAud ? fmtAud : fmt
-  const secFmt     = inputIsAud ? fmt : fmtAud
 
   const headerColors = ['bg-violet-50 border-b border-violet-100','bg-fuchsia-50 border-b border-fuchsia-100','bg-indigo-50 border-b border-indigo-100','bg-cyan-50 border-b border-cyan-100']
   const headerBg = headerColors[groupIndex % headerColors.length]
@@ -688,8 +686,8 @@ function TopGroupBlock({
           {/* = Total */}
           <div className="flex flex-col items-end gap-0">
             <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
-            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{dispFmt(dispTotal)}</span>
-            {showSecondary && <span className="text-[10px] text-slate-400">{secFmt(total)}</span>}
+            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{fmt(total)}</span>
+            {showSecondary && <span className="text-[10px] text-slate-400">{fmtAud(total)}</span>}
           </div>
         </div>
 
@@ -877,10 +875,8 @@ function SubGroupBlock({
   const isRecurring = parentIsRecurring
   const subtotal     = groupSubtotal(subGroup)
   const total        = subtotal * (subGroup.qty ?? 1)
+  // dispSubtotal/dispTotal are in the active input currency (for the Net editable input field)
   const dispSubtotal = inputIsAud ? subtotal * usdToAudRate : subtotal
-  const dispTotal    = inputIsAud ? total * usdToAudRate : total
-  const dispFmt  = inputIsAud ? fmtAud : fmt
-  const secFmt   = inputIsAud ? fmt : fmtAud
   const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
   // Colour theming
@@ -1085,8 +1081,8 @@ function SubGroupBlock({
           </div>
           <div className="flex flex-col items-end">
             <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
-            <span className="text-xs font-bold text-slate-800 whitespace-nowrap">{dispFmt(dispTotal)}</span>
-            {showSecondary && <span className="text-[10px] text-slate-500">{secFmt(total)}</span>}
+            <span className="text-xs font-bold text-slate-800 whitespace-nowrap">{fmt(total)}</span>
+            {showSecondary && <span className="text-[10px] text-slate-500">{fmtAud(total)}</span>}
           </div>
         </div>
 
@@ -1225,11 +1221,7 @@ function ConfigRowEditor({
   const dispSell  = toDisplay(row.sellPriceUsd)
   const discPct   = row.discountPct ?? 0
   const dispNet   = dispSell * (1 - discPct / 100)
-  // Total = net displayed price × qty × term
-  const dispTotal = dispNet * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
   const totalNetUsd = rowNetUsd(row) * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
-  const dispFmt   = inputIsAud ? fmtAud : fmt
-  const secFmt    = inputIsAud ? fmt : fmtAud
   const belowFloor = row.floorPriceUsd > 0 && row.sellPriceUsd < row.floorPriceUsd
 
   const [discInput, setDiscInput] = useState(() => discPct.toFixed(1))
@@ -1368,8 +1360,8 @@ function ConfigRowEditor({
       </div>
       <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
         {!hiddenCols.has(8) && <>
-          <p className="text-xs font-semibold text-slate-700">{dispFmt(dispTotal)}</p>
-          {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{secFmt(totalNetUsd)}</p>}
+          <p className="text-xs font-semibold text-slate-700">{fmt(totalNetUsd)}</p>
+          {showSecondary && totalNetUsd > 0 && <p className="text-[10px] text-slate-400">{fmtAud(totalNetUsd)}</p>}
         </>}
       </div>
       <button onClick={onDelete} className="p-1 text-slate-300 hover:text-red-500 transition-colors rounded">
@@ -1383,19 +1375,16 @@ function ConfigRowEditor({
 
 // ─── Footer totals ────────────────────────────────────────────────────────────
 
-function ConfigTotalsFooter({ config, inputIsAud, fmt, fmtAud, showSecondary, usdToAudRate }: {
-  config: ProductConfiguration; inputIsAud: boolean; fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
+function ConfigTotalsFooter({ config, fmt, fmtAud, showSecondary }: {
+  config: ProductConfiguration; fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean
 }) {
   const totalUsd = (config.groups ?? []).reduce((s, g) => s + groupTotal(g), 0)
-  const dispFmt  = inputIsAud ? fmtAud : fmt
-  const secFmt   = inputIsAud ? fmt : fmtAud
-  const dispTotal = inputIsAud ? totalUsd * usdToAudRate : totalUsd
   return (
     <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-4">
       <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Configuration Total</span>
       <div className="text-right">
-        <p className="text-base font-bold text-slate-900">{dispFmt(dispTotal)}</p>
-        {showSecondary && <p className="text-xs text-slate-400">{secFmt(totalUsd)}</p>}
+        <p className="text-base font-bold text-slate-900">{fmt(totalUsd)}</p>
+        {showSecondary && <p className="text-xs text-slate-400">{fmtAud(totalUsd)}</p>}
       </div>
     </div>
   )
