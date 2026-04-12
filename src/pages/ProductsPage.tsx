@@ -109,6 +109,7 @@ export default function ProductsPage() {
   const addProduct    = useAppStore(s => s.addDealProduct)
   const updateProduct = useAppStore(s => s.updateDealProduct)
   const deleteProduct = useAppStore(s => s.deleteDealProduct)
+  const saveFxRate    = useAppStore(s => s.saveFxRate)
   const fmt           = useCurrency(s => s.fmt)
   const fmtAud        = useCurrency(s => s.fmtAud)
   const showSecondary = useCurrency(s => s.showSecondary)
@@ -247,7 +248,7 @@ export default function ProductsPage() {
       {/* Top bar */}
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
         <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Products</h2>
-        <CurrencyBar />
+        <CurrencyBar onFxChange={saveFxRate} />
         <button
           onClick={() => { setActiveId(null) }}
           className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
@@ -406,13 +407,24 @@ function ProductDetailPane({
   showSecondary: boolean
 }) {
   const [tab, setTab] = useState<'details' | 'history'>('details')
+  const [activeConfigId, setActiveConfigId] = useState<string | null>(configs[0]?.id ?? null)
 
-  const hasConfigs = configs.length > 0 && configs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
+  // Keep activeConfigId in sync when configs change (e.g. first config added)
+  useEffect(() => {
+    if (activeConfigId === null && configs.length > 0) setActiveConfigId(configs[0].id)
+  }, [configs]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Only use the currently selected config for price tile calculations
+  const activeConfigs = activeConfigId
+    ? configs.filter(c => c.id === activeConfigId)
+    : configs.slice(0, 1)
+
+  const hasConfigs = activeConfigs.length > 0 && activeConfigs.some(c => (c.groups ?? []).some(g => (g.children ?? []).length > 0))
 
   // Derived price tiles
-  const cost  = hasConfigs ? configsTotal(configs, 'cost')  : parsePrice(form.costPrice)
-  const floor = hasConfigs ? configsTotal(configs, 'floor') : parsePrice(form.floorSellPrice)
-  const sell  = hasConfigs ? configsTotal(configs, 'sell')  : parsePrice(form.defaultSellPrice)
+  const cost  = hasConfigs ? configsTotal(activeConfigs, 'cost')  : parsePrice(form.costPrice)
+  const floor = hasConfigs ? configsTotal(activeConfigs, 'floor') : parsePrice(form.floorSellPrice)
+  const sell  = hasConfigs ? configsTotal(activeConfigs, 'sell')  : parsePrice(form.defaultSellPrice)
 
   const recurringPrice = parsePrice(form.recurringPricePerPeriod)
   const recurringFloor = parsePrice(form.recurringFloorPricePerPeriod)
@@ -601,7 +613,12 @@ function ProductDetailPane({
             {/* Configurations */}
             {!isNew && existing && (
               <div className="border-t border-slate-100 pt-4">
-                <ProductConfigEditor configs={configs} onChange={onConfigsChange} />
+                <ProductConfigEditor
+                  configs={configs}
+                  onChange={onConfigsChange}
+                  activeConfigId={activeConfigId}
+                  onActiveConfigChange={setActiveConfigId}
+                />
               </div>
             )}
             {isNew && (

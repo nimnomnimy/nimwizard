@@ -6,6 +6,7 @@ import {
   type Unsubscribe,
 } from 'firebase/firestore'
 import { db } from '../lib/firebase'
+import { useCurrency } from './useCurrency'
 import type {
   AppState, Contact, Meeting, TaskBucket, SavedChart, DottedLine,
   PeerLine, Position, EmailSettings, Timeline, TimelineItem, SubTask, Task, Diagram,
@@ -42,6 +43,7 @@ export const DEFAULT_BUCKET_DEFS: Omit<TaskBucket, 'tasks'>[] = [
 interface SettingsDoc {
   bucketDefs: Omit<TaskBucket, 'tasks'>[]
   emailSettings: EmailSettings
+  usdToAudRate?: number
 }
 
 // ─── Org chart document shape (stored at users/{uid}/orgchart/state) ──────────
@@ -119,6 +121,7 @@ interface StoreState extends AppState {
 
   // Settings
   setEmailSettings: (settings: EmailSettings) => void
+  saveFxRate: (usdToAudRate: number) => void
 
   // Timelines
   addTimeline: (t: Timeline) => void
@@ -523,6 +526,10 @@ export const useAppStore = create<StoreState>()(
             }
             s.emailSettings = d.emailSettings ?? {}
           })
+          // Sync FX rate into currency store if present
+          if (d.usdToAudRate && d.usdToAudRate > 0) {
+            useCurrency.getState().setFxRateDirect(d.usdToAudRate)
+          }
           // Re-assign tasks into the now-correct bucket defs
           rebuildTaskBuckets()
         } else {
@@ -937,6 +944,13 @@ export const useAppStore = create<StoreState>()(
         console.error('[setEmailSettings]', e)
         if (prev) set(s => { s.emailSettings = prev! })
       })
+    },
+
+    saveFxRate: (usdToAudRate) => {
+      const u = get().uid
+      if (!u) return
+      const doc: SettingsDoc = { ...buildSettingsDoc(get()), usdToAudRate }
+      writeSettings(u, doc).catch(e => console.error('[saveFxRate]', e))
     },
 
     // ── Timelines ─────────────────────────────────────────────────────────────
@@ -1482,6 +1496,7 @@ function buildSettingsDoc(state: StoreState): SettingsDoc {
   return {
     bucketDefs:    state.taskBuckets.map(({ id, name, color }) => ({ id, name, color })),
     emailSettings: state.emailSettings,
+    usdToAudRate:  useCurrency.getState().usdToAudRate,
   }
 }
 

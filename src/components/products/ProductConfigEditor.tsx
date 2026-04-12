@@ -141,12 +141,20 @@ function parseExcelPaste(text: string, fxRate: number, inputIsAud: boolean): { g
 interface Props {
   configs: ProductConfiguration[]
   onChange: (configs: ProductConfiguration[]) => void
+  activeConfigId?: string | null
+  onActiveConfigChange?: (id: string | null) => void
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProductConfigEditor({ configs, onChange }: Props) {
-  const [activeConfigId, setActiveConfigId] = useState<string | null>(configs[0]?.id ?? null)
+export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange }: Props) {
+  const [internalActiveId, setInternalActiveId] = useState<string | null>(configs[0]?.id ?? null)
+  const activeConfigId = controlledActiveId !== undefined ? controlledActiveId : internalActiveId
+  function setActiveConfigId(id: string | null) {
+    setInternalActiveId(id)
+    onActiveConfigChange?.(id)
+  }
+
   const [editingConfigName, setEditingConfigName] = useState<string | null>(null)
   const [nameInput, setNameInput] = useState('')
   const [pasteOpen, setPasteOpen] = useState(false)
@@ -155,9 +163,12 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
   const pasteAreaRef = useRef<HTMLTextAreaElement>(null)
 
   const usdToAudRate  = useCurrency(s => s.usdToAudRate)
+  const currency      = useCurrency(s => s.currency)
   const fmt           = useCurrency(s => s.fmt)
   const fmtAud        = useCurrency(s => s.fmtAud)
   const showSecondary = useCurrency(s => s.showSecondary)
+  // Global currency mode: AUD mode means inputs are in AUD
+  const inputIsAud    = currency === 'AUD'
 
   const activeConfig = configs.find(c => c.id === activeConfigId) ?? null
 
@@ -195,7 +206,7 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
   }
 
   function applyPaste(cfg: ProductConfiguration) {
-    const result = parseExcelPaste(pasteText, usdToAudRate, cfg.currency === 'AUD')
+    const result = parseExcelPaste(pasteText, usdToAudRate, inputIsAud)
     if (!result) { setPasteError('Could not parse. Ensure the first row is a header with at least a "Description" column.'); return }
     updateConfig({ ...cfg, groups: result.groups })
     setPasteOpen(false); setPasteText(''); setPasteError('')
@@ -246,14 +257,7 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
                 {activeConfig.name} ✎
               </button>
             )}
-            <div className="flex items-center gap-1 ml-auto">
-              <span className="text-[11px] text-slate-400 font-semibold">Prices in:</span>
-              {(['USD', 'AUD'] as const).map(c => (
-                <button key={c} onClick={() => updateConfig({ ...activeConfig, currency: c })}
-                  className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${activeConfig.currency === c ? 'bg-blue-500 text-white' : 'bg-slate-200 text-slate-600 hover:bg-slate-300'}`}>{c}</button>
-              ))}
-            </div>
-            <button onClick={() => setPasteOpen(v => !v)}
+            <button onClick={() => setPasteOpen(v => !v)} className="ml-auto"
               className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
               Paste Excel
             </button>
@@ -298,6 +302,7 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
                   groupIndex={gi}
                   totalGroups={activeConfig.groups.length}
                   cfg={activeConfig}
+                  inputIsAud={inputIsAud}
                   onUpdate={g => updateConfig(updateGroupInConfig(activeConfig, g))}
                   onDelete={() => deleteTopGroup(activeConfig, group.id)}
                   onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
@@ -308,7 +313,7 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
             </div>
           )}
 
-          <ConfigTotalsFooter config={activeConfig} fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate} />
+          <ConfigTotalsFooter config={activeConfig} inputIsAud={inputIsAud} fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate} />
         </div>
       )}
     </div>
@@ -318,10 +323,11 @@ export default function ProductConfigEditor({ configs, onChange }: Props) {
 // ─── Top-level group ──────────────────────────────────────────────────────────
 
 function TopGroupBlock({
-  group, groupIndex, totalGroups, cfg, onUpdate, onDelete, onMoveGroup, onMoveRows,
+  group, groupIndex, totalGroups, cfg, inputIsAud, onUpdate, onDelete, onMoveGroup, onMoveRows,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
   group: ConfigGroup; groupIndex: number; totalGroups: number; cfg: ProductConfiguration
+  inputIsAud: boolean
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
   onMoveGroup: (from: number, to: number) => void
   onMoveRows: (rowIds: Set<string>, destGroupId: string) => void
@@ -334,9 +340,9 @@ function TopGroupBlock({
 
   const isRecurring = group.pricingType === 'recurring'
   const total    = groupTotal(group)
-  const dispTotal = cfg.currency === 'AUD' ? total * usdToAudRate : total
-  const dispFmt  = cfg.currency === 'AUD' ? fmtAud : fmt
-  const secFmt   = cfg.currency === 'AUD' ? fmt : fmtAud
+  const dispTotal = inputIsAud ? total * usdToAudRate : total
+  const dispFmt  = inputIsAud ? fmtAud : fmt
+  const secFmt   = inputIsAud ? fmt : fmtAud
 
   const headerColors = ['bg-violet-50 border-b border-violet-100','bg-fuchsia-50 border-b border-fuchsia-100','bg-indigo-50 border-b border-indigo-100','bg-cyan-50 border-b border-cyan-100']
   const headerBg = headerColors[groupIndex % headerColors.length]
@@ -479,8 +485,9 @@ function TopGroupBlock({
             if (child.type === 'row') {
               return (
                 <ConfigRowEditor
-                  key={child.row.id} row={child.row} cfg={cfg} isRecurring={isRecurring}
+                  key={child.row.id} row={child.row} isRecurring={isRecurring}
                   groupDefaultUnit={group.defaultUnit ?? 'months'}
+                  inputIsAud={inputIsAud}
                   onChange={r => updateChild(ci, { type: 'row', row: r })}
                   onDelete={() => deleteChild(ci)}
                   selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
@@ -498,10 +505,27 @@ function TopGroupBlock({
                 childIndex={ci}
                 totalChildren={group.children.length}
                 cfg={cfg}
+                inputIsAud={inputIsAud}
                 parentIsRecurring={isRecurring}
                 parentDefaultUnit={group.defaultUnit ?? 'months'}
                 onUpdate={sg => updateChild(ci, { type: 'subgroup', group: sg })}
                 onDelete={() => deleteChild(ci)}
+                onMoveRowsToParent={(rowChildren) => {
+                  // Move selected rows from subgroup back into the parent group at the subgroup's position
+                  const rowIds = new Set(rowChildren.filter(c => c.type === 'row').map(c => (c as {type:'row';row:ConfigRow}).row.id))
+                  const updatedSg = { ...child.group, children: child.group.children.filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
+                  const nextChildren: typeof group.children = []
+                  for (let i = 0; i < group.children.length; i++) {
+                    if (i === ci) {
+                      // insert the extracted rows at this position, then the updated subgroup
+                      nextChildren.push(...rowChildren)
+                      nextChildren.push({ type: 'subgroup', group: updatedSg })
+                    } else {
+                      nextChildren.push(group.children[i])
+                    }
+                  }
+                  onUpdate({ ...group, children: nextChildren })
+                }}
                 onDragStart={() => { dragChildIdx.current = ci }}
                 onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
                 onDropRowInto={() => {
@@ -534,13 +558,16 @@ function TopGroupBlock({
 // ─── Sub-group ────────────────────────────────────────────────────────────────
 
 function SubGroupBlock({
-  subGroup, childIndex, totalChildren: _totalChildren, cfg, parentIsRecurring: _parentIsRecurring, parentDefaultUnit,
-  onUpdate, onDelete, onDragStart, onDrop, onDropRowInto,
+  subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
+  parentIsRecurring: _parentIsRecurring, parentDefaultUnit,
+  onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
+  inputIsAud: boolean
   parentIsRecurring: boolean; parentDefaultUnit: ConfigRowUnit
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
+  onMoveRowsToParent: (rowChildren: ConfigChild[]) => void
   onDragStart: () => void; onDrop: () => void; onDropRowInto: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
@@ -554,9 +581,9 @@ function SubGroupBlock({
   // Sub-group inherits pricing type from parent (user can override)
   const isRecurring = subGroup.pricingType === 'recurring'
   const total = groupTotal(subGroup)
-  const dispTotal = cfg.currency === 'AUD' ? total * usdToAudRate : total
-  const dispFmt = cfg.currency === 'AUD' ? fmtAud : fmt
-  const secFmt  = cfg.currency === 'AUD' ? fmt : fmtAud
+  const dispTotal = inputIsAud ? total * usdToAudRate : total
+  const dispFmt = inputIsAud ? fmtAud : fmt
+  const secFmt  = inputIsAud ? fmt : fmtAud
   const subBg = childIndex % 2 === 0 ? 'bg-amber-50' : 'bg-yellow-50'
   const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
@@ -640,7 +667,21 @@ function SubGroupBlock({
         </span>
 
         {!subGroup.collapsed && (
-          <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
+          <div className="flex items-center gap-1">
+            {selected.size > 0 && (
+              <button
+                onClick={() => {
+                  const toMove = subGroup.children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
+                  onMoveRowsToParent(toMove)
+                  setSelected(new Set())
+                }}
+                title="Move selected rows to parent group"
+                className="text-[11px] text-amber-700 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
+                ↑ Parent ({selected.size})
+              </button>
+            )}
+            <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
+          </div>
         )}
 
         <button onClick={onDelete} className="text-slate-300 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
@@ -655,8 +696,9 @@ function SubGroupBlock({
             if (child.type !== 'row') return null // no nested sub-groups beyond 2 levels
             return (
               <ConfigRowEditor
-                key={child.row.id} row={child.row} cfg={cfg} isRecurring={isRecurring}
+                key={child.row.id} row={child.row} isRecurring={isRecurring}
                 groupDefaultUnit={effectiveDefaultUnit}
+                inputIsAud={inputIsAud}
                 onChange={r => updateChild(ci, { type: 'row', row: r })}
                 onDelete={() => deleteChild(ci)}
                 selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
@@ -707,18 +749,17 @@ function ConfigTableHeader({
 // ─── Row editor ───────────────────────────────────────────────────────────────
 
 function ConfigRowEditor({
-  row, cfg, isRecurring, groupDefaultUnit, onChange, onDelete, selected, onToggleSelect,
+  row, isRecurring, groupDefaultUnit, inputIsAud, onChange, onDelete, selected, onToggleSelect,
   onDragStart, onDrop,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
-  row: ConfigRow; cfg: ProductConfiguration; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit
+  row: ConfigRow; isRecurring: boolean; groupDefaultUnit: ConfigRowUnit; inputIsAud: boolean
   onChange: (r: ConfigRow) => void; onDelete: () => void
   selected: boolean; onToggleSelect: () => void
   onDragStart: () => void; onDrop: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const [dragOver, setDragOver] = useState(false)
-  const inputIsAud = cfg.currency === 'AUD'
   const rate = usdToAudRate
   const toDisplay = (usd: number) => inputIsAud ? usd * rate : usd
   const toUsd = (v: number) => inputIsAud ? v / rate : v
@@ -801,13 +842,13 @@ function ConfigRowEditor({
 
 // ─── Footer totals ────────────────────────────────────────────────────────────
 
-function ConfigTotalsFooter({ config, fmt, fmtAud, showSecondary, usdToAudRate }: {
-  config: ProductConfiguration; fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
+function ConfigTotalsFooter({ config, inputIsAud, fmt, fmtAud, showSecondary, usdToAudRate }: {
+  config: ProductConfiguration; inputIsAud: boolean; fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const totalUsd = config.groups.reduce((s, g) => s + groupTotal(g), 0)
-  const dispFmt  = config.currency === 'AUD' ? fmtAud : fmt
-  const secFmt   = config.currency === 'AUD' ? fmt : fmtAud
-  const dispTotal = config.currency === 'AUD' ? totalUsd * usdToAudRate : totalUsd
+  const dispFmt  = inputIsAud ? fmtAud : fmt
+  const secFmt   = inputIsAud ? fmt : fmtAud
+  const dispTotal = inputIsAud ? totalUsd * usdToAudRate : totalUsd
   return (
     <div className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-4">
       <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Configuration Total</span>
