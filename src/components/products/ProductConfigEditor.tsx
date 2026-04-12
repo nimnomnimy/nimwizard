@@ -527,12 +527,13 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
 
             {/* Always-visible actions — pushed to right */}
             <div className="flex items-center gap-1.5 ml-auto">
-              {(selectedGroupId || activeConfig.groups.length === 1) && (
-                <button onClick={() => toolbarAddRow(activeConfig)}
-                  className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
-                  + Row
-                </button>
-              )}
+              <button
+                onClick={() => toolbarAddRow(activeConfig)}
+                disabled={!selectedGroupId && activeConfig.groups.length > 1}
+                title={!selectedGroupId && activeConfig.groups.length > 1 ? 'Select a group first' : undefined}
+                className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                + Row
+              </button>
               <button onClick={() => addTopGroup(activeConfig)}
                 className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
                 + Group
