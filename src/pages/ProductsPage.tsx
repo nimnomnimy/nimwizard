@@ -54,8 +54,6 @@ type FormState = {
   costPrice: string
   floorSellPrice: string
   defaultSellPrice: string
-  fxOverride?: number
-  fxEnabled: boolean
   recurringPeriod: RecurringPeriod
   recurringTermMonths: number
   recurringPricePerPeriod: string
@@ -71,8 +69,6 @@ function emptyForm(): FormState {
     costPrice: '',
     floorSellPrice: '',
     defaultSellPrice: '',
-    fxOverride: undefined,
-    fxEnabled: false,
     recurringPeriod: 'monthly',
     recurringTermMonths: 36,
     recurringPricePerPeriod: '',
@@ -90,8 +86,6 @@ function productToForm(p: DealProduct): FormState {
     costPrice: p.costPrice ? String(p.costPrice) : '',
     floorSellPrice: p.floorSellPrice ? String(p.floorSellPrice) : '',
     defaultSellPrice: p.pricingType === 'one-time' && p.defaultSellPrice ? String(p.defaultSellPrice) : '',
-    fxOverride: p.fxOverride,
-    fxEnabled: p.fxOverride !== undefined,
     recurringPeriod: rc?.period ?? 'monthly',
     recurringTermMonths: rc?.termMonths ?? 36,
     recurringPricePerPeriod: rc?.pricePerPeriod ? String(rc.pricePerPeriod) : '',
@@ -221,7 +215,7 @@ export default function ProductsPage() {
         pricePerPeriod:      parsePrice(form.recurringPricePerPeriod),
         floorPricePerPeriod: parsePrice(form.recurringFloorPricePerPeriod),
       } : undefined,
-      fxOverride:     form.fxEnabled && form.fxOverride ? Number(form.fxOverride) : undefined,
+      fxOverride:     existing?.fxOverride,
       priceHistory:   newHistory,
       createdAt:      existing?.createdAt ?? Date.now(),
       configurations: existing?.configurations,
@@ -494,17 +488,34 @@ function ProductDetailPane({
 
   return (
     <div className="max-w-3xl mx-auto flex flex-col h-full">
-      {/* ── Tabs (only for existing products) ── */}
-      {!isNew && (
-        <div className="flex border-b border-slate-200 px-6 pt-4 flex-shrink-0">
-          {(['details', 'history'] as const).map(t => (
-            <button key={t} type="button" onClick={() => setTab(t)}
-              className={`px-4 py-2 text-sm font-semibold border-b-2 -mb-px transition-colors ${tab === t ? 'border-blue-500 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>
-              {t === 'details' ? 'Details' : `Price History${historyCount > 0 ? ` (${historyCount})` : ''}`}
-            </button>
-          ))}
+      {/* ── Top action bar ── */}
+      <div className="flex items-center gap-2 px-6 pt-4 pb-2 flex-shrink-0 border-b border-slate-100">
+        <div className="flex-1">
+          {!isNew && (
+            <div className="flex gap-1">
+              {(['details', 'history'] as const).map(t => (
+                <button key={t} type="button" onClick={() => setTab(t)}
+                  className={`px-3 py-1.5 text-sm font-semibold rounded-lg transition-colors ${tab === t ? 'bg-blue-50 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-50'}`}>
+                  {t === 'details' ? 'Details' : `Price History${historyCount > 0 ? ` (${historyCount})` : ''}`}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+        {!isNew && (
+          <button type="button" onClick={onDelete}
+            className="px-3 py-1.5 rounded-lg border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
+            Delete
+          </button>
+        )}
+        <button
+          type="button"
+          onClick={() => onSave()}
+          disabled={!dirty && !isNew}
+          className="px-4 py-1.5 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+          {isNew ? 'Create Product' : 'Save'}
+        </button>
+      </div>
 
       <div className="flex-1 overflow-y-auto">
         {/* ── History tab ── */}
@@ -635,38 +646,6 @@ function ProductDetailPane({
               </div>
             )}
 
-            {/* FX override */}
-            <div className="flex flex-col gap-2">
-              <label className="flex items-center gap-3 cursor-pointer select-none">
-                <button type="button" role="switch" aria-checked={form.fxEnabled}
-                  onClick={() => set('fxEnabled', !form.fxEnabled)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors flex-shrink-0 ${form.fxEnabled ? 'bg-blue-500' : 'bg-slate-200'}`}>
-                  <span className={`inline-block h-4 w-4 rounded-full bg-white shadow transition-transform ${form.fxEnabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
-                </button>
-                <span className="text-sm text-slate-600">Custom FX rate (USD → AUD)</span>
-              </label>
-              {form.fxEnabled && (
-                <input type="number" min="0" step="0.0001"
-                  value={form.fxOverride ?? ''}
-                  onChange={e => set('fxOverride', parseFloat(e.target.value) || undefined)}
-                  placeholder="e.g. 1.58"
-                  className="w-40 px-3 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
-              )}
-            </div>
-
-            {/* Save / delete */}
-            <div className="flex items-center gap-3 pt-2 border-t border-slate-100">
-              {!isNew && (
-                <button type="button" onClick={onDelete}
-                  className="px-4 py-2 rounded-xl border border-red-200 text-red-500 text-sm font-medium hover:bg-red-50 transition-colors">
-                  Delete
-                </button>
-              )}
-              <button type="submit" disabled={!dirty && !isNew}
-                className="flex-1 py-2.5 rounded-xl bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                {isNew ? 'Create Product' : 'Save Changes'}
-              </button>
-            </div>
 
             {/* Configurations */}
             {!isNew && existing && (
