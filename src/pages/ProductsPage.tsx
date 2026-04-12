@@ -546,22 +546,6 @@ function ProductDetailPane({
           hideConfigName
           headerSlot={
             <div className="flex items-center gap-2">
-              {/* Category + type toggles */}
-              <select
-                value={form.category}
-                onChange={e => set('category', e.target.value as ProductCategory)}
-                className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer flex-shrink-0 ${CATEGORY_COLORS[form.category]}`}
-                style={{ appearance: 'none' }}>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-              <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5 flex-shrink-0">
-                {(['one-time', 'recurring'] as PricingType[]).map(t => (
-                  <button key={t} type="button" onClick={() => set('pricingType', t)}
-                    className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                    {t === 'one-time' ? 'One-Time' : 'Recurring'}
-                  </button>
-                ))}
-              </div>
               {/* Product name — grows to fill */}
               <input
                 ref={nameRef}
