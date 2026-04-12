@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
@@ -42,6 +42,30 @@ export default function DealEnginePage() {
   const [showComparison, setShowComparison]   = useState(false)
   const [showNewDealModal, setShowNewDealModal] = useState(false)
   const [newDealName, setNewDealName]          = useState('')
+
+  // ── Resizable / collapsible panels ────────────────────────────────────────
+  const [leftWidth,  setLeftWidth]  = useState(200)
+  const [rightWidth, setRightWidth] = useState(300)
+  const [leftOpen,   setLeftOpen]   = useState(true)
+  const [rightOpen,  setRightOpen]  = useState(true)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const startDrag = useCallback((side: 'left' | 'right', e: React.MouseEvent) => {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = side === 'left' ? leftWidth : rightWidth
+    const onMove = (me: MouseEvent) => {
+      const delta = me.clientX - startX
+      const next = Math.max(140, Math.min(500, startW + (side === 'left' ? delta : -delta)))
+      side === 'left' ? setLeftWidth(next) : setRightWidth(next)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }, [leftWidth, rightWidth])
 
   // ── Active deal ────────────────────────────────────────────────────────────
   const activeDeal = deals.find(d => d.id === activeDealId) ?? null
@@ -217,23 +241,45 @@ export default function DealEnginePage() {
       </div>
 
       {/* ── DEALS ───────────────────────────────────────────────────────── */}
-      <div className="flex-1 flex min-h-0 overflow-hidden">
+      <div ref={containerRef} className="flex-1 flex min-h-0 overflow-hidden select-none">
 
-          {/* Left: deal list */}
-          <div className="w-56 flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto py-2">
-              {sortedDeals.length === 0 && (
-                <p className="text-xs text-slate-400 text-center py-6 px-3">No deals yet.<br/>Click "New Deal" to start.</p>
-              )}
-              {sortedDeals.map(d => (
-                <button key={d.id} onClick={() => setActiveDealId(d.id)}
-                  className={`w-full text-left px-3 py-2.5 transition-colors border-l-2 ${activeDealId === d.id ? 'bg-blue-50 border-blue-500' : 'border-transparent hover:bg-slate-50'}`}>
-                  <p className={`text-sm font-semibold truncate ${activeDealId === d.id ? 'text-blue-700' : 'text-slate-800'}`}>{d.name}</p>
-                  <p className="text-[11px] text-slate-400 mt-0.5">{d.lineItems.length} line{d.lineItems.length !== 1 ? 's' : ''}</p>
-                </button>
-              ))}
-            </div>
-          </div>
+          {/* Left: deal list (collapsible + resizable) */}
+          {leftOpen && (
+            <>
+              <div style={{ width: leftWidth }} className="flex-shrink-0 border-r border-slate-200 bg-white flex flex-col overflow-hidden">
+                <div className="px-2 py-1.5 border-b border-slate-100 flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide">Deals</span>
+                  <button onClick={() => setLeftOpen(false)} className="text-slate-300 hover:text-slate-500 p-0.5 rounded" title="Collapse">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto py-1">
+                  {sortedDeals.length === 0 && (
+                    <p className="text-xs text-slate-400 text-center py-6 px-3">No deals yet.<br/>Click "New Deal" to start.</p>
+                  )}
+                  {sortedDeals.map(d => (
+                    <button key={d.id} onClick={() => setActiveDealId(d.id)}
+                      className={`w-full text-left px-3 py-2.5 transition-colors border-l-2 ${activeDealId === d.id ? 'bg-blue-50 border-blue-500' : 'border-transparent hover:bg-slate-50'}`}>
+                      <p className={`text-sm font-semibold truncate ${activeDealId === d.id ? 'text-blue-700' : 'text-slate-800'}`}>{d.name}</p>
+                      <p className="text-[11px] text-slate-400 mt-0.5">{d.lineItems.length} line{d.lineItems.length !== 1 ? 's' : ''}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {/* Left drag handle */}
+              <div
+                onMouseDown={e => startDrag('left', e)}
+                className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-400 bg-slate-200 transition-colors"
+              />
+            </>
+          )}
+          {!leftOpen && (
+            <button onClick={() => setLeftOpen(true)}
+              className="w-6 flex-shrink-0 border-r border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-300 hover:text-slate-500 transition-colors"
+              title="Expand deals list">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          )}
 
           {/* Centre: deal builder */}
           <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -289,19 +335,28 @@ export default function DealEnginePage() {
                 {/* Line items */}
                 <div className="flex-1 overflow-auto px-4 pt-3 pb-4">
 
-                  {/* Table */}
+                  {/* Table — always scrollable horizontally so all cols stay at full width */}
                   <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-4">
                     <div className="overflow-x-auto">
-                    <table className="w-full min-w-[640px] border-collapse">
+                    <table className="border-collapse" style={{ minWidth: 680, width: '100%' }}>
+                      <colgroup>
+                        <col style={{ minWidth: 170 }} />  {/* Product */}
+                        <col style={{ width: 64 }} />       {/* Qty */}
+                        <col style={{ width: 110 }} />      {/* Status */}
+                        <col style={{ width: 120 }} />      {/* Sell/Unit */}
+                        <col style={{ width: 110 }} />      {/* Total */}
+                        <col style={{ width: 110 }} />      {/* Margin */}
+                        <col style={{ width: 64 }} />       {/* Actions */}
+                      </colgroup>
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200 text-left">
-                          <th className="px-3 py-2 text-xs font-semibold text-slate-500 min-w-[150px]">Product</th>
-                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-16 text-center">Qty</th>
-                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-28">Status</th>
-                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-28">Sell/Unit</th>
-                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-24 text-right">Total</th>
-                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 w-24 text-right">Margin</th>
-                          <th className="px-2 py-2 w-16 text-right"></th>
+                          <th className="px-3 py-2 text-xs font-semibold text-slate-500">Product</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 text-center">Qty</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500">Status</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500">Sell/Unit</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 text-right">Total</th>
+                          <th className="px-2 py-2 text-xs font-semibold text-slate-500 text-right">Margin</th>
+                          <th className="px-2 py-2"></th>
                         </tr>
                       </thead>
                       <tbody>
@@ -350,33 +405,54 @@ export default function DealEnginePage() {
             )}
           </div>
 
-          {/* Right: summary + optimizer + charts */}
+          {/* Right: summary + optimizer + charts (collapsible + resizable) */}
           {activeDeal && metrics && (
-            <div className="w-80 flex-shrink-0 border-l border-slate-200 bg-white flex flex-col overflow-hidden">
-              {/* Right tab bar */}
-              <div className="flex border-b border-slate-200 flex-shrink-0">
-                {(['summary', 'optimizer', 'charts'] as RightTab[]).map(t => (
-                  <button key={t} onClick={() => setRightTab(t)}
-                    className={`flex-1 py-2.5 text-[11px] font-semibold capitalize transition-colors ${rightTab === t ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
-                    {t}
-                  </button>
-                ))}
-              </div>
-              <div className="flex-1 overflow-y-auto p-3">
-                {rightTab === 'summary'   && <DealSummaryPanel metrics={metrics} />}
-                {rightTab === 'optimizer' && (
-                  <OptimizationPanel
-                    deal={activeDeal}
-                    products={products}
-                    onApplyRecommendation={handleApplyRecommendation}
-                    onApplyAll={handleApplyAll}
+            <>
+              {rightOpen && (
+                <>
+                  {/* Right drag handle */}
+                  <div
+                    onMouseDown={e => startDrag('right', e)}
+                    className="w-1 flex-shrink-0 cursor-col-resize hover:bg-blue-400 bg-slate-200 transition-colors"
                   />
-                )}
-                {rightTab === 'charts' && (
-                  <DealCharts deal={activeDeal} products={products} metrics={metrics} />
-                )}
-              </div>
-            </div>
+                  <div style={{ width: rightWidth }} className="flex-shrink-0 border-l border-slate-200 bg-white flex flex-col overflow-hidden">
+                    {/* Right tab bar + collapse button */}
+                    <div className="flex items-center border-b border-slate-200 flex-shrink-0">
+                      {(['summary', 'optimizer', 'charts'] as RightTab[]).map(t => (
+                        <button key={t} onClick={() => setRightTab(t)}
+                          className={`flex-1 py-2 text-[11px] font-semibold capitalize transition-colors ${rightTab === t ? 'border-b-2 border-blue-500 text-blue-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                          {t}
+                        </button>
+                      ))}
+                      <button onClick={() => setRightOpen(false)} className="px-2 text-slate-300 hover:text-slate-500" title="Collapse">
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                      </button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-3">
+                      {rightTab === 'summary'   && <DealSummaryPanel metrics={metrics} />}
+                      {rightTab === 'optimizer' && (
+                        <OptimizationPanel
+                          deal={activeDeal}
+                          products={products}
+                          onApplyRecommendation={handleApplyRecommendation}
+                          onApplyAll={handleApplyAll}
+                        />
+                      )}
+                      {rightTab === 'charts' && (
+                        <DealCharts deal={activeDeal} products={products} metrics={metrics} />
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+              {!rightOpen && (
+                <button onClick={() => setRightOpen(true)}
+                  className="w-6 flex-shrink-0 border-l border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-300 hover:text-slate-500 transition-colors"
+                  title="Expand summary">
+                  <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                </button>
+              )}
+            </>
           )}
         </div>
 

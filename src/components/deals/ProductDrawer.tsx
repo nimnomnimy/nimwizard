@@ -3,7 +3,7 @@ import { useAppStore } from '../../store/useAppStore'
 import { uid } from '../../lib/utils'
 import { showToast } from '../ui/Toast'
 import CurrencyInput from '../ui/CurrencyInput'
-import type { DealProduct, ProductCategory, PricingTier, PricingType, RecurringPeriod } from '../../types'
+import type { DealProduct, PriceHistoryEntry, ProductCategory, PricingTier, PricingType, RecurringPeriod } from '../../types'
 
 const CATEGORIES: ProductCategory[] = [
   'Software', 'Hardware', 'Professional Services', 'Technical Services', 'Maintenance',
@@ -131,6 +131,22 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
       floorSellPrice   = form.recurringFloorPricePerPeriod * periods
     }
 
+    // Append to price history whenever prices actually change
+    const prevHistory: PriceHistoryEntry[] = existing?.priceHistory ?? []
+    const priceChanged = !existing ||
+      existing.costPrice !== (Number(form.costPrice) || 0) ||
+      existing.floorSellPrice !== floorSellPrice ||
+      existing.defaultSellPrice !== defaultSellPrice
+    const newHistory: PriceHistoryEntry[] = priceChanged
+      ? [...prevHistory, {
+          id: uid(),
+          savedAt: Date.now(),
+          costPrice: Number(form.costPrice) || 0,
+          floorSellPrice,
+          defaultSellPrice,
+        }]
+      : prevHistory
+
     const product: DealProduct = {
       id:               existing?.id ?? uid(),
       name:             form.name.trim(),
@@ -147,6 +163,7 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
       } : undefined,
       fxOverride:   fxEnabled && form.fxOverride ? Number(form.fxOverride) : undefined,
       pricingTiers: form.pricingTiers,
+      priceHistory: newHistory,
       createdAt:    existing?.createdAt ?? Date.now(),
     }
 
@@ -375,6 +392,18 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
             ))}
           </div>
 
+          {/* ── PRICE HISTORY ──────────────────────────────────────────────── */}
+          {existing && (existing.priceHistory?.length ?? 0) > 0 && (
+            <PriceHistorySection
+              history={existing.priceHistory!}
+              onDeleteIds={ids => {
+                const filtered = (existing.priceHistory ?? []).filter(h => !ids.includes(h.id))
+                updateProduct({ ...existing, priceHistory: filtered })
+                showToast(`${ids.length} record${ids.length > 1 ? 's' : ''} deleted`)
+              }}
+            />
+          )}
+
           <div className="h-2" />
         </form>
 
@@ -394,5 +423,162 @@ export default function ProductDrawer({ productId, open, onClose }: Props) {
         </div>
       </div>
     </>
+  )
+}
+
+// ── Price History Section ─────────────────────────────────────────────────────
+
+type DateBucket = 'today' | 'week' | 'month' | 'year' | 'older'
+
+function getBucket(ts: number): DateBucket {
+  const now = Date.now()
+  const diff = now - ts
+  if (diff < 86_400_000)       return 'today'
+  if (diff < 7  * 86_400_000)  return 'week'
+  if (diff < 30 * 86_400_000)  return 'month'
+  if (diff < 365 * 86_400_000) return 'year'
+  return 'older'
+}
+
+const BUCKET_LABELS: Record<DateBucket, string> = {
+  today: 'Today',
+  week:  'This Week',
+  month: 'This Month',
+  year:  'This Year',
+  older: 'Older',
+}
+
+function PriceHistorySection({
+  history,
+  onDeleteIds,
+}: {
+  history: PriceHistoryEntry[]
+  onDeleteIds: (ids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [customFrom, setCustomFrom] = useState('')
+  const [customTo,   setCustomTo]   = useState('')
+  const [selected,   setSelected]   = useState<Set<string>>(new Set())
+
+  const sorted = [...history].sort((a, b) => b.savedAt - a.savedAt)
+
+  // Group by bucket
+  const buckets = new Map<DateBucket | 'custom', PriceHistoryEntry[]>()
+  const BUCKET_ORDER: DateBucket[] = ['today', 'week', 'month', 'year', 'older']
+  BUCKET_ORDER.forEach(b => buckets.set(b, []))
+  sorted.forEach(h => {
+    const b = getBucket(h.savedAt)
+    buckets.get(b)!.push(h)
+  })
+
+  // Custom range filter
+  const customIds = (() => {
+    if (!customFrom && !customTo) return []
+    const from = customFrom ? new Date(customFrom).getTime() : 0
+    const to   = customTo   ? new Date(customTo).getTime() + 86_400_000 : Infinity
+    return sorted.filter(h => h.savedAt >= from && h.savedAt <= to).map(h => h.id)
+  })()
+
+  const toggleSelect = (id: string) => {
+    setSelected(s => {
+      const n = new Set(s)
+      n.has(id) ? n.delete(id) : n.add(id)
+      return n
+    })
+  }
+
+  const selectBucket = (ids: string[]) => {
+    setSelected(s => {
+      const n = new Set(s)
+      const allSelected = ids.every(id => n.has(id))
+      ids.forEach(id => allSelected ? n.delete(id) : n.add(id))
+      return n
+    })
+  }
+
+  const fmt = (ts: number) => new Date(ts).toLocaleString('en-AU', {
+    day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  })
+
+  return (
+    <div className="flex flex-col gap-2">
+      <button type="button" onClick={() => setOpen(v => !v)}
+        className="flex items-center justify-between text-xs font-bold text-slate-500 uppercase tracking-wide hover:text-slate-700 transition-colors">
+        <span>Price History ({history.length})</span>
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`transition-transform ${open ? 'rotate-180' : ''}`}>
+          <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+      </button>
+
+      {open && (
+        <div className="flex flex-col gap-3">
+          {/* Batch delete controls */}
+          {selected.size > 0 && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+              <span className="text-xs text-red-600 font-semibold flex-1">{selected.size} selected</span>
+              <button type="button"
+                onClick={() => { onDeleteIds([...selected]); setSelected(new Set()) }}
+                className="text-xs bg-red-500 text-white px-3 py-1 rounded-lg hover:bg-red-600 font-semibold">
+                Delete selected
+              </button>
+              <button type="button" onClick={() => setSelected(new Set())}
+                className="text-xs text-red-400 hover:text-red-600">Clear</button>
+            </div>
+          )}
+
+          {/* Date bucket pills */}
+          <div className="flex flex-wrap gap-1.5">
+            {BUCKET_ORDER.map(bucket => {
+              const items = buckets.get(bucket)!
+              if (items.length === 0) return null
+              const ids = items.map(h => h.id)
+              const allSel = ids.every(id => selected.has(id))
+              return (
+                <button key={bucket} type="button"
+                  onClick={() => selectBucket(ids)}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded-full transition-colors ${
+                    allSel ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                  }`}>
+                  {BUCKET_LABELS[bucket]} ({items.length})
+                </button>
+              )
+            })}
+            {/* Custom range */}
+            <div className="flex items-center gap-1 ml-1">
+              <input type="date" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              <span className="text-slate-300 text-xs">–</span>
+              <input type="date" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                className="border border-slate-200 rounded-lg px-2 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-blue-500" />
+              {customIds.length > 0 && (
+                <button type="button" onClick={() => selectBucket(customIds)}
+                  className="text-[11px] text-blue-500 hover:text-blue-700 font-semibold px-2 py-0.5 rounded-full bg-blue-50">
+                  Select {customIds.length}
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* History rows */}
+          <div className="flex flex-col gap-1 max-h-48 overflow-y-auto">
+            {sorted.map(h => (
+              <label key={h.id} className={`flex items-start gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-colors ${selected.has(h.id) ? 'bg-blue-50 border border-blue-200' : 'bg-slate-50 hover:bg-slate-100'}`}>
+                <input type="checkbox" checked={selected.has(h.id)} onChange={() => toggleSelect(h.id)}
+                  className="mt-0.5 flex-shrink-0 rounded border-slate-300" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-slate-400">{fmt(h.savedAt)}</p>
+                  <div className="flex gap-3 mt-0.5 text-xs text-slate-600">
+                    <span>Cost: <span className="font-semibold">${h.costPrice.toFixed(2)}</span></span>
+                    <span>Floor: <span className="font-semibold">${h.floorSellPrice.toFixed(2)}</span></span>
+                    <span>Default: <span className="font-semibold">${h.defaultSellPrice.toFixed(2)}</span></span>
+                  </div>
+                  {h.note && <p className="text-[10px] text-slate-400 mt-0.5 italic">{h.note}</p>}
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
   )
 }

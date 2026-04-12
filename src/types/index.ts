@@ -220,6 +220,15 @@ export interface RecurringConfig {
   floorPricePerPeriod: number   // USD floor per billing period
 }
 
+export interface PriceHistoryEntry {
+  id: string
+  savedAt: number                // Unix ms
+  costPrice: number
+  floorSellPrice: number
+  defaultSellPrice: number
+  note?: string                  // e.g. "Initial" or free-text
+}
+
 export interface DealProduct {
   id: string
   name: string
@@ -231,6 +240,7 @@ export interface DealProduct {
   recurringConfig?: RecurringConfig  // populated when pricingType = 'recurring'
   fxOverride?: number           // USD→AUD override (undefined = use deal-level global)
   pricingTiers?: PricingTier[]
+  priceHistory?: PriceHistoryEntry[]
   createdAt: number
 }
 
