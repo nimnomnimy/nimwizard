@@ -674,7 +674,7 @@ function SubGroupBlock({
   subGroup, childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
   onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
-  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize,
+  fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
   inputIsAud: boolean
@@ -718,8 +718,6 @@ function SubGroupBlock({
   }
 
   const rows = rowsOf(subGroup)
-  const allRowsSelected = rows.length > 0 && rows.every(r => selected.has(r.id))
-  const toggleAll = () => { if (allRowsSelected) setSelected(new Set()); else setSelected(new Set(rows.map(r => r.id))) }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
   return (
