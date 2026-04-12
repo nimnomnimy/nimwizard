@@ -123,6 +123,9 @@ export interface SwimLane {
   label: string
   color: string
   collapsed?: boolean
+  /** Folder-tree nesting: id of parent lane. Undefined = top-level. */
+  parentId?: string
+  /** @deprecated use parentId instead. Kept for backwards compat read. */
   category?: string
 }
 
@@ -464,6 +467,15 @@ export interface ContractNotification {
   notified: boolean
 }
 
+export interface ContractAttachment {
+  id: string
+  name: string           // original filename
+  storagePath: string    // Firebase Storage path
+  downloadUrl: string    // public download URL
+  size: number           // bytes
+  uploadedAt: number     // Unix ms
+}
+
 export interface Contract {
   id: string
   contractNumber: string
@@ -478,6 +490,7 @@ export interface Contract {
   customPaymentTerms?: string  // when paymentTerms = 'custom'
   specialTerms?: string
   notifications: ContractNotification[]
+  attachments?: ContractAttachment[]
   notes?: string
   parentContractId?: string  // SOWs link back to their master agreement
   createdAt: number

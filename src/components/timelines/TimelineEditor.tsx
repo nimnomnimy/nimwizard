@@ -549,17 +549,71 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   }
 
   // ── Lane management ───────────────────────────────────────────────────────
-  function addLane() {
+  function addLane(parentId?: string) {
     const color = LANE_COLORS[timeline.swimLanes.length % LANE_COLORS.length]
-    update({ swimLanes: [...timeline.swimLanes, { id: uid(), label: `Lane ${timeline.swimLanes.length+1}`, color }] })
+    const label = parentId
+      ? `Sublane ${timeline.swimLanes.filter(l => l.parentId === parentId).length + 1}`
+      : `Lane ${timeline.swimLanes.filter(l => !l.parentId).length + 1}`
+    // Insert sublane right after parent (and its existing sublanes)
+    if (parentId) {
+      const parentIdx = timeline.swimLanes.findIndex(l => l.id === parentId)
+      // Find the last sibling sublane index
+      let insertAfter = parentIdx
+      for (let i = parentIdx + 1; i < timeline.swimLanes.length; i++) {
+        if (isDescendantOf(timeline.swimLanes[i].id, parentId, timeline.swimLanes)) insertAfter = i
+        else break
+      }
+      const newLane = { id: uid(), label, color, parentId }
+      const next = [...timeline.swimLanes]
+      next.splice(insertAfter + 1, 0, newLane)
+      update({ swimLanes: next })
+    } else {
+      update({ swimLanes: [...timeline.swimLanes, { id: uid(), label, color }] })
+    }
   }
   function renameLane(id: string, label: string) { update({ swimLanes: timeline.swimLanes.map(l => l.id===id ? {...l,label} : l) }) }
   function deleteLane(id: string) {
-    if (!confirm('Delete this lane and all its items?')) return
-    update({ swimLanes: timeline.swimLanes.filter(l=>l.id!==id), items: timeline.items.filter(i=>i.swimLaneId!==id) })
+    // Collect this lane and all its descendants
+    const toDelete = new Set<string>()
+    const collect = (lid: string) => {
+      toDelete.add(lid)
+      timeline.swimLanes.filter(l => l.parentId === lid).forEach(c => collect(c.id))
+    }
+    collect(id)
+    const hasItems = timeline.items.some(i => toDelete.has(i.swimLaneId))
+    if (!confirm(`Delete this lane${hasItems ? ' and all its items' : ''}?`)) return
+    update({
+      swimLanes: timeline.swimLanes.filter(l => !toDelete.has(l.id)),
+      items: timeline.items.filter(i => !toDelete.has(i.swimLaneId)),
+    })
   }
   function colorLane(id: string, color: string) { update({ swimLanes: timeline.swimLanes.map(l => l.id===id ? {...l,color} : l) }) }
   function toggleLane(id: string) { update({ swimLanes: timeline.swimLanes.map(l => l.id===id ? {...l, collapsed:!l.collapsed} : l) }) }
+
+  // Returns true if laneId is a descendant (child, grandchild, etc.) of ancestorId
+  function isDescendantOf(laneId: string, ancestorId: string, lanes: typeof timeline.swimLanes): boolean {
+    let current = lanes.find(l => l.id === laneId)
+    while (current?.parentId) {
+      if (current.parentId === ancestorId) return true
+      current = lanes.find(l => l.id === current!.parentId)
+    }
+    return false
+  }
+
+  // Build a flat ordered render list: top-level lanes first, children immediately after parent
+  // Returns { laneId, depth } in display order, respecting parent collapse
+  function buildLaneRenderOrder(lanes: typeof timeline.swimLanes): Array<{ lane: typeof timeline.swimLanes[number]; depth: number }> {
+    const result: Array<{ lane: typeof timeline.swimLanes[number]; depth: number }> = []
+    const addChildren = (parentId: string | undefined, depth: number) => {
+      const children = lanes.filter(l => l.parentId === parentId)
+      for (const lane of children) {
+        result.push({ lane, depth })
+        if (!lane.collapsed) addChildren(lane.id, depth + 1)
+      }
+    }
+    addChildren(undefined, 0)
+    return result
+  }
 
   // ── Item save/delete ──────────────────────────────────────────────────────
   function saveItem(item: TimelineItem) {
@@ -678,7 +732,9 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
   /** Total height of a lane including header, all task rows, sub-rows, add-task button */
   function laneH(laneId: string): number {
     const lane = timeline.swimLanes.find(l => l.id === laneId)
-    if (lane?.collapsed) return LANE_HEADER_H + ADD_TASK_ROW_H
+    const isFolder = timeline.swimLanes.some(l => l.parentId === laneId)
+    if (lane?.collapsed) return LANE_HEADER_H
+    if (isFolder) return LANE_HEADER_H // folder lanes have no task rows or add-task button
     const items = timeline.items.filter(i => i.swimLaneId === laneId && i.type === 'bar')
     const rowsHeight = items.reduce((sum, item) => {
       const subCount = item.collapsed ? 0 : (item.subItems?.length ?? 0)
@@ -713,71 +769,35 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
     return y
   }
 
-  // ── Sub-swimlane (category) layout ───────────────────────────────────────
-  const CAT_HEADER_H = 28  // height of a category group header row
+  // ── Tree-based lane layout ───────────────────────────────────────────────
+  // Flat ordered render list built from parent/child relationships
+  const laneRenderOrder = useMemo(
+    () => buildLaneRenderOrder(timeline.swimLanes),
+    [timeline.swimLanes] // eslint-disable-line react-hooks/exhaustive-deps
+  )
 
-  // Build flat render list: interleave category-header sentinels and lanes
-  type RenderRow =
-    | { kind: 'cat-header'; category: string; collapsed: boolean }
-    | { kind: 'lane'; lane: typeof timeline.swimLanes[number]; laneIdx: number }
-
-  const renderRows: RenderRow[] = useMemo(() => {
-    const rows: RenderRow[] = []
-    const seenCats = new Set<string>()
-    for (let i = 0; i < timeline.swimLanes.length; i++) {
-      const lane = timeline.swimLanes[i]
-      const cat = lane.category?.trim() || null
-      if (cat && !seenCats.has(cat)) {
-        seenCats.add(cat)
-        rows.push({ kind: 'cat-header', category: cat, collapsed: false })
-      }
-      rows.push({ kind: 'lane', lane, laneIdx: i })
-    }
-    return rows
-  }, [timeline.swimLanes])
-
-  // Collapsed category state — collapsing hides all lanes in that category
-  const [collapsedCats, setCollapsedCats] = useState<Set<string>>(new Set())
-  function toggleCat(cat: string) {
-    setCollapsedCats(prev => {
-      const next = new Set(prev)
-      if (next.has(cat)) { next.delete(cat) } else { next.add(cat) }
-      return next
-    })
-  }
-  function isCatCollapsed(cat: string | null | undefined) {
-    return cat ? collapsedCats.has(cat) : false
+  // Whether a lane has children
+  function hasChildren(laneId: string) {
+    return timeline.swimLanes.some(l => l.parentId === laneId)
   }
 
-  // Y offset for each render row
-  function renderRowY(rowIdx: number): number {
+  // Y offset for a lane in the render order
+  function laneRenderY(targetLaneId: string): number {
     let y = 0
-    for (let i = 0; i < rowIdx; i++) {
-      const row = renderRows[i]
-      if (row.kind === 'cat-header') {
-        y += CAT_HEADER_H
-      } else {
-        const cat = row.lane.category?.trim() || null
-        if (isCatCollapsed(cat)) continue
-        y += laneH(row.lane.id)
-      }
+    for (const { lane } of laneRenderOrder) {
+      if (lane.id === targetLaneId) return y
+      y += laneH(lane.id)
     }
     return y
   }
 
-  const totalCanvasH = renderRows.reduce((s, row) => {
-    if (row.kind === 'cat-header') return s + CAT_HEADER_H
-    const cat = row.lane.category?.trim() || null
-    if (isCatCollapsed(cat)) return s
-    return s + laneH(row.lane.id)
-  }, 0)
+  const totalCanvasH = laneRenderOrder.reduce((s, { lane }) => s + laneH(lane.id), 0)
 
-  // ── Lane Y offsets (legacy API for predecessor lines) ─────────────────────
+  // Legacy API for predecessor lines — find lane by laneIdx in original swimLanes array
   function laneYOffset(laneIdx: number) {
-    // Find this lane's renderRows index and sum heights before it
-    const rowIdx = renderRows.findIndex(r => r.kind === 'lane' && r.laneIdx === laneIdx)
-    if (rowIdx < 0) return 0
-    return renderRowY(rowIdx)
+    const lane = timeline.swimLanes[laneIdx]
+    if (!lane) return 0
+    return laneRenderY(lane.id)
   }
 
   // Keep window listener refs in sync with latest render's handlers
@@ -1175,85 +1195,80 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
               )
             })}
 
-            {/* Category headers + Lanes */}
-            {renderRows.map((row, rowIdx) => {
-              if (row.kind === 'cat-header') {
-                const rowY = renderRowY(rowIdx)
-                const isCollapsed = collapsedCats.has(row.category)
-                return (
-                  <div key={`cat-${row.category}`}
-                    style={{ position:'absolute', top: rowY, left: 0, width: labelWidth + totalWidthPx, height: CAT_HEADER_H, display:'flex', zIndex: 5 }}>
-                    {/* Sticky label */}
-                    <div style={{ width: labelWidth, flexShrink: 0 }}
-                      className="sticky left-0 z-10 bg-slate-100 border-r border-b border-slate-200 flex items-center px-2 gap-1.5">
-                      <button onClick={() => toggleCat(row.category)}
-                        className="text-slate-500 hover:text-slate-700 p-0.5 flex-shrink-0">
-                        <svg width="9" height="9" viewBox="0 0 10 10" fill="none"
-                          style={{ transform: isCollapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition:'transform 0.15s' }}>
-                          <path d="M2 3l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-                        </svg>
-                      </button>
-                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider truncate">{row.category}</span>
-                    </div>
-                    {/* Full-width tinted band */}
-                    <div className="flex-1 bg-slate-100 border-b border-slate-200" />
-                  </div>
-                )
-              }
-
-              // Lane row
-              const { lane, laneIdx: _laneIdx } = row; void _laneIdx
-              const cat = lane.category?.trim() || null
-              if (isCatCollapsed(cat)) return null
-
-              const laneY      = renderRowY(rowIdx)
+            {/* Lane tree */}
+            {laneRenderOrder.map(({ lane, depth }) => {
+              const laneY      = laneRenderY(lane.id)
               const laneHeight = laneH(lane.id)
               const laneItems  = timeline.items.filter(i => i.swimLaneId===lane.id)
               const laneGhost  = ghost?.laneId===lane.id ? ghost : null
               const collapsed  = lane.collapsed
               const isDropTarget = dragTargetLaneId === lane.id
+              const isFolder   = hasChildren(lane.id)
+              const indent     = depth * 12
 
               // Register lane bounds for cross-lane hit detection
               laneBoundsRef.current.set(lane.id, { top: laneY, bottom: laneY + laneHeight })
 
               const barItems = laneItems.filter(i => i.type === 'bar')
 
+              // Folder-style background tint by depth
+              const depthBg = depth === 0 ? 'bg-white' : depth === 1 ? 'bg-slate-50/80' : 'bg-slate-100/60'
+
               return (
                 <div key={lane.id} style={{ position:'absolute', top:laneY, left:0, width:labelWidth+totalWidthPx, height:laneHeight, display:'flex' }}>
 
                   {/* ── Label column (sticky) ───────────────────────────── */}
                   <div style={{ width:labelWidth, flexShrink:0, height:laneHeight }}
-                    className="sticky left-0 z-10 bg-white border-r border-b border-slate-200 flex flex-col relative group">
+                    className={`sticky left-0 z-10 ${depthBg} border-r border-b border-slate-200 flex flex-col relative group`}>
 
                     {/* Lane header row */}
-                    <div className="flex items-center px-2 gap-1.5 flex-shrink-0 border-b border-slate-100" style={{ height: LANE_HEADER_H }}>
-                      <button onClick={() => toggleLane(lane.id)}
-                        className="text-slate-300 hover:text-slate-500 flex-shrink-0 transition-colors p-0.5">
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor"
-                          style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition:'transform 0.15s' }}>
-                          <path d="M2 3l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
+                    <div className="flex items-center gap-1 flex-shrink-0 border-b border-slate-100 pr-1"
+                      style={{ height: LANE_HEADER_H, paddingLeft: 6 + indent }}>
+                      {/* Folder icon for parent lanes, bullet for leaf lanes */}
+                      {isFolder ? (
+                        <button onClick={() => toggleLane(lane.id)}
+                          className="text-slate-400 hover:text-slate-600 flex-shrink-0 transition-colors p-0.5">
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"
+                            style={{ transform: collapsed ? 'rotate(-90deg)' : 'rotate(0deg)', transition:'transform 0.15s' }}>
+                            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none"/>
+                          </svg>
+                        </button>
+                      ) : (
+                        <div className="w-[13px] flex-shrink-0 flex items-center justify-center">
+                          <div style={{ backgroundColor: lane.color }} className="w-1.5 h-1.5 rounded-full" />
+                        </div>
+                      )}
+                      {/* Color dot — clickable for color picker */}
+                      {isFolder && (
+                        <div className="relative flex-shrink-0">
+                          <div style={{ backgroundColor:lane.color }}
+                            className="w-2 h-2 rounded-sm" />
+                          <input type="color" value={lane.color} onChange={e=>colorLane(lane.id,e.target.value)}
+                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                        </div>
+                      )}
+                      {!isFolder && (
+                        <div className="relative flex-shrink-0">
+                          <div style={{ backgroundColor:lane.color }} className="w-2 h-2 rounded-full" />
+                          <input type="color" value={lane.color} onChange={e=>colorLane(lane.id,e.target.value)}
+                            className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
+                        </div>
+                      )}
+                      <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
+                        className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-white/80 rounded px-1 truncate" />
+                      {/* Add sublane button */}
+                      <button
+                        onClick={() => addLane(lane.id)}
+                        title="Add sublane"
+                        className="lg:opacity-0 lg:group-hover:opacity-100 p-0.5 text-slate-300 hover:text-blue-500 transition-all flex-shrink-0">
+                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                          <path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
                         </svg>
                       </button>
-                      <div className="relative flex-shrink-0">
-                        <div style={{ backgroundColor:lane.color }} className="w-2.5 h-2.5 rounded-full" />
-                        <input type="color" value={lane.color} onChange={e=>colorLane(lane.id,e.target.value)}
-                          className="absolute inset-0 opacity-0 w-full h-full cursor-pointer" />
-                      </div>
-                      <input type="text" value={lane.label} onChange={e=>renameLane(lane.id,e.target.value)}
-                        className="flex-1 min-w-0 text-xs font-semibold text-slate-700 bg-transparent focus:outline-none focus:bg-slate-50 rounded px-1 truncate" />
-                      {/* Category badge — click to set/clear */}
-                      <input
-                        type="text"
-                        value={lane.category ?? ''}
-                        onChange={e => update({ swimLanes: timeline.swimLanes.map(l => l.id===lane.id ? { ...l, category: e.target.value || undefined } : l) })}
-                        placeholder="Group…"
-                        title="Category / sub-swimlane group"
-                        className="lg:opacity-0 lg:group-hover:opacity-100 w-14 text-[9px] text-slate-400 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:ring-1 focus:ring-blue-400 transition-all flex-shrink-0"
-                      />
                       {timeline.swimLanes.length > 1 && (
                         <button onClick={()=>deleteLane(lane.id)} title="Delete lane"
-                          className="lg:opacity-0 lg:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 active:text-red-500 transition-all flex-shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center">
-                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M4.5 3V2h3v1M2.5 3l.8 7h5.4l.8-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                          className="lg:opacity-0 lg:group-hover:opacity-100 p-1 text-slate-300 hover:text-red-400 active:text-red-500 transition-all flex-shrink-0 min-w-[24px] min-h-[24px] flex items-center justify-center">
+                          <svg width="11" height="11" viewBox="0 0 12 12" fill="none"><path d="M1 3h10M4.5 3V2h3v1M2.5 3l.8 7h5.4l.8-7" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/></svg>
                         </button>
                       )}
                     </div>
@@ -1301,13 +1316,15 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                       )
                     })}
 
-                    {/* Add task button */}
-                    <button onClick={()=>addTaskForLane(lane.id)}
-                      className="flex items-center gap-1.5 px-2 text-[10px] font-semibold text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors w-full border-t border-slate-100 flex-shrink-0"
-                      style={{ height: ADD_TASK_ROW_H }}>
-                      <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-                      Add task
-                    </button>
+                    {/* Add task button — only for leaf lanes */}
+                    {!isFolder && (
+                      <button onClick={()=>addTaskForLane(lane.id)}
+                        className="flex items-center gap-1.5 px-2 text-[10px] font-semibold text-slate-400 hover:text-blue-500 hover:bg-blue-50 active:bg-blue-100 transition-colors w-full border-t border-slate-100 flex-shrink-0"
+                        style={{ height: ADD_TASK_ROW_H, paddingLeft: 8 + indent }}>
+                        <svg width="9" height="9" viewBox="0 0 9 9" fill="none"><path d="M4.5 1v7M1 4.5h7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                        Add task
+                      </button>
+                    )}
 
                     {/* Resize handle */}
                     <div style={{ position:'absolute', right:0, top:0, bottom:0, width:6, cursor:'col-resize', touchAction:'none' }}
@@ -1316,9 +1333,10 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
                   </div>
 
                   {/* ── Canvas area ─────────────────────────────────────── */}
-                  <div style={{ flex:1, position:'relative', cursor:'crosshair', touchAction:'none' }}
-                    className={`border-b border-slate-100 transition-colors ${isDropTarget ? 'bg-blue-50' : 'bg-white'}`}
+                  <div style={{ flex:1, position:'relative', cursor: isFolder ? 'default' : 'crosshair', touchAction:'none' }}
+                    className={`border-b border-slate-100 transition-colors ${isDropTarget ? 'bg-blue-50' : depth === 0 ? 'bg-white' : depth === 1 ? 'bg-slate-50/40' : 'bg-slate-100/30'}`}
                     onPointerDown={e => {
+                      if (isFolder) return // folders don't accept direct task draw
                       // Auto-expand collapsed lane when user starts drawing
                       if (collapsed) toggleLane(lane.id)
                       startDraw(e, lane.id)
@@ -1435,7 +1453,7 @@ export default function TimelineEditor({ timeline, onChange }: Props) {
             <div style={{ position:'absolute', top:totalCanvasH, left:0, width:labelWidth+totalWidthPx, height:40, display:'flex' }}>
               <div style={{ width:labelWidth, flexShrink:0 }}
                 className="sticky left-0 z-10 bg-slate-50 border-r border-t border-slate-200 flex items-center px-2">
-                <button onClick={addLane}
+                <button onClick={() => addLane()}
                   className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-blue-500 transition-colors min-h-[32px]">
                   <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
                     <path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>

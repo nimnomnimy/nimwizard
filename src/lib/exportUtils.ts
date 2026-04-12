@@ -1,5 +1,5 @@
-import type { Timeline, Contact, TaskBucket, DottedLine, PeerLine } from '../types'
-import { downloadCSV, LEVEL_LABELS } from './utils'
+import type { Timeline, Contact, TaskBucket, DottedLine, PeerLine, DealProduct, Deal, Pricebook, Contract } from '../types'
+import { downloadCSV, downloadJSON, LEVEL_LABELS } from './utils'
 import ExcelJS from 'exceljs'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -1121,4 +1121,128 @@ export async function exportTasksPPTX(taskBuckets: TaskBucket[]): Promise<void> 
     slide.addTable([header, ...body], { x: 0.5, y: 0.7, w: 9, fontSize: 9, colW: [2.5, 0.9, 1.0, 1.0, 1.0, 0.7, 1.9], border: { pt: 0.5, color: 'e2e8f0' }, autoPage: true })
   }
   await pptx.writeFile({ fileName: 'tasks.pptx' })
+}
+
+// ─── Products export / import ─────────────────────────────────────────────────
+
+export function exportProductsJSON(products: DealProduct[]) {
+  downloadJSON({ version: 1, type: 'products', exportedAt: Date.now(), data: products }, 'products.json')
+}
+
+export async function exportProductsXLSX(products: DealProduct[]) {
+  const wb = new ExcelJS.Workbook()
+  const rows: string[][] = [
+    ['Name', 'Category', 'Type', 'Cost (USD)', 'Floor Sell (USD)', 'Default Sell (USD)', 'Recurring Period', 'Term (months)', 'Price/Period', 'Floor/Period', 'FX Override', 'Created At'],
+  ]
+  for (const p of products) {
+    const rc = p.recurringConfig
+    rows.push([
+      p.name, p.category, p.pricingType,
+      String(p.costPrice), String(p.floorSellPrice), String(p.defaultSellPrice),
+      rc?.period ?? '', rc ? String(rc.termMonths) : '', rc ? String(rc.pricePerPeriod) : '', rc ? String(rc.floorPricePerPeriod) : '',
+      p.fxOverride != null ? String(p.fxOverride) : '',
+      new Date(p.createdAt).toLocaleDateString('en-AU'),
+    ])
+  }
+  addSheetFromRows(wb, 'Products', rows, '6366f1')
+  await downloadXLSX(wb, 'products.xlsx')
+}
+
+/** Returns imported products array or throws on invalid format */
+export function importProductsJSON(json: string): DealProduct[] {
+  const parsed = JSON.parse(json)
+  if (parsed.type !== 'products' || !Array.isArray(parsed.data)) throw new Error('Invalid products export file')
+  return parsed.data as DealProduct[]
+}
+
+// ─── Deal Engine export / import ─────────────────────────────────────────────
+
+export function exportDealsJSON(deals: Deal[]) {
+  downloadJSON({ version: 1, type: 'deals', exportedAt: Date.now(), data: deals }, 'deals.json')
+}
+
+export async function exportDealsXLSX(deals: Deal[], products: DealProduct[]) {
+  const wb = new ExcelJS.Workbook()
+  const rows: string[][] = [
+    ['Deal Name', 'Product', 'Qty', 'Sell Price (USD)', 'Status', 'Discount Type', 'Discount Value', 'Notes', 'Created At'],
+  ]
+  for (const deal of deals) {
+    for (const li of deal.lineItems) {
+      const prod = products.find(p => p.id === li.productId)
+      rows.push([
+        deal.name, prod?.name ?? li.productId, String(li.quantity),
+        String(li.sellPriceUsd), li.status,
+        li.discountType ?? '', li.discountValue != null ? String(li.discountValue) : '',
+        li.notes ?? '', new Date(deal.createdAt).toLocaleDateString('en-AU'),
+      ])
+    }
+  }
+  addSheetFromRows(wb, 'Deals', rows, '8b5cf6')
+  await downloadXLSX(wb, 'deals.xlsx')
+}
+
+export function importDealsJSON(json: string): Deal[] {
+  const parsed = JSON.parse(json)
+  if (parsed.type !== 'deals' || !Array.isArray(parsed.data)) throw new Error('Invalid deals export file')
+  return parsed.data as Deal[]
+}
+
+// ─── Pricebooks export / import ───────────────────────────────────────────────
+
+export function exportPricebooksJSON(pricebooks: Pricebook[]) {
+  downloadJSON({ version: 1, type: 'pricebooks', exportedAt: Date.now(), data: pricebooks }, 'pricebooks.json')
+}
+
+export async function exportPricebooksXLSX(pricebooks: Pricebook[], products: DealProduct[]) {
+  const wb = new ExcelJS.Workbook()
+  const rows: string[][] = [
+    ['Pricebook', 'Customer', 'Product', 'Unit Price (USD)', 'Custom FX', 'Freight Incl.', 'Valid From', 'Valid To'],
+  ]
+  for (const pb of pricebooks) {
+    for (const entry of pb.entries) {
+      const prod = products.find(p => p.id === entry.productId)
+      rows.push([
+        pb.customerName, pb.customerName, prod?.name ?? entry.productName,
+        String(entry.unitPriceUsd), entry.customFxRate != null ? String(entry.customFxRate) : '',
+        entry.freightIncluded ? 'Yes' : 'No',
+        pb.validFrom ?? '', pb.validTo ?? '',
+      ])
+    }
+  }
+  addSheetFromRows(wb, 'Pricebooks', rows, '10b981')
+  await downloadXLSX(wb, 'pricebooks.xlsx')
+}
+
+export function importPricebooksJSON(json: string): Pricebook[] {
+  const parsed = JSON.parse(json)
+  if (parsed.type !== 'pricebooks' || !Array.isArray(parsed.data)) throw new Error('Invalid pricebooks export file')
+  return parsed.data as Pricebook[]
+}
+
+// ─── Contracts export / import ────────────────────────────────────────────────
+
+export function exportContractsJSON(contracts: Contract[]) {
+  downloadJSON({ version: 1, type: 'contracts', exportedAt: Date.now(), data: contracts }, 'contracts.json')
+}
+
+export async function exportContractsXLSX(contracts: Contract[]) {
+  const wb = new ExcelJS.Workbook()
+  const rows: string[][] = [
+    ['Contract #', 'Type', 'Customer', 'Title', 'Start Date', 'End Date', 'Value (USD)', 'Billing', 'Payment Terms', 'Notes'],
+  ]
+  for (const c of contracts) {
+    rows.push([
+      c.contractNumber, c.type, c.customerName, c.title,
+      c.startDate, c.endDate, String(c.contractValueUsd),
+      c.billingModel, c.paymentTerms, c.notes ?? '',
+    ])
+  }
+  addSheetFromRows(wb, 'Contracts', rows, 'ef4444')
+  await downloadXLSX(wb, 'contracts.xlsx')
+}
+
+export function importContractsJSON(json: string): Contract[] {
+  const parsed = JSON.parse(json)
+  if (parsed.type !== 'contracts' || !Array.isArray(parsed.data)) throw new Error('Invalid contracts export file')
+  return parsed.data as Contract[]
 }

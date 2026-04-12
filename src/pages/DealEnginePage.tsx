@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useResizable } from '../hooks/useResizable'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
 import { showToast } from '../components/ui/Toast'
 import CurrencyBar from '../components/ui/CurrencyBar'
+import { exportDealsJSON, exportDealsXLSX, importDealsJSON } from '../lib/exportUtils'
 import DealLineItemRow from '../components/deals/DealLineItem'
 import DealSummaryPanel from '../components/deals/DealSummaryPanel'
 import OptimizationPanel from '../components/deals/OptimizationPanel'
@@ -43,6 +44,8 @@ export default function DealEnginePage() {
   const [showComparison, setShowComparison]   = useState(false)
   const [showNewDealModal, setShowNewDealModal] = useState(false)
   const [newDealName, setNewDealName]          = useState('')
+  const [showExportMenu, setShowExportMenu]    = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
 
   // ── Resizable / collapsible panels ────────────────────────────────────────
   const left  = useResizable({ initial: 200, min: 140, max: 400 })
@@ -94,6 +97,28 @@ export default function DealEnginePage() {
     deleteDeal(id)
     if (activeDealId === id) setActiveDealId(null)
     showToast(`"${name}" deleted`)
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = ev => {
+      try {
+        const imported = importDealsJSON(ev.target?.result as string)
+        const existing = new Set(deals.map(d => d.id))
+        let added = 0
+        for (const d of imported) {
+          if (existing.has(d.id)) { updateDeal(d); added++ }
+          else { addDeal(d); added++ }
+        }
+        showToast(`Imported ${added} deal(s)`, 'success')
+      } catch {
+        showToast('Import failed: invalid file', 'error')
+      }
+    }
+    reader.readAsText(file)
   }
 
   // ── Line items ─────────────────────────────────────────────────────────────
@@ -214,11 +239,40 @@ export default function DealEnginePage() {
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
         <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Deal Engine</h2>
         <CurrencyBar />
-        <button onClick={() => { setShowNewDealModal(true); setNewDealName('') }}
-          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
-          New Deal
-        </button>
+        <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+          <button onClick={() => importRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3 6l3.5 3.5L10 6M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Import
+          </button>
+          <div className="relative">
+            <button onClick={() => setShowExportMenu(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 9V1M3 4l3.5-3.5L10 4M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Export
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[130px] py-1"
+                onMouseLeave={() => setShowExportMenu(false)}>
+                <button onClick={() => { exportDealsJSON(deals); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export JSON
+                </button>
+                <button onClick={() => { exportDealsXLSX(deals, products); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export Excel
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => { setShowNewDealModal(true); setNewDealName('') }}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v10M1 6h10" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>
+            New Deal
+          </button>
+        </div>
       </div>
 
       {/* ── DEALS ───────────────────────────────────────────────────────── */}

@@ -1,9 +1,11 @@
-import { useState, useMemo } from 'react'
+import React, { useRef, useState, useMemo } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
+import { showToast } from '../components/ui/Toast'
 import CurrencyBar from '../components/ui/CurrencyBar'
 import { useResizable } from '../hooks/useResizable'
+import { exportPricebooksJSON, exportPricebooksXLSX, importPricebooksJSON } from '../lib/exportUtils'
 import type { Pricebook, PricebookEntry, UpliftConfig, UpliftType } from '../types'
 
 function emptyUplift(): UpliftConfig {
@@ -84,6 +86,8 @@ export default function PricebookPage() {
   const [search, setSearch]       = useState('')
   const [fxInput, setFxInput]     = useState('')
   const [useFx, setUseFx]         = useState(false)
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
   // Left panel: grouped by customer vs flat list
   const [groupByCustomer, setGroupByCustomer] = useState(true)
   // Which customer groups are expanded in the left pane
@@ -124,6 +128,28 @@ export default function PricebookPage() {
     setFxInput('')
     setUseFx(false)
     setShowModal(true)
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = ev => {
+      try {
+        const imported = importPricebooksJSON(ev.target?.result as string)
+        const existingIds = new Set(pricebooks.map(p => p.id))
+        let added = 0
+        for (const pb of imported) {
+          if (existingIds.has(pb.id)) { updatePricebook(pb); added++ }
+          else { addPricebook(pb); added++ }
+        }
+        showToast(`Imported ${added} pricebook(s)`, 'success')
+      } catch {
+        showToast('Import failed: invalid file', 'error')
+      }
+    }
+    reader.readAsText(file)
   }
 
   function openEdit(p: Pricebook) {
@@ -200,10 +226,39 @@ export default function PricebookPage() {
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
         <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Pricebooks</h2>
         <CurrencyBar />
-        <button onClick={openNew}
-          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
-          + New Pricebook
-        </button>
+        <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+          <button onClick={() => importRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3 6l3.5 3.5L10 6M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Import
+          </button>
+          <div className="relative">
+            <button onClick={() => setShowExportMenu(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 9V1M3 4l3.5-3.5L10 4M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Export
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[130px] py-1"
+                onMouseLeave={() => setShowExportMenu(false)}>
+                <button onClick={() => { exportPricebooksJSON(pricebooks); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export JSON
+                </button>
+                <button onClick={() => { exportPricebooksXLSX(pricebooks, products); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export Excel
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={openNew}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors">
+            + New Pricebook
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden select-none">

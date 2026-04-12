@@ -1,10 +1,14 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
+import { ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { storage } from '../lib/firebase'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
+import { showToast } from '../components/ui/Toast'
 import CurrencyBar from '../components/ui/CurrencyBar'
 import { useResizable } from '../hooks/useResizable'
-import type { Contract, ContractNotification, ContractType, PaymentTerms, BillingModel } from '../types'
+import { exportContractsJSON, exportContractsXLSX, importContractsJSON } from '../lib/exportUtils'
+import type { Contract, ContractAttachment, ContractNotification, ContractType, PaymentTerms, BillingModel } from '../types'
 
 const CONTRACT_TYPE_LABELS: Record<ContractType, string> = {
   'master-agreement': 'Master Agreement',
@@ -75,9 +79,13 @@ export default function ContractManagerPage() {
   const [editId, setEditId]       = useState<string | null>(null)
   const [search, setSearch]       = useState('')
   const [filterType, setFilterType] = useState<ContractType | 'all'>('all')
-  const [tab, setTab]             = useState<'details' | 'notifications'>('details')
+  const [tab, setTab]             = useState<'details' | 'notifications' | 'attachments'>('details')
   const [groupByCustomer, setGroupByCustomer] = useState(false)
   const [collapsedCustomers, setCollapsedCustomers] = useState<Set<string>>(new Set())
+  const [showExportMenu, setShowExportMenu] = useState(false)
+  const importRef = useRef<HTMLInputElement>(null)
+  const attachRef = useRef<HTMLInputElement>(null)
+  const [uploading, setUploading] = useState(false)
 
   const sorted = [...contracts]
     .filter(c => {
@@ -105,6 +113,87 @@ export default function ContractManagerPage() {
     setDraft(emptyContract())
     setShowModal(true)
     setTab('details')
+  }
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    e.target.value = ''
+    const reader = new FileReader()
+    reader.onload = ev => {
+      try {
+        const imported = importContractsJSON(ev.target?.result as string)
+        const existingIds = new Set(contracts.map(c => c.id))
+        let added = 0
+        for (const c of imported) {
+          if (existingIds.has(c.id)) { updateContract(c); added++ }
+          else { addContract(c); added++ }
+        }
+        showToast(`Imported ${added} contract(s)`, 'success')
+      } catch {
+        showToast('Import failed: invalid file', 'error')
+      }
+    }
+    reader.readAsText(file)
+  }
+
+  async function handleAttachFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    if (!files.length || !active) return
+    e.target.value = ''
+    setUploading(true)
+    try {
+      const newAttachments: ContractAttachment[] = []
+      for (const file of files) {
+        const path = `contracts/${active.id}/${uid()}_${file.name}`
+        const sRef = storageRef(storage, path)
+        await uploadBytes(sRef, file)
+        const url = await getDownloadURL(sRef)
+        newAttachments.push({
+          id: uid(),
+          name: file.name,
+          storagePath: path,
+          downloadUrl: url,
+          size: file.size,
+          uploadedAt: Date.now(),
+        })
+      }
+      const updated: Contract = {
+        ...active,
+        attachments: [...(active.attachments ?? []), ...newAttachments],
+        updatedAt: Date.now(),
+      }
+      updateContract(updated)
+      showToast(`Uploaded ${newAttachments.length} file(s)`, 'success')
+    } catch (err) {
+      console.error(err)
+      showToast('Upload failed', 'error')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  async function handleDeleteAttachment(attachment: ContractAttachment) {
+    if (!active) return
+    if (!confirm(`Delete "${attachment.name}"?`)) return
+    try {
+      await deleteObject(storageRef(storage, attachment.storagePath))
+    } catch {
+      // Ignore missing file errors — delete from Firestore regardless
+    }
+    const updated: Contract = {
+      ...active,
+      attachments: (active.attachments ?? []).filter(a => a.id !== attachment.id),
+      updatedAt: Date.now(),
+    }
+    updateContract(updated)
+    showToast(`"${attachment.name}" deleted`)
+  }
+
+  function formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
   }
 
   function openEdit(c: Contract) {
@@ -192,10 +281,39 @@ export default function ContractManagerPage() {
       <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
         <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Contracts</h2>
         <CurrencyBar />
-        <button onClick={openNew}
-          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
-          + New Contract
-        </button>
+        <div className="ml-auto flex items-center gap-2 flex-shrink-0">
+          <input ref={importRef} type="file" accept=".json" className="hidden" onChange={handleImportFile} />
+          <button onClick={() => importRef.current?.click()}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 1v8M3 6l3.5 3.5L10 6M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            Import
+          </button>
+          <div className="relative">
+            <button onClick={() => setShowExportMenu(v => !v)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-semibold hover:bg-slate-200 transition-colors">
+              <svg width="13" height="13" viewBox="0 0 13 13" fill="none"><path d="M6.5 9V1M3 4l3.5-3.5L10 4M2 11h9" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              Export
+              <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            {showExportMenu && (
+              <div className="absolute right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 min-w-[130px] py-1"
+                onMouseLeave={() => setShowExportMenu(false)}>
+                <button onClick={() => { exportContractsJSON(contracts); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export JSON
+                </button>
+                <button onClick={() => { exportContractsXLSX(contracts); setShowExportMenu(false) }}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">
+                  Export Excel
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={openNew}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors">
+            + New Contract
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-1 min-h-0 overflow-hidden select-none">
@@ -424,6 +542,63 @@ export default function ContractManagerPage() {
                 </div>
               </div>
             )}
+
+            {/* Attachments */}
+            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+              <div className="px-4 py-3 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                  Attachments {(active.attachments?.length ?? 0) > 0 && `(${active.attachments!.length})`}
+                </p>
+                <div className="flex items-center gap-2">
+                  <input ref={attachRef} type="file" multiple className="hidden" onChange={handleAttachFiles} />
+                  <button onClick={() => attachRef.current?.click()} disabled={uploading}
+                    className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 font-semibold transition-colors disabled:opacity-50">
+                    {uploading ? (
+                      <>
+                        <svg className="animate-spin" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                          <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" strokeDasharray="7 7" strokeLinecap="round"/>
+                        </svg>
+                        Uploading…
+                      </>
+                    ) : (
+                      <>
+                        <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M6 1v8M3 5.5l3-3.5 3 3.5M2 11h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                        Attach Files
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+              {(!active.attachments || active.attachments.length === 0) ? (
+                <p className="text-xs text-slate-400 text-center py-6">No files attached</p>
+              ) : (
+                <div className="divide-y divide-slate-100">
+                  {active.attachments.map(att => (
+                    <div key={att.id} className="px-4 py-3 flex items-center gap-3">
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className="flex-shrink-0 text-slate-400">
+                        <path d="M9 1H4a1 1 0 00-1 1v12a1 1 0 001 1h8a1 1 0 001-1V6L9 1z" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                        <path d="M9 1v5h5" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round"/>
+                      </svg>
+                      <div className="flex-1 min-w-0">
+                        <a href={att.downloadUrl} target="_blank" rel="noreferrer"
+                          className="text-sm font-medium text-blue-600 hover:underline truncate block">
+                          {att.name}
+                        </a>
+                        <p className="text-xs text-slate-400">
+                          {formatFileSize(att.size)} · {new Date(att.uploadedAt).toLocaleDateString('en-AU')}
+                        </p>
+                      </div>
+                      <button onClick={() => handleDeleteAttachment(att)}
+                        className="flex-shrink-0 text-slate-300 hover:text-red-500 p-1 rounded transition-colors" title="Delete">
+                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                          <path d="M2 3.5h10M5.5 3.5V2h3v1.5M4.5 3.5l.5 8h4l.5-8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </div>
