@@ -232,8 +232,8 @@ const DEFAULT_COL_WIDTHS = [90, 200, 50, 78, 78, 78, 72, 52, 84, 56, 78, 100] as
 type ColWidths = [number, number, number, number, number, number, number, number, number, number, number, number]
 
 const COL_LABELS = ['Code', 'Description', 'Qty', 'Cost', 'Floor', 'Sell', 'Unit', 'Term', 'Total', 'Disc%', 'Net', 'Category'] as const
-// Cost (3) and Floor (4) hidden by default
-const DEFAULT_HIDDEN_COLS = new Set([3, 4])
+// Cost (3), Floor (4), and Category (11) hidden by default
+const DEFAULT_HIDDEN_COLS = new Set([3, 4, 11])
 
 function colPx(w: ColWidths, idx: number, hidden: Set<number>): string {
   return hidden.has(idx) ? '0px' : `${w[idx]}px`
