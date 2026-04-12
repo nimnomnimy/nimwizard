@@ -3,6 +3,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
 import CurrencyBar from '../components/ui/CurrencyBar'
+import { useResizable } from '../hooks/useResizable'
 import type { Pricebook, PricebookEntry, UpliftConfig, UpliftType } from '../types'
 
 function emptyUplift(): UpliftConfig {
@@ -38,6 +39,7 @@ export default function PricebookPage() {
   const fmtAud          = useCurrency(s => s.fmtAud)
   const showSecondary   = useCurrency(s => s.showSecondary)
 
+  const left = useResizable({ initial: 260, min: 180, max: 400 })
   const [activeId, setActiveId]   = useState<string | null>(null)
   const [showModal, setShowModal] = useState(false)
   const [draft, setDraft]         = useState(emptyPricebook())
@@ -110,17 +112,27 @@ export default function PricebookPage() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-slate-100">
+    <div className="flex flex-col h-full overflow-hidden bg-slate-100">
+      {/* Top bar */}
+      <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
+        <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Pricebooks</h2>
+        <CurrencyBar />
+        <button onClick={openNew}
+          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
+          + New Pricebook
+        </button>
+      </div>
 
+      <div className="flex flex-1 min-h-0 overflow-hidden select-none">
       {/* Left pane */}
-      <div className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
+      {left.isOpen ? (
+        <>
+        <div style={{ width: left.width }} className="flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
         <div className="p-3 border-b border-slate-100 flex flex-col gap-2">
-          <div className="flex items-center justify-between gap-2">
-            <h2 className="font-bold text-slate-800 text-sm flex-shrink-0">Pricebooks</h2>
-            <CurrencyBar />
-            <button onClick={openNew}
-              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors flex-shrink-0">
-              + New
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-500">All Pricebooks ({pricebooks.length})</span>
+            <button onClick={() => left.setIsOpen(false)} className="text-slate-300 hover:text-slate-500 p-1 rounded" title="Collapse">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
           </div>
           <input value={search} onChange={e => setSearch(e.target.value)}
@@ -130,7 +142,9 @@ export default function PricebookPage() {
 
         <div className="flex-1 overflow-y-auto p-2 flex flex-col gap-1">
           {sorted.length === 0 && (
-            <p className="text-xs text-slate-400 text-center py-8">No pricebooks yet</p>
+            <div className="flex flex-col items-center justify-center py-10 gap-3 text-slate-400">
+              <p className="text-xs text-center">No pricebooks yet.<br/>Click + New Pricebook above.</p>
+            </div>
           )}
           {sorted.map(p => (
             <button key={p.id} onClick={() => setActiveId(p.id)}
@@ -150,7 +164,18 @@ export default function PricebookPage() {
             </button>
           ))}
         </div>
-      </div>
+        </div>
+        <div {...left.dragHandleProps} className="w-1.5 flex-shrink-0 cursor-col-resize group">
+          <div className="w-px h-full bg-slate-200 group-hover:bg-blue-400 mx-auto transition-colors" />
+        </div>
+        </>
+      ) : (
+        <button onClick={() => left.setIsOpen(true)}
+          className="w-7 flex-shrink-0 border-r border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-300 hover:text-slate-500 transition-colors"
+          title="Expand list">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      )}
 
       {/* Right pane — detail */}
       <div className="flex-1 overflow-y-auto">
@@ -246,7 +271,8 @@ export default function PricebookPage() {
             </div>
           </div>
         )}
-      </div>
+      </div>{/* end right pane */}
+      </div>{/* end panel row */}
 
       {/* Modal */}
       {showModal && (

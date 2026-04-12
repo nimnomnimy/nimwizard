@@ -3,6 +3,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import CurrencyBar from '../components/ui/CurrencyBar'
 import ProductDrawer from '../components/deals/ProductDrawer'
+import { useResizable } from '../hooks/useResizable'
 import type { DealProduct, ProductCategory } from '../types'
 
 const CATEGORY_COLORS: Record<ProductCategory, string> = {
@@ -28,6 +29,7 @@ export default function ProductsPage() {
   const [filterCat, setFilterCat] = useState<ProductCategory | 'all'>('all')
   const [filterType, setFilterType] = useState<'all' | 'one-time' | 'recurring'>('all')
   const [activeId, setActiveId] = useState<string | null>(null)
+  const left = useResizable({ initial: 260, min: 180, max: 400 })
 
   const filtered = products.filter(p => {
     const matchSearch = p.name.toLowerCase().includes(search.toLowerCase())
@@ -53,19 +55,29 @@ export default function ProductsPage() {
   }
 
   return (
-    <div className="flex h-full overflow-hidden bg-slate-100">
+    <div className="flex flex-col h-full overflow-hidden bg-slate-100">
+      {/* Top bar */}
+      <div className="bg-white border-b border-slate-200 flex-shrink-0 px-4 flex items-center gap-3 flex-wrap" style={{ minHeight: 52 }}>
+        <h2 className="text-sm font-bold text-slate-700 flex-shrink-0">Products</h2>
+        <CurrencyBar />
+        <button onClick={() => setDrawerProductId(null)}
+          className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-lg bg-blue-500 text-white text-sm font-semibold hover:bg-blue-600 transition-colors flex-shrink-0">
+          + New Product
+        </button>
+      </div>
 
+      <div className="flex flex-1 min-h-0 overflow-hidden select-none">
       {/* Left pane — list */}
-      <div className="w-72 flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
+      {left.isOpen ? (
+        <>
+        <div style={{ width: left.width }} className="flex-shrink-0 flex flex-col bg-white border-r border-slate-200 overflow-hidden">
         <div className="p-3 border-b border-slate-100 flex flex-col gap-2">
           <div className="flex items-center justify-between">
-            <h2 className="font-bold text-slate-800 text-sm">Products</h2>
-            <button onClick={() => setDrawerProductId(null)}
-              className="flex items-center gap-1 text-xs bg-blue-500 hover:bg-blue-600 text-white px-2.5 py-1.5 rounded-lg font-semibold transition-colors">
-              + New
+            <span className="text-xs font-semibold text-slate-500">All Products ({products.length})</span>
+            <button onClick={() => left.setIsOpen(false)} className="text-slate-300 hover:text-slate-500 p-1 rounded" title="Collapse">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
             </button>
           </div>
-          <CurrencyBar />
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search products…"
             className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500" />
@@ -122,9 +134,20 @@ export default function ProductsPage() {
         </div>
 
         <div className="p-2 border-t border-slate-100 text-xs text-slate-400 text-center">
-          {products.length} product{products.length !== 1 ? 's' : ''}
+          {filtered.length} of {products.length}
         </div>
-      </div>
+        </div>
+        <div {...left.dragHandleProps} className="w-1.5 flex-shrink-0 cursor-col-resize group">
+          <div className="w-px h-full bg-slate-200 group-hover:bg-blue-400 mx-auto transition-colors" />
+        </div>
+        </>
+      ) : (
+        <button onClick={() => left.setIsOpen(true)}
+          className="w-7 flex-shrink-0 border-r border-slate-200 bg-white hover:bg-slate-50 flex items-center justify-center text-slate-300 hover:text-slate-500 transition-colors"
+          title="Expand list">
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M4 2l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+        </button>
+      )}
 
       {/* Right pane — detail */}
       <div className="flex-1 overflow-y-auto">
@@ -268,6 +291,8 @@ export default function ProductsPage() {
       </div>
 
       {/* Product drawer */}
+      </div>{/* end flex-1 panel row */}
+
       {drawerProductId !== undefined && (
         <ProductDrawer
           productId={drawerProductId}

@@ -1,22 +1,21 @@
 import { useState } from 'react'
-import type { DealLineItem as LineItemType, DealProduct, LineMetrics, FreightMethod } from '../../types'
+import type { DealLineItem as LineItemType, DealProduct, LineMetrics, FreightMethod, FreightConfig } from '../../types'
+import type { FreightBreakdown } from '../../engine/freight'
 import { calcFreight } from '../../engine/freight'
 import { suggestedSellPrice } from '../../engine/pricing'
 import { useCurrency } from '../../store/useCurrency'
 
-const STATUS_LABELS = { paid: 'Paid', discounted: 'Discounted', free: 'Free' }
-
-const STATUS_COLORS = {
-  paid:       'bg-green-100 text-green-700',
-  discounted: 'bg-amber-100 text-amber-700',
-  free:       'bg-purple-100 text-purple-700',
-}
+const STATUS_OPTIONS = [
+  { value: 'paid',       label: 'Paid',       color: 'bg-green-100 text-green-700  border-green-200' },
+  { value: 'discounted', label: 'Discounted', color: 'bg-amber-100 text-amber-700  border-amber-200' },
+  { value: 'free',       label: 'Free',       color: 'bg-purple-100 text-purple-700 border-purple-200' },
+] as const
 
 function marginColor(pct: number, belowFloor: boolean): string {
   if (belowFloor) return 'text-red-600 font-bold'
-  if (pct >= 20)  return 'text-green-600 font-semibold'
-  if (pct >= 10)  return 'text-amber-600 font-semibold'
-  return 'text-red-500 font-semibold'
+  if (pct >= 20)  return 'text-green-600'
+  if (pct >= 10)  return 'text-amber-600'
+  return 'text-red-500'
 }
 
 interface Props {
@@ -40,8 +39,7 @@ export default function DealLineItemRow({ item, products, metrics, onChange, onR
   const handleProductChange = (productId: string) => {
     const p = products.find(x => x.id === productId)
     if (!p) return
-    const suggested = suggestedSellPrice(p, item.quantity)
-    onChange({ ...item, productId, sellPriceUsd: suggested, status: 'paid' })
+    onChange({ ...item, productId, sellPriceUsd: suggestedSellPrice(p, item.quantity), status: 'paid' })
   }
 
   const handleQtyChange = (qty: number) => {
@@ -50,138 +48,149 @@ export default function DealLineItemRow({ item, products, metrics, onChange, onR
     onChange({ ...item, quantity: qty, sellPriceUsd: item.status === 'free' ? 0 : suggested })
   }
 
-  const freight = item.freight
-  const freightBreakdown = freight && product
-    ? calcFreight(freight, item.quantity)
+  const freightBreakdown = item.freight && product
+    ? calcFreight(item.freight, item.quantity)
     : null
 
+  const statusOpt = STATUS_OPTIONS.find(s => s.value === item.status)!
+
   return (
-    <>
-      {/* Main row */}
-      <tr className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${metrics?.belowFloor ? 'bg-red-50' : ''}`}>
+    <div className={`rounded-xl border transition-colors ${metrics?.belowFloor ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'}`}>
+      {/* Main row — responsive grid */}
+      <div className="grid items-start gap-2 p-3" style={{ gridTemplateColumns: '1fr 72px 110px 130px 1fr 1fr auto' }}>
 
         {/* Product */}
-        <td className="px-3 py-2">
-          <select value={item.productId} onChange={e => handleProductChange(e.target.value)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white">
+        <div className="flex flex-col gap-1 min-w-0">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Product</span>
+          <select
+            value={item.productId}
+            onChange={e => handleProductChange(e.target.value)}
+            className="w-full text-sm border border-slate-200 rounded-lg px-2.5 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+          >
             <option value="">— Select —</option>
-            {products.map(p => (
-              <option key={p.id} value={p.id}>{p.name}</option>
-            ))}
+            {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
-          {product && (
-            <p className="text-[10px] text-slate-400 mt-0.5 px-1">{product.category}</p>
-          )}
-        </td>
+          {product && <span className="text-[10px] text-slate-400 px-0.5">{product.category}</span>}
+        </div>
 
         {/* Qty */}
-        <td className="px-2 py-2">
-          <input type="number" min="1" value={item.quantity}
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Qty</span>
+          <input
+            type="number" min="1"
+            value={item.quantity}
             onChange={e => handleQtyChange(parseInt(e.target.value) || 1)}
-            className="w-full text-sm border border-slate-200 rounded-lg px-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center" />
-        </td>
+            className="w-full text-sm border border-slate-200 rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-center"
+          />
+        </div>
 
         {/* Status */}
-        <td className="px-2 py-2">
-          <select value={item.status} onChange={e => set('status', e.target.value as LineItemType['status'])}
-            className={`w-full text-xs border border-slate-200 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold ${STATUS_COLORS[item.status]}`}>
-            {Object.entries(STATUS_LABELS).map(([k, v]) => (
-              <option key={k} value={k}>{v}</option>
-            ))}
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Status</span>
+          <select
+            value={item.status}
+            onChange={e => set('status', e.target.value as LineItemType['status'])}
+            className={`w-full text-xs font-semibold border rounded-lg px-2 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 ${statusOpt.color}`}
+          >
+            {STATUS_OPTIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
-        </td>
+        </div>
 
-        {/* Sell price */}
-        <td className="px-2 py-2">
+        {/* Sell/Unit */}
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Sell / Unit</span>
           {item.status === 'free' ? (
-            <span className="text-sm text-slate-400 italic px-2">Free</span>
+            <div className="py-2 px-2.5 text-sm text-slate-400 italic border border-slate-200 rounded-lg bg-slate-50">Free</div>
           ) : (
             <div className="relative">
-              <span className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">$</span>
-              <input type="number" min="0" step="0.01" value={item.sellPriceUsd}
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs font-medium">$</span>
+              <input
+                type="number" min="0" step="0.01"
+                value={item.sellPriceUsd}
                 onChange={e => set('sellPriceUsd', parseFloat(e.target.value) || 0)}
-                className="w-full pl-5 pr-2 py-1.5 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
+                className="w-full pl-6 pr-2 py-2 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
             </div>
           )}
           {product && item.status !== 'free' && (
-            <p className="text-[10px] text-slate-400 mt-0.5 px-1">
-              Floor: ${product.floorSellPrice.toFixed(2)}
-            </p>
+            <span className="text-[10px] text-slate-400 px-0.5">Floor: ${product.floorSellPrice.toFixed(2)}</span>
           )}
-        </td>
+        </div>
 
         {/* Line total */}
-        <td className="px-2 py-2 text-right">
-          <span className="text-sm text-slate-700 font-medium">
-            {metrics ? currFmt(metrics.sellPriceUsd) : '—'}
-          </span>
-          {showSecondary && metrics && (
-            <p className="text-[10px] text-slate-400">{fmtAud(metrics.sellPriceUsd)}</p>
-          )}
-        </td>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Line Total</span>
+          <div className="py-2 px-2.5 rounded-lg bg-slate-50 border border-slate-100">
+            <p className="text-sm font-semibold text-slate-700">{metrics ? currFmt(metrics.sellPriceUsd) : '—'}</p>
+            {showSecondary && metrics && <p className="text-[10px] text-slate-400 mt-0.5">{fmtAud(metrics.sellPriceUsd)}</p>}
+          </div>
+        </div>
 
         {/* Margin */}
-        <td className="px-2 py-2 text-right">
-          {metrics ? (
-            <>
-              <span className={`text-sm ${marginColor(metrics.marginPercent, metrics.belowFloor)}`}>
-                {metrics.marginPercent === -Infinity ? 'N/A' : `${metrics.marginPercent.toFixed(1)}%`}
-              </span>
-              <p className="text-[10px] text-slate-400">{currFmt(metrics.marginUsd)}</p>
-              {showSecondary && <p className="text-[10px] text-slate-300">{fmtAud(metrics.marginUsd)}</p>}
-              {metrics.belowFloor && (
-                <p className="text-[10px] text-red-500 font-semibold">⚠ Below floor</p>
-              )}
-            </>
-          ) : '—'}
-        </td>
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Margin</span>
+          <div className="py-2 px-2.5 rounded-lg bg-slate-50 border border-slate-100">
+            {metrics ? (
+              <>
+                <p className={`text-sm font-semibold ${marginColor(metrics.marginPercent, metrics.belowFloor)}`}>
+                  {metrics.marginPercent === -Infinity ? 'N/A' : `${metrics.marginPercent.toFixed(1)}%`}
+                </p>
+                <p className="text-[10px] text-slate-400 mt-0.5">{currFmt(metrics.marginUsd)}</p>
+                {showSecondary && <p className="text-[10px] text-slate-300">{fmtAud(metrics.marginUsd)}</p>}
+                {metrics.belowFloor && <p className="text-[10px] text-red-500 font-semibold mt-0.5">⚠ Below floor</p>}
+              </>
+            ) : <span className="text-sm text-slate-300">—</span>}
+          </div>
+        </div>
 
-        {/* Freight toggle + Remove */}
-        <td className="px-2 py-2 text-right">
-          <div className="flex items-center justify-end gap-1">
-            <button type="button" onClick={() => setFreightOpen(v => !v)} title="Freight"
-              className={`p-1.5 rounded-lg transition-colors ${freightOpen ? 'bg-blue-100 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}>
-              <svg width="13" height="13" viewBox="0 0 20 20" fill="currentColor">
+        {/* Actions */}
+        <div className="flex flex-col gap-1">
+          <span className="text-[10px] font-semibold text-transparent uppercase tracking-wide select-none">·</span>
+          <div className="flex items-center gap-1 pt-0.5">
+            <button
+              type="button"
+              onClick={() => setFreightOpen(v => !v)}
+              title="Freight"
+              className={`p-2 rounded-lg transition-colors ${freightOpen ? 'bg-blue-100 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
+            >
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
                 <path d="M8 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM15 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0z"/>
                 <path d="M3 4h13l1.5 5H1.5L3 4zM1 2h2l.5 2H17l2 6H2L1 2z"/>
               </svg>
             </button>
-            <button type="button" onClick={onRemove}
-              className="p-1.5 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors">
-              <svg width="12" height="12" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <button
+              type="button"
+              onClick={onRemove}
+              className="p-2 rounded-lg text-red-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
             </button>
           </div>
-        </td>
-      </tr>
+        </div>
+      </div>
 
       {/* Freight expander */}
       {freightOpen && (
-        <tr className="bg-slate-50 border-b border-slate-100">
-          <td colSpan={7} className="px-4 py-3 select-text">
-            <FreightEditor
-              freight={item.freight}
-              breakdown={freightBreakdown}
-              onChange={f => set('freight', f)}
-            />
-          </td>
-        </tr>
+        <div className="border-t border-slate-100 px-4 py-3 bg-slate-50 rounded-b-xl">
+          <FreightEditor
+            freight={item.freight}
+            breakdown={freightBreakdown}
+            onChange={f => set('freight', f)}
+          />
+        </div>
       )}
-    </>
+    </div>
   )
 }
 
-// ── Freight editor (inline) ───────────────────────────────────────────────────
-
-import type { FreightConfig } from '../../types'
-import type { FreightBreakdown } from '../../engine/freight'
+// ── Freight editor ────────────────────────────────────────────────────────────
 
 function FreightEditor({
-  freight,
-  breakdown,
-  onChange,
+  freight, breakdown, onChange,
 }: {
   freight: FreightConfig | undefined
-  qty?: number
   breakdown: FreightBreakdown | null
   onChange: (f: FreightConfig | undefined) => void
 }) {
@@ -204,65 +213,58 @@ function FreightEditor({
 
       {enabled && (
         <div className="flex flex-wrap gap-3 items-start">
-          {/* Method selector */}
           <div className="flex flex-col gap-1">
             <label className="text-[11px] font-semibold text-slate-400">Method</label>
             <select value={f.method} onChange={e => set('method', e.target.value as FreightMethod)}
-              className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[36px]">
+              className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="ocean">Ocean</option>
               <option value="air">Air</option>
               <option value="mixed">Mixed</option>
             </select>
           </div>
 
-          {/* Ocean cost */}
           {(f.method === 'ocean' || f.method === 'mixed') && (
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold text-slate-400">Ocean $/unit</label>
               <input type="number" min="0" step="0.01" value={f.oceanCostPerUnit ?? ''}
                 onChange={e => set('oceanCostPerUnit', parseFloat(e.target.value) || 0)}
                 placeholder="0.00"
-                className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[36px]" />
+                className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           )}
 
-          {/* Air cost */}
           {(f.method === 'air' || f.method === 'mixed') && (
             <div className="flex flex-col gap-1">
               <label className="text-[11px] font-semibold text-slate-400">Air $/unit</label>
               <input type="number" min="0" step="0.01" value={f.airCostPerUnit ?? ''}
                 onChange={e => set('airCostPerUnit', parseFloat(e.target.value) || 0)}
                 placeholder="0.00"
-                className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[36px]" />
+                className="w-28 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           )}
 
-          {/* Mixed qty split */}
           {f.method === 'mixed' && (
             <>
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-semibold text-slate-400">Ocean units</label>
                 <input type="number" min="0" value={f.oceanQty ?? ''}
                   onChange={e => set('oceanQty', parseInt(e.target.value) || 0)}
-                  className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[36px]" />
+                  className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-[11px] font-semibold text-slate-400">Air units</label>
                 <input type="number" min="0" value={f.airQty ?? ''}
                   onChange={e => set('airQty', parseInt(e.target.value) || 0)}
-                  className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-[36px]" />
+                  className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
             </>
           )}
 
-          {/* Breakdown summary */}
           {breakdown && (
-            <div className="flex flex-col gap-0.5 ml-2 self-end pb-1">
-              <p className="text-xs font-semibold text-slate-600">
-                Total freight: ${breakdown.totalCost.toFixed(2)}
-              </p>
+            <div className="flex flex-col gap-0.5 self-end pb-1">
+              <p className="text-xs font-semibold text-slate-600">Total: ${breakdown.totalCost.toFixed(2)}</p>
               <p className="text-[11px] text-slate-400">
-                ${breakdown.blendedCostPerUnit.toFixed(2)}/unit blended
+                ${breakdown.blendedCostPerUnit.toFixed(2)}/unit
                 {breakdown.method === 'mixed' && ` (${breakdown.oceanQty} ocean / ${breakdown.airQty} air)`}
               </p>
             </div>
