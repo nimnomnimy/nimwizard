@@ -365,23 +365,33 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           {activeConfig.groups.length === 0 ? (
             <div className="p-6 text-center text-slate-400 text-sm">No groups yet. Click <strong>+ Group</strong> to add one.</div>
           ) : (
-            <div className="divide-y divide-slate-100">
-              {activeConfig.groups.map((group, gi) => (
-                <TopGroupBlock
-                  key={group.id}
-                  group={group}
-                  groupIndex={gi}
-                  totalGroups={activeConfig.groups.length}
-                  cfg={activeConfig}
-                  inputIsAud={inputIsAud}
-                  onUpdate={g => updateConfig(updateGroupInConfig(activeConfig, g))}
-                  onDelete={() => deleteTopGroup(activeConfig, group.id)}
-                  onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
-                  onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
-                  fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+            <div className="flex flex-col">
+              {/* Sticky column header */}
+              <div className="sticky top-0 z-20">
+                <ConfigTableHeader
+                  isRecurring={activeConfig.groups.some(g => g.pricingType === 'recurring')}
                   colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
                 />
-              ))}
+              </div>
+              {/* Scrollable groups area */}
+              <div className="divide-y divide-slate-100 overflow-y-auto" style={{ maxHeight: 520 }}>
+                {activeConfig.groups.map((group, gi) => (
+                  <TopGroupBlock
+                    key={group.id}
+                    group={group}
+                    groupIndex={gi}
+                    totalGroups={activeConfig.groups.length}
+                    cfg={activeConfig}
+                    inputIsAud={inputIsAud}
+                    onUpdate={g => updateConfig(updateGroupInConfig(activeConfig, g))}
+                    onDelete={() => deleteTopGroup(activeConfig, group.id)}
+                    onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
+                    onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
+                    fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                    colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
+                  />
+                ))}
+              </div>
             </div>
           )}
 
@@ -569,23 +579,24 @@ function TopGroupBlock({
     }
   }
 
-  // First selected row becomes the subgroup header (label = its code, description = its description).
-  // Remaining selected rows become children inside it.
   function promoteToSubGroup() {
     if (selected.size === 0) return
     const children = group.children ?? []
-    const selectedRows = children.filter(c => c.type === 'row' && selected.has(c.row.id)) as { type: 'row'; row: ConfigRow }[]
-    if (selectedRows.length === 0) return
-    const firstRow = selectedRows[0].row
-    const firstIdx = children.findIndex(c => c.type === 'row' && c.row.id === firstRow.id)
+    const firstIdx = children.findIndex(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
+    if (firstIdx < 0) return
+    const rowsToMove = children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
     const remaining = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
-    // The first selected row becomes the subgroup identity; the rest become component children
-    const sg = emptyGroup(firstRow.productCode ?? firstRow.description ?? `Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
-    sg.description = firstRow.productCode ? firstRow.description : undefined
-    sg.children = selectedRows.slice(1) // remaining selected rows become components
+    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
+    sg.children = rowsToMove
     const insertAt = Math.min(firstIdx, remaining.length)
     const next = [...remaining.slice(0, insertAt), { type: 'subgroup' as const, group: sg }, ...remaining.slice(insertAt)]
     onUpdate({ ...group, children: next })
+    setSelected(new Set())
+  }
+
+  function deleteSelected() {
+    if (selected.size === 0) return
+    onUpdate({ ...group, children: (group.children ?? []).filter(c => !(c.type === 'row' && selected.has(c.row.id))) })
     setSelected(new Set())
   }
 
@@ -696,6 +707,10 @@ function TopGroupBlock({
                   className="text-[11px] text-violet-700 bg-violet-100 hover:bg-violet-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
                   → Sub ({selected.size})
                 </button>
+                <button onClick={deleteSelected} title="Delete selected rows"
+                  className="text-[11px] text-red-600 bg-red-50 hover:bg-red-100 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
+                  Delete ({selected.size})
+                </button>
                 {destinations.length > 0 && (
                   <select defaultValue="" onChange={e => { if (e.target.value) { onMoveRows(selected, e.target.value); setSelected(new Set()) } }}
                     className="text-[11px] border border-slate-300 rounded px-1 py-0.5 bg-white focus:outline-none max-w-[110px]">
@@ -728,7 +743,6 @@ function TopGroupBlock({
 
       {!group.collapsed && (group.children ?? []).length > 0 && (
         <div>
-          <ConfigTableHeader isRecurring={isRecurring} showSelect onSelectAll={toggleAll} allSelected={allRowsSelected} colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols} />
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
@@ -861,6 +875,7 @@ function SubGroupBlock({
   const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
   const [subQtyInput, setSubQtyInput] = useState(() => String(subGroup.qty ?? 1))
   const [showColorPicker, setShowColorPicker] = useState(false)
+  const [subGroupSelected, setSubGroupSelected] = useState(false)
   const dragFrom = useRef<number | null>(null)
   // dropZoneOver: which inter-row gap is being hovered during a drag-from-parent
   const [dropZoneOver, setDropZoneOver] = useState<number | null>(null)
@@ -935,6 +950,13 @@ function SubGroupBlock({
   }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
+  const subGroupRows = (subGroup.children ?? []).filter(c => c.type === 'row').map(c => (c as {type:'row';row:ConfigRow}).row.id)
+  function toggleSubGroup(checked: boolean) {
+    setSubGroupSelected(checked)
+    if (checked) setSelected(new Set(subGroupRows))
+    else setSelected(new Set())
+  }
+
   return (
     <div
       draggable onDragStart={e => { e.dataTransfer.effectAllowed = 'move'; onDragStart() }}
@@ -951,7 +973,11 @@ function SubGroupBlock({
         style={{ ...headerBgStyle, ...(headerDragOver ? {} : {}) }}
         className={`flex items-center gap-1.5 px-2 py-1.5 border-t border-black/10 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       >
-        {/* Colour picker swatch */}
+        {/* Subgroup checkbox */}
+        <input type="checkbox" checked={subGroupSelected} onChange={e => toggleSubGroup(e.target.checked)}
+          className="w-3 h-3 cursor-pointer flex-shrink-0" title="Select all rows in this sub-group" />
+
+        {/* Colour picker swatch — visible when subgroup is selected */}
         <div className="relative flex-shrink-0">
           <button
             onClick={() => setShowColorPicker(v => !v)}
@@ -1265,9 +1291,11 @@ function ConfigRowEditor({
         ${selected ? 'bg-blue-50' : ''}
         ${dragOver ? 'border-t-2 border-blue-400' : ''}
       `}
-      style={{ gridTemplateColumns: cols, paddingLeft: '8px', ...(selected ? {} : (rowBgStyle ?? {})), ...rowBorderStyle }}
+      style={{ gridTemplateColumns: cols, paddingLeft: '8px', ...rowBorderStyle }}
     >
-      <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
+      <div style={selected ? undefined : rowBgStyle} className="flex items-center justify-center rounded-sm">
+        <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
+      </div>
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
       <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(0) && <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
