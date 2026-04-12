@@ -211,6 +211,16 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
   const [tableWidth, setTableWidth] = useState<number | null>(null)
   const tableContainerRef = useRef<HTMLDivElement>(null)
 
+  // Lifted selection state — shared across all groups so toolbar can act on it
+  // selectedRowIds: Set<rowId>, selectedGroupId: the group/subgroup owning those rows
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set())
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null)
+  // selectedSubGroupId: a subgroup whose checkbox is ticked (for colour picking)
+  const [selectedSubGroupId, setSelectedSubGroupId] = useState<string | null>(null)
+  const [showToolbarColorPicker, setShowToolbarColorPicker] = useState(false)
+
+  function clearSelection() { setSelectedRowIds(new Set()); setSelectedGroupId(null); setSelectedSubGroupId(null) }
+
   function toggleCol(idx: number) {
     setHiddenCols(prev => {
       const next = new Set(prev)
@@ -285,6 +295,53 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
     setPasteOpen(false); setPasteText(''); setPasteError('')
   }
 
+  // Toolbar action: add a row to the active group
+  function toolbarAddRow(cfg: ProductConfiguration) {
+    if (!selectedGroupId) return
+    const found = findGroup(cfg, selectedGroupId)
+    if (!found) return
+    const g = found.group
+    updateConfig(updateGroupInConfig(cfg, { ...g, children: [...(g.children ?? []), { type: 'row', row: emptyRow() }] }))
+  }
+
+  // Toolbar action: promote selected rows to a new subgroup (only valid inside a top-level group)
+  function toolbarAddSubGroup(cfg: ProductConfiguration) {
+    if (!selectedGroupId || selectedRowIds.size === 0) return
+    const found = findGroup(cfg, selectedGroupId)
+    if (!found || found.parentGroup !== null) return // only top-level groups can have subgroups
+    const g = found.group
+    const children = g.children ?? []
+    const firstIdx = children.findIndex(c => c.type === 'row' && selectedRowIds.has((c as {type:'row';row:ConfigRow}).row.id))
+    if (firstIdx < 0) return
+    const rowsToMove = children.filter(c => c.type === 'row' && selectedRowIds.has((c as {type:'row';row:ConfigRow}).row.id))
+    const remaining = children.filter(c => !(c.type === 'row' && selectedRowIds.has((c as {type:'row';row:ConfigRow}).row.id)))
+    const sg = emptyGroup(`Sub-group ${subGroupsOf(g).length + 1}`, g.pricingType)
+    sg.children = rowsToMove
+    const insertAt = Math.min(firstIdx, remaining.length)
+    const next = [...remaining.slice(0, insertAt), { type: 'subgroup' as const, group: sg }, ...remaining.slice(insertAt)]
+    updateConfig(updateGroupInConfig(cfg, { ...g, children: next }))
+    clearSelection()
+  }
+
+  // Toolbar action: delete selected rows
+  function toolbarDeleteSelected(cfg: ProductConfiguration) {
+    if (!selectedGroupId || selectedRowIds.size === 0) return
+    const found = findGroup(cfg, selectedGroupId)
+    if (!found) return
+    const g = found.group
+    updateConfig(updateGroupInConfig(cfg, { ...g, children: (g.children ?? []).filter(c => !(c.type === 'row' && selectedRowIds.has((c as {type:'row';row:ConfigRow}).row.id))) }))
+    clearSelection()
+  }
+
+  // Toolbar action: apply colour to selected subgroup
+  function toolbarApplyColor(cfg: ProductConfiguration, color: string) {
+    if (!selectedSubGroupId) return
+    const found = findGroup(cfg, selectedSubGroupId)
+    if (!found) return
+    updateConfig(updateGroupInConfig(cfg, { ...found.group, color }))
+    setShowToolbarColorPicker(false)
+  }
+
   if (!activeConfig) return null
 
   return (
@@ -297,7 +354,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           style={tableWidth ? { width: tableWidth } : undefined}
         >
           {/* Toolbar */}
-          <div className="px-4 py-2.5 border-b border-slate-100 bg-slate-50 flex items-center gap-2 flex-wrap">
+          <div className="px-3 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5 flex-wrap">
             {editingConfigName === activeConfig.id ? (
               <input autoFocus value={nameInput} onChange={e => setNameInput(e.target.value)}
                 onBlur={() => { updateConfig({ ...activeConfig, name: nameInput.trim() || activeConfig.name }); setEditingConfigName(null) }}
@@ -305,36 +362,105 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                 className="text-sm font-bold text-slate-800 border border-blue-300 rounded px-2 py-0.5 focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white" />
             ) : (
               <button onClick={() => { setEditingConfigName(activeConfig.id); setNameInput(activeConfig.name) }}
-                className="text-sm font-bold text-slate-800 hover:text-blue-600 transition-colors">
+                className="text-sm font-bold text-slate-800 hover:text-blue-600 transition-colors mr-1">
                 {activeConfig.name} ✎
               </button>
             )}
-            {/* Columns visibility dropdown */}
-            <div className="relative ml-auto">
-              <button onClick={() => setShowColMenu(v => !v)}
-                className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${showColMenu ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-                Columns{hiddenCols.size > 0 ? ` (${hiddenCols.size} hidden)` : ''}
-              </button>
-              {showColMenu && (
-                <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 flex flex-col gap-0.5 min-w-[130px]"
-                  onMouseLeave={() => setShowColMenu(false)}>
-                  {COL_LABELS.map((label, idx) => (
-                    <label key={idx} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer text-xs text-slate-600 font-medium select-none">
-                      <input type="checkbox" checked={!hiddenCols.has(idx)} onChange={() => toggleCol(idx)} className="w-3 h-3 cursor-pointer" />
-                      {label}
-                    </label>
-                  ))}
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-slate-200 mx-0.5" />
+
+            {/* Colour picker — shown when a subgroup is selected */}
+            {selectedSubGroupId && (() => {
+              const sg = findGroup(activeConfig, selectedSubGroupId)?.group
+              const curColor = sg?.color ?? '#fef9c3'
+              return (
+                <div className="relative flex-shrink-0">
+                  <button
+                    onClick={() => setShowToolbarColorPicker(v => !v)}
+                    style={{ backgroundColor: curColor, borderColor: darkenHex(curColor, 40) }}
+                    className="w-6 h-6 rounded border-2 cursor-pointer flex-shrink-0 shadow-sm"
+                    title="Set sub-group colour"
+                  />
+                  {showToolbarColorPicker && (
+                    <div className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-2 grid grid-cols-6 gap-1"
+                      onMouseLeave={() => setShowToolbarColorPicker(false)}>
+                      {SUB_GROUP_PALETTE.map(c => (
+                        <button key={c}
+                          onClick={() => toolbarApplyColor(activeConfig, c)}
+                          style={{ backgroundColor: c, borderColor: darkenHex(c, 40) }}
+                          className={`w-5 h-5 rounded border hover:scale-110 transition-transform ${curColor === c ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
+                          title={c}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
+              )
+            })()}
+
+            {/* Context actions when rows are selected */}
+            {selectedRowIds.size > 0 && selectedGroupId && (
+              <>
+                {/* Only show +Sub if in a top-level group (not already a subgroup) */}
+                {findGroup(activeConfig, selectedGroupId)?.parentGroup === null && (
+                  <button onClick={() => toolbarAddSubGroup(activeConfig)}
+                    className="text-[11px] text-violet-700 bg-violet-100 hover:bg-violet-200 px-2 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap border border-violet-200">
+                    + Sub ({selectedRowIds.size})
+                  </button>
+                )}
+                <button onClick={() => toolbarDeleteSelected(activeConfig)}
+                  className="text-[11px] text-red-600 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg font-semibold transition-colors whitespace-nowrap border border-red-200">
+                  Delete ({selectedRowIds.size})
+                </button>
+                {(() => {
+                  const dests = buildDestinations(activeConfig, selectedGroupId)
+                  return dests.length > 0 ? (
+                    <select defaultValue="" onChange={e => { if (e.target.value) { moveRowsToGroup(activeConfig, selectedRowIds, selectedGroupId, e.target.value); clearSelection() } }}
+                      className="text-[11px] border border-slate-300 rounded-lg px-1 py-1 bg-white focus:outline-none max-w-[120px]">
+                      <option value="">Move to…</option>
+                      {dests.map(d => <option key={d.id} value={d.id}>{d.indent ? '  › ' : ''}{d.label}</option>)}
+                    </select>
+                  ) : null
+                })()}
+              </>
+            )}
+
+            {/* Always-visible actions — pushed to right */}
+            <div className="flex items-center gap-1.5 ml-auto">
+              {selectedGroupId && (
+                <button onClick={() => toolbarAddRow(activeConfig)}
+                  className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
+                  + Row
+                </button>
               )}
+              <button onClick={() => addTopGroup(activeConfig)}
+                className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
+                + Group
+              </button>
+              {/* Columns visibility dropdown */}
+              <div className="relative">
+                <button onClick={() => setShowColMenu(v => !v)}
+                  className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${showColMenu ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                  Columns{hiddenCols.size > 0 ? ` (${hiddenCols.size} hidden)` : ''}
+                </button>
+                {showColMenu && (
+                  <div className="absolute right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 p-2 flex flex-col gap-0.5 min-w-[130px]"
+                    onMouseLeave={() => setShowColMenu(false)}>
+                    {COL_LABELS.map((label, idx) => (
+                      <label key={idx} className="flex items-center gap-2 px-2 py-1 rounded hover:bg-slate-50 cursor-pointer text-xs text-slate-600 font-medium select-none">
+                        <input type="checkbox" checked={!hiddenCols.has(idx)} onChange={() => toggleCol(idx)} className="w-3 h-3 cursor-pointer" />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setPasteOpen(v => !v)}
+                className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+                Paste Excel
+              </button>
             </div>
-            <button onClick={() => setPasteOpen(v => !v)}
-              className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
-              Paste Excel
-            </button>
-            <button onClick={() => addTopGroup(activeConfig)}
-              className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
-              + Group
-            </button>
           </div>
 
           {/* Paste area */}
@@ -383,9 +509,12 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                     onUpdate={g => updateConfig(updateGroupInConfig(activeConfig, g))}
                     onDelete={() => deleteTopGroup(activeConfig, group.id)}
                     onMoveGroup={(from, to) => reorderTopGroups(activeConfig, from, to)}
-                    onMoveRows={(rowIds, destGroupId) => moveRowsToGroup(activeConfig, rowIds, group.id, destGroupId)}
                     fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                     colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
+                    selectedRowIds={selectedGroupId === group.id || selectedGroupId === null ? selectedRowIds : new Set<string>()}
+                    onSelectionChange={(gId, ids) => { setSelectedGroupId(ids.size > 0 ? gId : null); setSelectedRowIds(ids) }}
+                    selectedSubGroupId={selectedSubGroupId}
+                    onSubGroupSelectionChange={sgId => setSelectedSubGroupId(sgId)}
                   />
                 ))}
               </div>
@@ -473,24 +602,28 @@ function TableWidthHandle({ onResize }: { onResize: (delta: number) => void }) {
 // ─── Top-level group ──────────────────────────────────────────────────────────
 
 function TopGroupBlock({
-  group, groupIndex, totalGroups, cfg, inputIsAud, onUpdate, onDelete, onMoveGroup, onMoveRows,
+  group, groupIndex, totalGroups, cfg: _cfg, inputIsAud, onUpdate, onDelete, onMoveGroup,
   fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize, hiddenCols,
+  selectedRowIds, onSelectionChange, selectedSubGroupId, onSubGroupSelectionChange,
 }: {
   group: ConfigGroup; groupIndex: number; totalGroups: number; cfg: ProductConfiguration
   inputIsAud: boolean
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
   onMoveGroup: (from: number, to: number) => void
-  onMoveRows: (rowIds: Set<string>, destGroupId: string) => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
   colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
+  selectedRowIds: Set<string>; onSelectionChange: (groupId: string, ids: Set<string>) => void
+  selectedSubGroupId: string | null; onSubGroupSelectionChange: (sgId: string | null) => void
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(group.label)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [groupDiscInput, setGroupDiscInput] = useState(() => (group.discountPct ?? 0).toFixed(1))
   const [groupQtyInput, setGroupQtyInput] = useState(() => String(group.qty ?? 1))
   // dragFrom: index being dragged; if that index is a selected row, ALL selected rows move together
   const dragFrom = useRef<number | null>(null)
+
+  // Rows selected in THIS group
+  const selected = selectedRowIds
 
   const isRecurring = group.pricingType === 'recurring'
   const subtotal   = groupSubtotal(group)         // net × rowQty × term — before group qty
@@ -542,15 +675,6 @@ function TopGroupBlock({
     }
   }
 
-  function addRow() { onUpdate({ ...group, children: [...(group.children ?? []), { type: 'row', row: emptyRow() }] }) }
-
-  function addSubGroup() {
-    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
-    sg.children = [{ type: 'row', row: emptyRow() }]
-    // Insert at position 0 so the new sub-group appears at the top
-    onUpdate({ ...group, children: [{ type: 'subgroup', group: sg }, ...(group.children ?? [])] })
-  }
-
   function updateChild(idx: number, child: ConfigChild) {
     const next = [...(group.children ?? [])]; next[idx] = child
     onUpdate({ ...group, children: next })
@@ -574,77 +698,77 @@ function TopGroupBlock({
     }
   }
 
-  function promoteToSubGroup() {
-    if (selected.size === 0) return
-    const children = group.children ?? []
-    const firstIdx = children.findIndex(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
-    if (firstIdx < 0) return
-    const rowsToMove = children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
-    const remaining = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
-    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
-    sg.children = rowsToMove
-    const insertAt = Math.min(firstIdx, remaining.length)
-    const next = [...remaining.slice(0, insertAt), { type: 'subgroup' as const, group: sg }, ...remaining.slice(insertAt)]
-    onUpdate({ ...group, children: next })
-    setSelected(new Set())
+  const toggleSelect = (id: string) => {
+    const n = new Set(selected)
+    n.has(id) ? n.delete(id) : n.add(id)
+    onSelectionChange(group.id, n)
   }
 
-  function deleteSelected() {
-    if (selected.size === 0) return
-    onUpdate({ ...group, children: (group.children ?? []).filter(c => !(c.type === 'row' && selected.has(c.row.id))) })
-    setSelected(new Set())
-  }
-
-  const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
-
-  const destinations = buildDestinations(cfg, group.id)
+  const cols = buildColTemplate(colWidths, isRecurring, hiddenCols)
 
   return (
     <div>
-      {/* Header */}
-      <div className={`flex items-center gap-1.5 px-3 py-2 ${headerBg}`}>
-        <button onClick={() => onUpdate({ ...group, collapsed: !group.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" className={`transition-transform ${group.collapsed ? '-rotate-90' : ''}`}>
+      {/* Header — grid-aligned with data rows */}
+      <div className={`grid items-center gap-1 py-1 px-0 border-b border-black/5 ${headerBg}`}
+        style={{ gridTemplateColumns: cols, paddingLeft: '8px' }}>
+
+        {/* Checkbox cell */}
+        <span />
+        {/* Collapse toggle (drag handle slot) */}
+        <button onClick={() => onUpdate({ ...group, collapsed: !group.collapsed })} className="text-slate-400 hover:text-slate-600 flex-shrink-0 flex items-center justify-center">
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform ${group.collapsed ? '-rotate-90' : ''}`}>
             <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </button>
 
-        {editLabel ? (
-          <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
-            onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
-            className="text-sm font-bold flex-1 border border-violet-300 rounded px-2 py-0.5 focus:outline-none bg-white" />
-        ) : (
-          <button onClick={() => { setEditLabel(true); setLabelVal(group.label) }}
-            className="text-sm font-bold text-slate-800 hover:text-violet-700 flex-1 text-left truncate">
-            {group.label || '(unnamed group)'}
-          </button>
-        )}
+        {/* Code column — group label (bold) */}
+        <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(0) && (editLabel ? (
+            <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
+              onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
+              className="w-full text-xs font-bold border border-violet-300 rounded px-1.5 py-0.5 focus:outline-none bg-white" />
+          ) : (
+            <button onClick={() => { setEditLabel(true); setLabelVal(group.label) }}
+              className="w-full text-xs font-bold text-slate-800 hover:text-violet-700 text-left truncate">
+              {group.label || '(group)'}
+            </button>
+          ))}
+        </div>
 
-        {/* One-time / Recurring toggle */}
-        <div className="flex items-center gap-0.5 flex-shrink-0">
-          {(['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
+        {/* Description column — pricing type toggle */}
+        <div className={`flex items-center gap-0.5 ${hiddenCols.has(1) ? 'overflow-hidden' : ''}`}>
+          {!hiddenCols.has(1) && (['one-time', 'recurring'] as ConfigGroupPricingType[]).map(pt => (
             <button key={pt} onClick={() => onUpdate({ ...group, pricingType: pt, children: (group.children ?? []).map(c => c.type === 'subgroup' ? { ...c, group: { ...c.group, pricingType: pt } } : c) })}
-              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors capitalize ${
-                group.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white text-slate-400 hover:text-slate-600 border border-slate-200'
+              className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
+                group.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white/60 text-slate-400 hover:text-slate-600 border border-slate-200'
               }`}>
               {pt === 'one-time' ? '1×' : '↻'}
             </button>
           ))}
-          {/* Default unit for recurring */}
-          {isRecurring && (
+          {isRecurring && !hiddenCols.has(1) && (
             <select value={group.defaultUnit ?? 'months'}
               onChange={e => onUpdate({ ...group, defaultUnit: e.target.value as ConfigRowUnit })}
-              className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 ml-1">
+              className="text-[10px] border border-indigo-200 rounded px-1 py-0.5 bg-white/70 focus:outline-none ml-1">
               {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           )}
         </div>
 
-        {/* Disc% → Net → ×Qty → Total */}
-        <div className="flex items-center gap-1 flex-shrink-0">
-          {/* Disc % */}
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
+        {/* Qty — empty */}
+        <div className={hiddenCols.has(2) ? 'overflow-hidden' : ''} />
+        {/* Cost — empty */}
+        <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''} />
+        {/* Floor — empty */}
+        <div className={hiddenCols.has(4) ? 'overflow-hidden' : ''} />
+        {/* Sell — empty */}
+        <div className={hiddenCols.has(5) ? 'overflow-hidden' : ''} />
+        {/* Unit/Term — empty (recurring) */}
+        {isRecurring && <div className={hiddenCols.has(6) ? 'overflow-hidden' : ''} />}
+        {isRecurring && <div className={hiddenCols.has(7) ? 'overflow-hidden' : ''} />}
+
+        {/* Disc% */}
+        <div className={hiddenCols.has(9) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(9) && (
             <div className="relative flex items-center">
               <input type="number" max="100" step="0.1"
                 value={groupDiscInput}
@@ -652,85 +776,61 @@ function TopGroupBlock({
                 onBlur={e => applyGroupDisc(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') applyGroupDisc(groupDiscInput) }}
                 placeholder="0"
-                className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+                className="w-full border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white/80 font-semibold"
               />
               <span className="absolute right-1 text-[9px] text-slate-400 pointer-events-none">%</span>
             </div>
-          </div>
-          {/* Net (editable — sets disc%) */}
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
-            <input type="number" min="0" step="0.01"
+          )}
+        </div>
+
+        {/* Net */}
+        <div className={hiddenCols.has(10) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(10) && (
+            <input type="number" step="0.01"
               defaultValue={dispSubtotal.toFixed(2)}
               key={`${dispSubtotal.toFixed(2)}`}
               onBlur={e => applyGroupNet(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applyGroupNet((e.target as HTMLInputElement).value) }}
               placeholder="0.00"
-              className="w-20 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+              className="w-full border border-slate-200 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white/80 font-semibold"
             />
-          </div>
-          {/* × */}
-          <span className="text-slate-400 text-xs font-bold flex-shrink-0 mt-3">×</span>
-          {/* Qty */}
-          <div className="flex flex-col items-center gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
-            <input type="number" min="1" step="1"
-              value={groupQtyInput}
-              onChange={e => setGroupQtyInput(e.target.value)}
-              onBlur={e => applyGroupQty(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') applyGroupQty(groupQtyInput) }}
-              placeholder="1"
-              className="w-12 border border-slate-200 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
-            />
-          </div>
-          {/* = Total */}
-          <div className="flex flex-col items-end gap-0">
-            <span className="text-[9px] text-slate-400 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
-            <span className="text-xs font-bold text-slate-700 whitespace-nowrap">{fmt(total)}</span>
-            {showSecondary && <span className="text-[10px] text-slate-400">{fmtAud(total)}</span>}
-          </div>
+          )}
         </div>
 
-        {!group.collapsed && (
-          <div className="flex gap-1 flex-shrink-0 items-center">
-            {selected.size > 0 && (
-              <>
-                <button onClick={promoteToSubGroup} title="Make selected rows a sub-group (keeps position)"
-                  className="text-[11px] text-violet-700 bg-violet-100 hover:bg-violet-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
-                  → Sub ({selected.size})
-                </button>
-                <button onClick={deleteSelected} title="Delete selected rows"
-                  className="text-[11px] text-red-600 bg-red-50 hover:bg-red-100 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
-                  Delete ({selected.size})
-                </button>
-                {destinations.length > 0 && (
-                  <select defaultValue="" onChange={e => { if (e.target.value) { onMoveRows(selected, e.target.value); setSelected(new Set()) } }}
-                    className="text-[11px] border border-slate-300 rounded px-1 py-0.5 bg-white focus:outline-none max-w-[110px]">
-                    <option value="">Move to…</option>
-                    {destinations.map(d => (
-                      <option key={d.id} value={d.id}>{d.indent ? '  › ' : ''}{d.label}</option>
-                    ))}
-                  </select>
-                )}
-              </>
-            )}
-            <button onClick={addRow} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Row</button>
-            <button onClick={addSubGroup} className="text-[11px] text-slate-400 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white transition-colors">+Sub</button>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-0 flex-shrink-0">
-          <button onClick={() => onMoveGroup(groupIndex, groupIndex - 1)} disabled={groupIndex === 0} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 7l3-4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
-          <button onClick={() => onMoveGroup(groupIndex, groupIndex + 1)} disabled={groupIndex === totalGroups - 1} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
-            <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-          </button>
+        {/* Total + ×Qty */}
+        <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
+          {!hiddenCols.has(8) && (
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-slate-400 text-[10px]">×</span>
+              <input type="number" min="1" step="1"
+                value={groupQtyInput}
+                onChange={e => setGroupQtyInput(e.target.value)}
+                onBlur={e => applyGroupQty(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') applyGroupQty(groupQtyInput) }}
+                className="w-8 border border-slate-200 rounded px-0.5 py-0.5 text-[10px] text-center focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white/80"
+              />
+              <div className="text-right">
+                <p className="text-xs font-bold text-slate-700 whitespace-nowrap">{fmt(total)}</p>
+                {showSecondary && <p className="text-[10px] text-slate-400">{fmtAud(total)}</p>}
+              </div>
+            </div>
+          )}
         </div>
 
-        <button onClick={onDelete} className="text-slate-300 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
-          <svg width="11" height="11" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
-        </button>
+        {/* Actions: reorder + delete */}
+        <div className="flex items-center gap-0.5 justify-end">
+          <div className="flex flex-col gap-0">
+            <button onClick={() => onMoveGroup(groupIndex, groupIndex - 1)} disabled={groupIndex === 0} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 7l3-4 3 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+            <button onClick={() => onMoveGroup(groupIndex, groupIndex + 1)} disabled={groupIndex === totalGroups - 1} className="text-slate-300 hover:text-slate-600 disabled:opacity-20 leading-none p-0.5">
+              <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M2 3l3 4 3-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+            </button>
+          </div>
+          <button onClick={onDelete} className="text-slate-300 hover:text-red-500 p-1 rounded transition-colors">
+            <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+          </button>
+        </div>
       </div>
 
       {!group.collapsed && (group.children ?? []).length > 0 && (
@@ -759,7 +859,6 @@ function TopGroupBlock({
                 subGroup={child.group}
                 childIndex={ci}
                 totalChildren={group.children.length}
-                cfg={cfg}
                 inputIsAud={inputIsAud}
                 parentIsRecurring={isRecurring}
                 parentDefaultUnit={group.defaultUnit ?? 'months'}
@@ -779,13 +878,11 @@ function TopGroupBlock({
                 onDragStart={() => { dragFrom.current = ci }}
                 onDrop={() => { if (dragFrom.current !== null && dragFrom.current !== ci) reorderChildren(dragFrom.current, ci); dragFrom.current = null }}
                 onDropRowsInto={(insertAt) => {
-                  // Move dragged rows (selected or single) from parent group into this subgroup at insertAt
                   const fromIdx = dragFrom.current
                   if (fromIdx === null || fromIdx === ci) { dragFrom.current = null; return }
                   const groupChildren2 = group.children ?? []
                   const dragged = groupChildren2[fromIdx]
                   if (!dragged || dragged.type !== 'row') { dragFrom.current = null; return }
-                  // Collect all rows to move: multi if selected, single otherwise
                   const isMulti = selected.has(dragged.row.id) && selected.size > 1
                   const toMove = isMulti
                     ? groupChildren2.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
@@ -799,6 +896,10 @@ function TopGroupBlock({
                   onUpdate({ ...group, children: nextChildren2 })
                   dragFrom.current = null
                 }}
+                selectedRowIds={selectedRowIds}
+                onSelectionChange={ids => onSelectionChange(child.group.id, ids)}
+                isSelectedSubGroup={selectedSubGroupId === child.group.id}
+                onSubGroupSelectionChange={checked => onSubGroupSelectionChange(checked ? child.group.id : null)}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                 colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
               />
@@ -842,18 +943,21 @@ function darkenHex(hex: string, amount = 15): string {
 }
 
 function SubGroupBlock({
-  subGroup, childIndex: _childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
+  subGroup, childIndex: _childIndex, totalChildren: _totalChildren, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
-  onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowsInto,
+  onUpdate, onDelete, onMoveRowsToParent: _onMoveRowsToParent, onDragStart, onDrop, onDropRowsInto,
+  selectedRowIds, onSelectionChange, isSelectedSubGroup, onSubGroupSelectionChange,
   fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize, hiddenCols,
 }: {
-  subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
+  subGroup: ConfigGroup; childIndex: number; totalChildren: number
   inputIsAud: boolean
   parentIsRecurring: boolean; parentDefaultUnit: ConfigRowUnit
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
   onMoveRowsToParent: (rowChildren: ConfigChild[]) => void
   onDragStart: () => void; onDrop: () => void
-  onDropRowsInto: (insertAt: number) => void  // drop row(s) from parent into this subgroup at position
+  onDropRowsInto: (insertAt: number) => void
+  selectedRowIds: Set<string>; onSelectionChange: (ids: Set<string>) => void
+  isSelectedSubGroup: boolean; onSubGroupSelectionChange: (checked: boolean) => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
   colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
 }) {
@@ -861,16 +965,14 @@ function SubGroupBlock({
   const [labelVal, setLabelVal] = useState(subGroup.label)
   const [editDesc, setEditDesc] = useState(false)
   const [descVal, setDescVal] = useState(subGroup.description ?? '')
-  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const [headerDragOver, setHeaderDragOver] = useState(false)
   const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
   const [subQtyInput, setSubQtyInput] = useState(() => String(subGroup.qty ?? 1))
-  const [showColorPicker, setShowColorPicker] = useState(false)
-  const [subGroupSelected, setSubGroupSelected] = useState(false)
   const dragFrom = useRef<number | null>(null)
-  // dropZoneOver: which inter-row gap is being hovered during a drag-from-parent
   const [dropZoneOver, setDropZoneOver] = useState<number | null>(null)
+
+  const selected = selectedRowIds
 
   const isRecurring = parentIsRecurring
   const subtotal     = groupSubtotal(subGroup)
@@ -887,7 +989,6 @@ function SubGroupBlock({
 
   function commitLabel() { onUpdate({ ...subGroup, label: labelVal.trim() || subGroup.label }); setEditLabel(false) }
   function commitDesc()  { onUpdate({ ...subGroup, description: descVal.trim() || undefined }); setEditDesc(false) }
-  function addRow() { onUpdate({ ...subGroup, children: [...(subGroup.children ?? []), { type: 'row', row: emptyRow() }] }) }
 
   function applySubDisc(val: string) {
     const d = parseFloat(val)
@@ -938,14 +1039,18 @@ function SubGroupBlock({
       onUpdate({ ...subGroup, children: reorder(children, from, to) })
     }
   }
-  const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleSelect = (id: string) => {
+    const n = new Set(selected); n.has(id) ? n.delete(id) : n.add(id)
+    onSelectionChange(n)
+  }
 
   const subGroupRows = (subGroup.children ?? []).filter(c => c.type === 'row').map(c => (c as {type:'row';row:ConfigRow}).row.id)
   function toggleSubGroup(checked: boolean) {
-    setSubGroupSelected(checked)
-    if (checked) setSelected(new Set(subGroupRows))
-    else setSelected(new Set())
+    onSubGroupSelectionChange(checked)
+    onSelectionChange(checked ? new Set(subGroupRows) : new Set())
   }
+
+  const cols = buildColTemplate(colWidths, isRecurring, hiddenCols)
 
   return (
     <div
@@ -955,71 +1060,45 @@ function SubGroupBlock({
       onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
       className={dragOver ? 'border-t-2 border-blue-400' : ''}
     >
-      {/* Sub-group header row — acts as the "product" row */}
+      {/* Sub-group header — grid-aligned */}
       <div
         onDragOver={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(true) }}
         onDragLeave={e => { e.stopPropagation(); setHeaderDragOver(false) }}
         onDrop={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(false); onDropRowsInto(0) }}
-        style={{ ...headerBgStyle, ...(headerDragOver ? {} : {}) }}
-        className={`flex items-center gap-1.5 px-2 py-1.5 border-t border-black/10 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+        style={{ ...headerBgStyle, gridTemplateColumns: cols, paddingLeft: '8px' }}
+        className={`grid items-center gap-1 py-1 border-t border-black/10 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       >
-        {/* Subgroup checkbox */}
-        <input type="checkbox" checked={subGroupSelected} onChange={e => toggleSubGroup(e.target.checked)}
-          className="w-3 h-3 cursor-pointer flex-shrink-0" title="Select all rows in this sub-group" />
+        {/* Checkbox — selects all rows in this subgroup */}
+        <input type="checkbox" checked={isSelectedSubGroup} onChange={e => toggleSubGroup(e.target.checked)}
+          className="w-3 h-3 cursor-pointer" title="Select all rows in this sub-group" />
 
-        {/* Colour picker swatch — visible when subgroup is selected */}
-        <div className="relative flex-shrink-0">
-          <button
-            onClick={() => setShowColorPicker(v => !v)}
-            style={{ backgroundColor: accentColor, borderColor: darkenHex(accentColor, 40) }}
-            className="w-4 h-4 rounded-sm border cursor-pointer flex-shrink-0"
-            title="Choose highlight colour"
-          />
-          {showColorPicker && (
-            <div
-              className="absolute left-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl z-50 p-2 grid grid-cols-6 gap-1"
-              onMouseLeave={() => setShowColorPicker(false)}
-            >
-              {SUB_GROUP_PALETTE.map(c => (
-                <button
-                  key={c}
-                  onClick={() => { onUpdate({ ...subGroup, color: c }); setShowColorPicker(false) }}
-                  style={{ backgroundColor: c, borderColor: darkenHex(c, 40) }}
-                  className={`w-5 h-5 rounded border hover:scale-110 transition-transform ${accentColor === c ? 'ring-2 ring-blue-500 ring-offset-1' : ''}`}
-                  title={c}
-                />
-              ))}
-            </div>
-          )}
+        {/* Drag handle + collapse */}
+        <div className="flex items-center gap-0.5">
+          <span className="cursor-grab text-slate-400 hover:text-slate-600 select-none text-xs" title="Drag">⠿</span>
+          <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-500 hover:text-slate-700">
+            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform ${subGroup.collapsed ? '-rotate-90' : ''}`}>
+              <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          </button>
         </div>
 
-        {/* Collapse toggle */}
-        <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-500 hover:text-slate-700 flex-shrink-0">
-          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" className={`transition-transform ${subGroup.collapsed ? '-rotate-90' : ''}`}>
-            <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-        </button>
-
-        {/* Drag handle */}
-        <span className="cursor-grab text-slate-400 hover:text-slate-600 select-none text-xs flex-shrink-0" title="Drag to reorder">⠿</span>
-
         {/* Code (label) */}
-        <div className="flex-shrink-0" style={{ width: colWidths[0] }}>
-          {editLabel ? (
+        <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(0) && (editLabel ? (
             <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
               onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
-              className="w-full text-xs font-semibold border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white font-mono" />
+              className="w-full text-xs font-bold border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white font-mono" />
           ) : (
             <button onClick={() => { setEditLabel(true); setLabelVal(subGroup.label) }}
               className="w-full text-xs font-bold text-slate-800 hover:text-blue-700 text-left truncate font-mono">
               {subGroup.label || '(code)'}
             </button>
-          )}
+          ))}
         </div>
 
         {/* Description */}
-        <div className="flex-1 min-w-0">
-          {editDesc ? (
+        <div className={hiddenCols.has(1) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(1) && (editDesc ? (
             <input autoFocus value={descVal} onChange={e => setDescVal(e.target.value)}
               onBlur={commitDesc} onKeyDown={e => { if (e.key === 'Enter') commitDesc(); if (e.key === 'Escape') setEditDesc(false) }}
               className="w-full text-xs border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white" />
@@ -1028,22 +1107,34 @@ function SubGroupBlock({
               className="w-full text-xs text-slate-700 hover:text-blue-700 text-left truncate italic">
               {subGroup.description || <span className="text-slate-400 not-italic">Description…</span>}
             </button>
-          )}
+          ))}
         </div>
 
-        {/* Recurring unit */}
+        {/* Qty — empty */}
+        <div className={hiddenCols.has(2) ? 'overflow-hidden' : ''} />
+        {/* Cost — empty */}
+        <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''} />
+        {/* Floor — empty */}
+        <div className={hiddenCols.has(4) ? 'overflow-hidden' : ''} />
+        {/* Sell — empty */}
+        <div className={hiddenCols.has(5) ? 'overflow-hidden' : ''} />
+        {/* Recurring unit + term — empty */}
         {isRecurring && (
-          <select value={effectiveDefaultUnit}
-            onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
-            className="text-[11px] border border-indigo-200 rounded px-1 py-0.5 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-400 flex-shrink-0">
-            {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
+          <div className={hiddenCols.has(6) ? 'overflow-hidden' : ''}>
+            {!hiddenCols.has(6) && (
+              <select value={effectiveDefaultUnit}
+                onChange={e => onUpdate({ ...subGroup, defaultUnit: e.target.value as ConfigRowUnit })}
+                className="w-full text-[10px] border border-indigo-200 rounded px-0.5 py-0.5 bg-white/70 focus:outline-none">
+                {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            )}
+          </div>
         )}
+        {isRecurring && <div className={hiddenCols.has(7) ? 'overflow-hidden' : ''} />}
 
-        {/* Disc% → Net → ×Qty → Total */}
-        <div className="flex items-center gap-1 flex-shrink-0">
-          <div className="flex flex-col items-center">
-            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Disc%</span>
+        {/* Disc% */}
+        <div className={hiddenCols.has(9) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(9) && (
             <div className="relative flex items-center">
               <input type="number" max="100" step="0.1"
                 value={subDiscInput}
@@ -1051,56 +1142,49 @@ function SubGroupBlock({
                 onBlur={e => applySubDisc(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter') applySubDisc(subDiscInput) }}
                 placeholder="0"
-                className="w-12 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                className="w-full bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center pr-3.5 focus:outline-none focus:ring-1 focus:ring-blue-400 font-semibold"
               />
               <span className="absolute right-1 text-[9px] text-slate-500 pointer-events-none">%</span>
             </div>
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Net</span>
-            <input type="number" min="0" step="0.01"
+          )}
+        </div>
+
+        {/* Net */}
+        <div className={hiddenCols.has(10) ? 'overflow-hidden' : ''}>
+          {!hiddenCols.has(10) && (
+            <input type="number" step="0.01"
               defaultValue={dispSubtotal.toFixed(2)}
               key={`${dispSubtotal.toFixed(2)}`}
               onBlur={e => applySubNet(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter') applySubNet((e.target as HTMLInputElement).value) }}
               placeholder="0.00"
-              className="w-20 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-blue-400"
+              className="w-full bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-right focus:outline-none focus:ring-1 focus:ring-blue-400 font-semibold"
             />
-          </div>
-          <span className="text-slate-500 text-xs font-bold flex-shrink-0 mt-3">×</span>
-          <div className="flex flex-col items-center">
-            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Qty</span>
-            <input type="number" min="1" step="1"
-              value={subQtyInput}
-              onChange={e => setSubQtyInput(e.target.value)}
-              onBlur={e => applySubQty(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
-              placeholder="1"
-              className="w-12 bg-white/70 border border-black/15 rounded px-1 py-0.5 text-[11px] text-center focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-          </div>
-          <div className="flex flex-col items-end">
-            <span className="text-[9px] text-slate-500 font-semibold uppercase tracking-wide leading-none mb-0.5">Total</span>
-            <span className="text-xs font-bold text-slate-800 whitespace-nowrap">{fmt(total)}</span>
-            {showSecondary && <span className="text-[10px] text-slate-500">{fmtAud(total)}</span>}
-          </div>
+          )}
         </div>
 
-        {/* Actions */}
-        {!subGroup.collapsed && (
-          <div className="flex items-center gap-1 flex-shrink-0">
-            {selected.size > 0 && (
-              <button
-                onClick={() => { const toMove = subGroup.children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)); onMoveRowsToParent(toMove); setSelected(new Set()) }}
-                className="text-[11px] text-amber-700 bg-amber-100 hover:bg-amber-200 px-1.5 py-0.5 rounded font-semibold transition-colors whitespace-nowrap">
-                ↑ Parent ({selected.size})
-              </button>
-            )}
-            <button onClick={addRow} className="text-[11px] text-slate-500 hover:text-slate-700 px-1.5 py-0.5 rounded hover:bg-white/50 transition-colors">+Row</button>
-          </div>
-        )}
+        {/* Total + ×Qty */}
+        <div className={`text-right pr-1 ${hiddenCols.has(8) ? 'overflow-hidden' : ''}`}>
+          {!hiddenCols.has(8) && (
+            <div className="flex items-center justify-end gap-1">
+              <span className="text-slate-400 text-[10px]">×</span>
+              <input type="number" min="1" step="1"
+                value={subQtyInput}
+                onChange={e => setSubQtyInput(e.target.value)}
+                onBlur={e => applySubQty(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') applySubQty(subQtyInput) }}
+                className="w-8 bg-white/70 border border-black/15 rounded px-0.5 py-0.5 text-[10px] text-center focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <div className="text-right">
+                <p className="text-xs font-bold text-slate-800 whitespace-nowrap">{fmt(total)}</p>
+                {showSecondary && <p className="text-[10px] text-slate-500">{fmtAud(total)}</p>}
+              </div>
+            </div>
+          )}
+        </div>
 
-        <button onClick={onDelete} className="text-slate-400 hover:text-red-500 flex-shrink-0 p-1 rounded transition-colors">
+        {/* Delete */}
+        <button onClick={onDelete} className="text-slate-400 hover:text-red-500 p-1 rounded transition-colors justify-self-end">
           <svg width="10" height="10" viewBox="0 0 14 14" fill="none"><path d="M1 1l12 12M13 1L1 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
         </button>
       </div>
