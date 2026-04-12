@@ -1085,25 +1085,23 @@ function SubGroupBlock({
         <input type="checkbox" checked={isSelectedSubGroup} onChange={e => toggleSubGroup(e.target.checked)}
           className="w-3 h-3 cursor-pointer" title="Select all rows in this sub-group" />
 
-        {/* Drag handle + collapse */}
-        <div className="flex items-center gap-0.5">
-          <span className="cursor-grab text-slate-400 hover:text-slate-600 select-none text-xs" title="Drag">⠿</span>
-          <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-500 hover:text-slate-700">
+        {/* Drag handle */}
+        <span className="cursor-grab text-slate-400 hover:text-slate-600 select-none text-xs text-center" title="Drag">⠿</span>
+
+        {/* Code (label) + collapse toggle */}
+        <div className={`flex items-center gap-0.5 ${hiddenCols.has(0) ? 'overflow-hidden' : ''}`}>
+          <button onClick={() => onUpdate({ ...subGroup, collapsed: !subGroup.collapsed })} className="text-slate-500 hover:text-slate-700 flex-shrink-0 p-0.5">
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" className={`transition-transform ${subGroup.collapsed ? '-rotate-90' : ''}`}>
               <path d="M2 4l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
-        </div>
-
-        {/* Code (label) */}
-        <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
           {!hiddenCols.has(0) && (editLabel ? (
             <input autoFocus value={labelVal} onChange={e => setLabelVal(e.target.value)}
               onBlur={commitLabel} onKeyDown={e => { if (e.key === 'Enter') commitLabel(); if (e.key === 'Escape') setEditLabel(false) }}
               className="w-full text-xs font-bold border border-blue-300 rounded px-1.5 py-0.5 focus:outline-none bg-white font-mono" />
           ) : (
             <button onClick={() => { setEditLabel(true); setLabelVal(subGroup.label) }}
-              className="w-full text-xs font-bold text-slate-800 hover:text-blue-700 text-left truncate font-mono">
+              className="flex-1 text-xs font-bold text-slate-800 hover:text-blue-700 text-left truncate font-mono min-w-0">
               {subGroup.label || '(code)'}
             </button>
           ))}
