@@ -159,7 +159,7 @@ export default function ProductsPage() {
 
   function handleNewProduct() {
     const newId = uid()
-    const firstConfig: ProductConfiguration = { id: uid(), name: 'Configuration 1', groups: [] }
+    const firstConfig: ProductConfiguration = { id: uid(), name: 'Configuration 1', groups: [], currency: 'USD', createdAt: Date.now(), updatedAt: Date.now() }
     const product: DealProduct = {
       id: newId,
       name: 'New Product',
