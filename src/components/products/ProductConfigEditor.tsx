@@ -257,8 +257,8 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
                 {activeConfig.name} ✎
               </button>
             )}
-            <button onClick={() => setPasteOpen(v => !v)} className="ml-auto"
-              className={`text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
+            <button onClick={() => setPasteOpen(v => !v)}
+              className={`ml-auto text-[11px] px-2 py-1 rounded-lg font-semibold border transition-colors ${pasteOpen ? 'bg-amber-100 text-amber-700 border-amber-200' : 'bg-white border-slate-200 text-slate-500 hover:border-slate-300'}`}>
               Paste Excel
             </button>
             <button onClick={() => addTopGroup(activeConfig)}

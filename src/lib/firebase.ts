@@ -20,5 +20,5 @@ export const storage = getStorage(app)
 
 // Use the new cache API — supports multiple tabs natively, no deprecation warning
 export const db = initializeFirestore(app, {
-  cache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+  localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
 })
