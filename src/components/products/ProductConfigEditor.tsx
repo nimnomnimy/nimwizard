@@ -358,15 +358,11 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           className="bg-white border border-slate-200 rounded-xl overflow-hidden relative flex flex-col flex-1 min-h-0"
           style={tableWidth ? { width: tableWidth } : undefined}
         >
-          {/* Header slot — product name / meta (rendered above toolbar when provided) */}
-          {headerSlot && (
-            <div className="px-3 py-2 border-b border-slate-200">
-              {headerSlot}
-            </div>
-          )}
+          {/* Toolbar (header slot lives inline on the left when provided) */}
+          <div className="px-3 py-2 border-b border-slate-200 bg-white flex items-center gap-2 flex-wrap">
+            {/* Header slot — product name + save/clone/delete (provided by parent) */}
+            {headerSlot}
 
-          {/* Toolbar */}
-          <div className="px-3 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5 flex-wrap">
             {!hideConfigName && (editingConfigName === activeConfig.id ? (
               <input autoFocus value={nameInput} onChange={e => setNameInput(e.target.value)}
                 onBlur={() => { updateConfig({ ...activeConfig, name: nameInput.trim() || activeConfig.name }); setEditingConfigName(null) }}
@@ -746,7 +742,7 @@ function TopGroupBlock({
               className={`text-[10px] px-1.5 py-0.5 rounded font-semibold transition-colors ${
                 group.pricingType === pt ? (pt === 'recurring' ? 'bg-indigo-500 text-white' : 'bg-slate-600 text-white') : 'bg-white/60 text-slate-400 hover:text-slate-600 border border-slate-200'
               }`}>
-              {pt === 'one-time' ? '1×' : '↻'}
+              {pt === 'one-time' ? 'One-Time' : 'Recurring'}
             </button>
           ))}
           {isRecurring && !hiddenCols.has(1) && (

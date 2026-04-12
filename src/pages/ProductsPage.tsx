@@ -545,8 +545,8 @@ function ProductDetailPane({
           onChange={onConfigsChange}
           hideConfigName
           headerSlot={
-            <div className="flex items-center gap-2">
-              {/* Product name — grows to fill */}
+            <>
+              {/* Product name — grows to fill available space */}
               <input
                 ref={nameRef}
                 type="text"
@@ -554,30 +554,29 @@ function ProductDetailPane({
                 onChange={e => set('name', e.target.value)}
                 placeholder="Product name…"
                 required
-                className="text-lg font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-2 py-0.5 flex-1 min-w-0 placeholder:text-slate-300"
+                className="text-base font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 flex-1 min-w-0 placeholder:text-slate-300"
               />
-              {/* Save / Clone / Delete inline */}
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                {!isNew && (
-                  <button type="button" onClick={onClone}
-                    className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors">
-                    Clone
-                  </button>
-                )}
-                {!isNew && (
-                  <button type="button" onClick={onDelete}
-                    className="px-2.5 py-1 rounded-lg border border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors">
-                    Delete
-                  </button>
-                )}
-                <button
-                  type="submit"
-                  disabled={!dirty && !isNew}
-                  className="px-3 py-1 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
-                  Save
+              {/* Save / Clone / Delete */}
+              {!isNew && (
+                <button type="button" onClick={onClone}
+                  className="px-2.5 py-1 rounded-lg border border-slate-200 text-slate-600 text-xs font-medium hover:bg-slate-50 transition-colors flex-shrink-0">
+                  Clone
                 </button>
-              </div>
-            </div>
+              )}
+              {!isNew && (
+                <button type="button" onClick={onDelete}
+                  className="px-2.5 py-1 rounded-lg border border-red-200 text-red-500 text-xs font-medium hover:bg-red-50 transition-colors flex-shrink-0">
+                  Delete
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={!dirty && !isNew}
+                className="px-3 py-1 rounded-lg bg-blue-500 text-white text-xs font-semibold hover:bg-blue-600 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0">
+                Save
+              </button>
+              <div className="w-px h-4 bg-slate-200 flex-shrink-0" />
+            </>
           }
         />
 
