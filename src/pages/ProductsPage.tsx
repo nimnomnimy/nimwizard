@@ -564,48 +564,43 @@ function ProductDetailPane({
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        <form onSubmit={onSave} className="p-6 flex flex-col gap-6">
-            {/* Name + meta header */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center gap-2">
-                <select
-                  value={form.category}
-                  onChange={e => set('category', e.target.value as ProductCategory)}
-                  className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer ${CATEGORY_COLORS[form.category]}`}
-                  style={{ appearance: 'none' }}>
-                  {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-                  {(['one-time', 'recurring'] as PricingType[]).map(t => (
-                    <button key={t} type="button" onClick={() => set('pricingType', t)}
-                      className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                      {t === 'one-time' ? 'One-Time' : 'Recurring'}
-                    </button>
-                  ))}
+        <form onSubmit={onSave} className="p-4 flex flex-col gap-4">
+            {/* Config editor (always shown — product name lives in the header slot) */}
+            <ProductConfigEditor
+              configs={configs}
+              onChange={onConfigsChange}
+              hideConfigName
+              headerSlot={
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={form.category}
+                      onChange={e => set('category', e.target.value as ProductCategory)}
+                      className={`text-xs font-semibold px-2 py-0.5 rounded-full border-0 focus:outline-none focus:ring-2 focus:ring-blue-400 cursor-pointer ${CATEGORY_COLORS[form.category]}`}
+                      style={{ appearance: 'none' }}>
+                      {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                    <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
+                      {(['one-time', 'recurring'] as PricingType[]).map(t => (
+                        <button key={t} type="button" onClick={() => set('pricingType', t)}
+                          className={`text-[11px] px-2 py-0.5 rounded font-semibold transition-colors ${form.pricingType === t ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
+                          {t === 'one-time' ? 'One-Time' : 'Recurring'}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <input
+                    ref={nameRef}
+                    type="text"
+                    value={form.name}
+                    onChange={e => set('name', e.target.value)}
+                    placeholder="Product name…"
+                    required
+                    className="text-2xl font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 -ml-1 w-full placeholder:text-slate-300"
+                  />
                 </div>
-              </div>
-              <input
-                ref={nameRef}
-                type="text"
-                value={form.name}
-                onChange={e => set('name', e.target.value)}
-                placeholder="Product name…"
-                required
-                className="text-2xl font-bold text-slate-900 bg-transparent border-0 focus:outline-none focus:bg-slate-50 rounded-lg px-1 py-0.5 -ml-1 w-full placeholder:text-slate-300"
-              />
-            </div>
-
-            {/* Price tiles — one-time */}
-            {/* Configurations */}
-            {existing && (
-              <div className="border-t border-slate-100 pt-4">
-                <ProductConfigEditor
-                  configs={configs}
-                  onChange={onConfigsChange}
-                  hideConfigName
-                />
-              </div>
-            )}
+              }
+            />
 
             {/* Price history — at the bottom */}
             {existing && historyCount > 0 && (

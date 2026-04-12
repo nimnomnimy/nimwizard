@@ -185,12 +185,13 @@ interface Props {
   onChange: (configs: ProductConfiguration[]) => void
   activeConfigId?: string | null
   onActiveConfigChange?: (id: string | null) => void
-  hideConfigName?: boolean   // hides the config name editor in the toolbar (product name acts as config name)
+  hideConfigName?: boolean        // hides the config name editor in the toolbar (product name acts as config name)
+  headerSlot?: React.ReactNode    // extra content rendered at the start of the toolbar (e.g. product name input)
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange, hideConfigName }: Props) {
+export default function ProductConfigEditor({ configs, onChange, activeConfigId: controlledActiveId, onActiveConfigChange, hideConfigName, headerSlot }: Props) {
   const [internalActiveId, setInternalActiveId] = useState<string | null>(configs[0]?.id ?? null)
   const activeConfigId = controlledActiveId !== undefined ? controlledActiveId : internalActiveId
   function setActiveConfigId(id: string | null) {
@@ -296,12 +297,15 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
     setPasteOpen(false); setPasteText(''); setPasteError('')
   }
 
-  // Toolbar action: add a row to the active group
+  // Toolbar action: add a row to the active group (or the only group if none selected)
   function toolbarAddRow(cfg: ProductConfiguration) {
-    if (!selectedGroupId) return
-    const found = findGroup(cfg, selectedGroupId)
+    const targetId = selectedGroupId ?? (cfg.groups.length === 1 ? cfg.groups[0].id : null)
+    if (!targetId) return
+    const found = findGroup(cfg, targetId)
     if (!found) return
     const g = found.group
+    // Auto-select this group so subsequent actions work
+    if (!selectedGroupId) setSelectedGroupId(targetId)
     updateConfig(updateGroupInConfig(cfg, { ...g, children: [...(g.children ?? []), { type: 'row', row: emptyRow() }] }))
   }
 
@@ -354,6 +358,13 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
           className="bg-white border border-slate-200 rounded-xl overflow-hidden relative"
           style={tableWidth ? { width: tableWidth } : undefined}
         >
+          {/* Header slot — product name / meta (rendered above toolbar when provided) */}
+          {headerSlot && (
+            <div className="px-3 pt-3 pb-2 border-b border-slate-100">
+              {headerSlot}
+            </div>
+          )}
+
           {/* Toolbar */}
           <div className="px-3 py-2 border-b border-slate-100 bg-slate-50 flex items-center gap-1.5 flex-wrap">
             {!hideConfigName && (editingConfigName === activeConfig.id ? (
@@ -429,7 +440,7 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
 
             {/* Always-visible actions — pushed to right */}
             <div className="flex items-center gap-1.5 ml-auto">
-              {selectedGroupId && (
+              {(selectedGroupId || activeConfig.groups.length === 1) && (
                 <button onClick={() => toolbarAddRow(activeConfig)}
                   className="text-[11px] px-2 py-1 rounded-lg bg-white border border-slate-200 text-slate-600 hover:border-slate-300 font-semibold transition-colors">
                   + Row
@@ -827,13 +838,16 @@ function TopGroupBlock({
         </div>
       </div>
 
-      {!group.collapsed && (group.children ?? []).length > 0 && (
+      {!group.collapsed && (
         <div>
           {/* Column header row — scoped to this group's recurring type */}
           <ConfigTableHeader
             isRecurring={isRecurring}
             colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
           />
+          {(group.children ?? []).length === 0 && (
+            <div className="py-3 text-center text-slate-400 text-xs">No rows yet. Click <strong>+ Row</strong> to add one.</div>
+          )}
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
