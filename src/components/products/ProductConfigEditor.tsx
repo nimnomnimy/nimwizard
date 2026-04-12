@@ -482,7 +482,8 @@ function TopGroupBlock({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [groupDiscInput, setGroupDiscInput] = useState(() => (group.discountPct ?? 0).toFixed(1))
   const [groupQtyInput, setGroupQtyInput] = useState(() => String(group.qty ?? 1))
-  const dragChildIdx = useRef<number | null>(null)
+  // dragFrom: index being dragged; if that index is a selected row, ALL selected rows move together
+  const dragFrom = useRef<number | null>(null)
 
   const isRecurring = group.pricingType === 'recurring'
   const subtotal   = groupSubtotal(group)         // net × rowQty × term — before group qty
@@ -555,20 +556,33 @@ function TopGroupBlock({
   }
 
   function reorderChildren(from: number, to: number) {
-    onUpdate({ ...group, children: reorder(group.children ?? [], from, to) })
+    const children = group.children ?? []
+    const draggingSelected = children[from]?.type === 'row' && selected.has((children[from] as {type:'row';row:ConfigRow}).row.id)
+    if (draggingSelected && selected.size > 1) {
+      const moving = children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
+      const rest   = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
+      const beforeTo = children.slice(0, to).filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)).length
+      const insertAt = Math.min(Math.max(0, to - beforeTo), rest.length)
+      onUpdate({ ...group, children: [...rest.slice(0, insertAt), ...moving, ...rest.slice(insertAt)] })
+    } else {
+      onUpdate({ ...group, children: reorder(children, from, to) })
+    }
   }
 
-  // Promote selected rows into a new sub-group at the position of the first selected row
+  // First selected row becomes the subgroup header (label = its code, description = its description).
+  // Remaining selected rows become children inside it.
   function promoteToSubGroup() {
     if (selected.size === 0) return
     const children = group.children ?? []
-    const firstIdx = children.findIndex(c => c.type === 'row' && selected.has(c.row.id))
-    if (firstIdx < 0) return
-    const rowsToMove = children.filter(c => c.type === 'row' && selected.has(c.row.id))
-    const remaining  = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
-    const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
-    sg.children = rowsToMove
-    // Insert the sub-group at firstIdx within the remaining list
+    const selectedRows = children.filter(c => c.type === 'row' && selected.has(c.row.id)) as { type: 'row'; row: ConfigRow }[]
+    if (selectedRows.length === 0) return
+    const firstRow = selectedRows[0].row
+    const firstIdx = children.findIndex(c => c.type === 'row' && c.row.id === firstRow.id)
+    const remaining = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
+    // The first selected row becomes the subgroup identity; the rest become component children
+    const sg = emptyGroup(firstRow.productCode ?? firstRow.description ?? `Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
+    sg.description = firstRow.productCode ? firstRow.description : undefined
+    sg.children = selectedRows.slice(1) // remaining selected rows become components
     const insertAt = Math.min(firstIdx, remaining.length)
     const next = [...remaining.slice(0, insertAt), { type: 'subgroup' as const, group: sg }, ...remaining.slice(insertAt)]
     onUpdate({ ...group, children: next })
@@ -725,8 +739,8 @@ function TopGroupBlock({
                   onChange={r => updateChild(ci, { type: 'row', row: r })}
                   onDelete={() => deleteChild(ci)}
                   selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
-                  onDragStart={() => { dragChildIdx.current = ci }}
-                  onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
+                  onDragStart={() => { dragFrom.current = ci }}
+                  onDrop={() => { if (dragFrom.current !== null && dragFrom.current !== ci) reorderChildren(dragFrom.current, ci); dragFrom.current = null }}
                   fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                   colWidths={colWidths} hiddenCols={hiddenCols}
                 />
@@ -746,39 +760,38 @@ function TopGroupBlock({
                 onUpdate={sg => updateChild(ci, { type: 'subgroup', group: sg })}
                 onDelete={() => deleteChild(ci)}
                 onMoveRowsToParent={(rowChildren) => {
-                  // Move selected rows from subgroup back into the parent group at the subgroup's position
                   const rowIds = new Set(rowChildren.filter(c => c.type === 'row').map(c => (c as {type:'row';row:ConfigRow}).row.id))
                   const updatedSg = { ...child.group, children: (child.group.children ?? []).filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
                   const groupChildren = group.children ?? []
                   const nextChildren: typeof groupChildren = []
                   for (let i = 0; i < groupChildren.length; i++) {
-                    if (i === ci) {
-                      nextChildren.push(...rowChildren)
-                      nextChildren.push({ type: 'subgroup', group: updatedSg })
-                    } else {
-                      nextChildren.push(groupChildren[i])
-                    }
+                    if (i === ci) { nextChildren.push(...rowChildren); nextChildren.push({ type: 'subgroup', group: updatedSg }) }
+                    else nextChildren.push(groupChildren[i])
                   }
                   onUpdate({ ...group, children: nextChildren })
                 }}
-                onDragStart={() => { dragChildIdx.current = ci }}
-                onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
-                onDropRowInto={() => {
-                  // Move the dragged row child into this subgroup
-                  const fromIdx = dragChildIdx.current
-                  if (fromIdx === null || fromIdx === ci) { dragChildIdx.current = null; return }
+                onDragStart={() => { dragFrom.current = ci }}
+                onDrop={() => { if (dragFrom.current !== null && dragFrom.current !== ci) reorderChildren(dragFrom.current, ci); dragFrom.current = null }}
+                onDropRowsInto={(insertAt) => {
+                  // Move dragged rows (selected or single) from parent group into this subgroup at insertAt
+                  const fromIdx = dragFrom.current
+                  if (fromIdx === null || fromIdx === ci) { dragFrom.current = null; return }
                   const groupChildren2 = group.children ?? []
                   const dragged = groupChildren2[fromIdx]
-                  if (!dragged || dragged.type !== 'row') { dragChildIdx.current = null; return }
-                  const updatedSg = { ...child.group, children: [...(child.group.children ?? []), dragged] }
-                  const nextChildren2: typeof groupChildren2 = []
-                  for (let i = 0; i < groupChildren2.length; i++) {
-                    if (i === fromIdx) continue
-                    if (i === ci) nextChildren2.push({ type: 'subgroup', group: updatedSg })
-                    else nextChildren2.push(groupChildren2[i])
-                  }
+                  if (!dragged || dragged.type !== 'row') { dragFrom.current = null; return }
+                  // Collect all rows to move: multi if selected, single otherwise
+                  const isMulti = selected.has(dragged.row.id) && selected.size > 1
+                  const toMove = isMulti
+                    ? groupChildren2.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
+                    : [dragged]
+                  const toMoveIds = new Set(toMove.map(c => (c as {type:'row';row:ConfigRow}).row.id))
+                  const parentRest = groupChildren2.filter(c => !(c.type === 'row' && toMoveIds.has((c as {type:'row';row:ConfigRow}).row.id)))
+                  const sgChildren = child.group.children ?? []
+                  const newSgChildren = [...sgChildren.slice(0, insertAt), ...toMove, ...sgChildren.slice(insertAt)]
+                  const updatedSg2 = { ...child.group, children: newSgChildren }
+                  const nextChildren2 = parentRest.map(c => c.type === 'subgroup' && c.group.id === child.group.id ? { type: 'subgroup' as const, group: updatedSg2 } : c)
                   onUpdate({ ...group, children: nextChildren2 })
-                  dragChildIdx.current = null
+                  dragFrom.current = null
                 }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
                 colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
@@ -825,7 +838,7 @@ function darkenHex(hex: string, amount = 15): string {
 function SubGroupBlock({
   subGroup, childIndex: _childIndex, totalChildren: _totalChildren, cfg: _cfg, inputIsAud,
   parentIsRecurring, parentDefaultUnit,
-  onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowInto,
+  onUpdate, onDelete, onMoveRowsToParent, onDragStart, onDrop, onDropRowsInto,
   fmt, fmtAud, showSecondary, usdToAudRate, colWidths, onColResize: _onColResize, hiddenCols,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
@@ -833,7 +846,8 @@ function SubGroupBlock({
   parentIsRecurring: boolean; parentDefaultUnit: ConfigRowUnit
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
   onMoveRowsToParent: (rowChildren: ConfigChild[]) => void
-  onDragStart: () => void; onDrop: () => void; onDropRowInto: () => void
+  onDragStart: () => void; onDrop: () => void
+  onDropRowsInto: (insertAt: number) => void  // drop row(s) from parent into this subgroup at position
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
   colWidths: ColWidths; onColResize: (idx: number, delta: number) => void; hiddenCols: Set<number>
 }) {
@@ -847,7 +861,9 @@ function SubGroupBlock({
   const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
   const [subQtyInput, setSubQtyInput] = useState(() => String(subGroup.qty ?? 1))
   const [showColorPicker, setShowColorPicker] = useState(false)
-  const dragChildIdx = useRef<number | null>(null)
+  const dragFrom = useRef<number | null>(null)
+  // dropZoneOver: which inter-row gap is being hovered during a drag-from-parent
+  const [dropZoneOver, setDropZoneOver] = useState<number | null>(null)
 
   const isRecurring = parentIsRecurring
   const subtotal     = groupSubtotal(subGroup)
@@ -905,7 +921,17 @@ function SubGroupBlock({
     onUpdate({ ...subGroup, children: (subGroup.children ?? []).filter((_, i) => i !== idx) })
   }
   function reorderChildren(from: number, to: number) {
-    onUpdate({ ...subGroup, children: reorder(subGroup.children ?? [], from, to) })
+    const children = subGroup.children ?? []
+    const draggingSelected = children[from]?.type === 'row' && selected.has((children[from] as {type:'row';row:ConfigRow}).row.id)
+    if (draggingSelected && selected.size > 1) {
+      const moving = children.filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id))
+      const rest   = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
+      const beforeTo = children.slice(0, to).filter(c => c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)).length
+      const insertAt = Math.min(Math.max(0, to - beforeTo), rest.length)
+      onUpdate({ ...subGroup, children: [...rest.slice(0, insertAt), ...moving, ...rest.slice(insertAt)] })
+    } else {
+      onUpdate({ ...subGroup, children: reorder(children, from, to) })
+    }
   }
   const toggleSelect = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
 
@@ -921,7 +947,7 @@ function SubGroupBlock({
       <div
         onDragOver={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(true) }}
         onDragLeave={e => { e.stopPropagation(); setHeaderDragOver(false) }}
-        onDrop={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(false); onDropRowInto() }}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(false); onDropRowsInto(0) }}
         style={{ ...headerBgStyle, ...(headerDragOver ? {} : {}) }}
         className={`flex items-center gap-1.5 px-2 py-1.5 border-t border-black/10 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
       >
@@ -1069,21 +1095,37 @@ function SubGroupBlock({
           {(subGroup.children ?? []).map((child, ci) => {
             if (child.type !== 'row') return null
             return (
-              <ConfigRowEditor
-                key={child.row.id} row={child.row} isRecurring={isRecurring}
-                groupDefaultUnit={effectiveDefaultUnit}
-                inputIsAud={inputIsAud}
-                onChange={r => updateChild(ci, { type: 'row', row: r })}
-                onDelete={() => deleteChild(ci)}
-                selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
-                onDragStart={() => { dragChildIdx.current = ci }}
-                onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
-                fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
-                colWidths={colWidths} hiddenCols={hiddenCols}
-                rowBgStyle={childBgStyle} rowBorderStyle={borderStyle}
-              />
+              <React.Fragment key={child.row.id}>
+                {/* Drop zone above this row (from parent group drag) */}
+                <div
+                  onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDropZoneOver(ci) }}
+                  onDragLeave={() => setDropZoneOver(null)}
+                  onDrop={e => { e.preventDefault(); e.stopPropagation(); setDropZoneOver(null); onDropRowsInto(ci) }}
+                  className={`h-1 transition-colors ${dropZoneOver === ci ? 'bg-blue-400' : 'hover:bg-blue-200'}`}
+                />
+                <ConfigRowEditor
+                  row={child.row} isRecurring={isRecurring}
+                  groupDefaultUnit={effectiveDefaultUnit}
+                  inputIsAud={inputIsAud}
+                  onChange={r => updateChild(ci, { type: 'row', row: r })}
+                  onDelete={() => deleteChild(ci)}
+                  selected={selected.has(child.row.id)} onToggleSelect={() => toggleSelect(child.row.id)}
+                  onDragStart={() => { dragFrom.current = ci }}
+                  onDrop={() => { if (dragFrom.current !== null && dragFrom.current !== ci) reorderChildren(dragFrom.current, ci); dragFrom.current = null }}
+                  fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
+                  colWidths={colWidths} hiddenCols={hiddenCols}
+                  rowBgStyle={childBgStyle} rowBorderStyle={borderStyle}
+                />
+              </React.Fragment>
             )
           })}
+          {/* Drop zone at the end of the subgroup */}
+          <div
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDropZoneOver(subGroup.children?.length ?? 0) }}
+            onDragLeave={() => setDropZoneOver(null)}
+            onDrop={e => { e.preventDefault(); e.stopPropagation(); setDropZoneOver(null); onDropRowsInto(subGroup.children?.length ?? 0) }}
+            className={`h-2 transition-colors ${dropZoneOver === (subGroup.children?.length ?? 0) ? 'bg-blue-400' : ''}`}
+          />
         </div>
       )}
     </div>
