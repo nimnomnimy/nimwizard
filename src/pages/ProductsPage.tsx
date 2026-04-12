@@ -42,9 +42,27 @@ function groupFieldTotal(g: ConfigGroup, field: 'cost' | 'floor' | 'sell'): numb
   }, 0)
 }
 
+// Net price × qty only (no term) — used for product list display
+function groupNetQtyTotal(g: ConfigGroup): number {
+  if (!g?.children) return 0
+  return g.children.reduce((s, c) => {
+    if (c.type === 'row') {
+      const net = (c.row.sellPriceUsd ?? 0) * (1 - (c.row.discountPct ?? 0) / 100)
+      return s + net * (c.row.quantity ?? 1)
+    }
+    if (c.type === 'subgroup') return s + groupNetQtyTotal(c.group)
+    return s
+  }, 0)
+}
+
 function configsTotal(configs: ProductConfiguration[], field: 'cost' | 'floor' | 'sell'): number {
   if (!configs?.length) return 0
   return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupFieldTotal(g, field), 0), 0)
+}
+
+function configsNetQtyTotal(configs: ProductConfiguration[]): number {
+  if (!configs?.length) return 0
+  return configs.reduce((s, cfg) => s + (cfg.groups ?? []).reduce((gs, g) => gs + groupNetQtyTotal(g), 0), 0)
 }
 
 // ─── Form state ───────────────────────────────────────────────────────────────
@@ -186,7 +204,7 @@ export default function ProductsPage() {
   }).sort((a, b) => a.name.localeCompare(b.name))
 
   function priceDisplay(p: DealProduct): { primary: string; secondary?: string; sub?: string } {
-    const cfgTotal = configsTotal(p.configurations ?? [], 'sell')
+    const cfgTotal = configsNetQtyTotal(p.configurations ?? [])
     if (cfgTotal > 0) {
       return {
         primary: fmt(cfgTotal),

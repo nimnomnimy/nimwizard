@@ -53,6 +53,18 @@ function groupTotal(g: ConfigGroup): number {
   }, 0)
 }
 
+// Apply a discount % to every row in a group (and its sub-groups) recursively
+function applyGroupDiscount(g: ConfigGroup, discPct: number): ConfigGroup {
+  return {
+    ...g,
+    discountPct: discPct,
+    children: (g.children ?? []).map(c => {
+      if (c.type === 'row') return { type: 'row', row: { ...c.row, discountPct: discPct } }
+      return { type: 'subgroup', group: applyGroupDiscount(c.group, discPct) }
+    }),
+  }
+}
+
 // Build a flat list of move destinations for a given config, excluding the current group/subgroup
 function buildDestinations(
   cfg: ProductConfiguration,
@@ -460,6 +472,7 @@ function TopGroupBlock({
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(group.label)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [groupDiscInput, setGroupDiscInput] = useState(() => (group.discountPct ?? 0).toFixed(1))
   const dragChildIdx = useRef<number | null>(null)
 
   const isRecurring = group.pricingType === 'recurring'
@@ -472,6 +485,17 @@ function TopGroupBlock({
   const headerBg = headerColors[groupIndex % headerColors.length]
 
   function commitLabel() { onUpdate({ ...group, label: labelVal.trim() || group.label }); setEditLabel(false) }
+
+  function applyGroupDisc(val: string) {
+    const d = parseFloat(val)
+    if (!isNaN(d)) {
+      const clamped = Math.max(0, Math.min(100, d))
+      onUpdate(applyGroupDiscount(group, clamped))
+      setGroupDiscInput(clamped.toFixed(1))
+    } else {
+      setGroupDiscInput((group.discountPct ?? 0).toFixed(1))
+    }
+  }
 
   function addRow() { onUpdate({ ...group, children: [...(group.children ?? []), { type: 'row', row: emptyRow() }] }) }
 
@@ -558,6 +582,20 @@ function TopGroupBlock({
               {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
             </select>
           )}
+        </div>
+
+        {/* Group-level discount */}
+        <div className="relative flex items-center flex-shrink-0" title="Apply discount % to all rows in this group">
+          <input
+            type="number" min="0" max="100" step="0.1"
+            value={groupDiscInput}
+            onChange={e => setGroupDiscInput(e.target.value)}
+            onBlur={e => applyGroupDisc(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') applyGroupDisc(groupDiscInput) }}
+            placeholder="0.0"
+            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-center pr-4 focus:outline-none focus:ring-1 focus:ring-violet-400 bg-white"
+          />
+          <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
         </div>
 
         <span className="text-xs font-bold text-slate-500 flex-shrink-0">
@@ -704,6 +742,7 @@ function SubGroupBlock({
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
   const [headerDragOver, setHeaderDragOver] = useState(false)
+  const [subDiscInput, setSubDiscInput] = useState(() => (subGroup.discountPct ?? 0).toFixed(1))
   const dragChildIdx = useRef<number | null>(null)
 
   // Sub-group inherits pricing type from parent
@@ -717,6 +756,17 @@ function SubGroupBlock({
 
   function commitLabel() { onUpdate({ ...subGroup, label: labelVal.trim() || subGroup.label }); setEditLabel(false) }
   function addRow() { onUpdate({ ...subGroup, children: [...(subGroup.children ?? []), { type: 'row', row: emptyRow() }] }) }
+
+  function applySubDisc(val: string) {
+    const d = parseFloat(val)
+    if (!isNaN(d)) {
+      const clamped = Math.max(0, Math.min(100, d))
+      onUpdate(applyGroupDiscount(subGroup, clamped))
+      setSubDiscInput(clamped.toFixed(1))
+    } else {
+      setSubDiscInput((subGroup.discountPct ?? 0).toFixed(1))
+    }
+  }
 
   function updateChild(idx: number, child: ConfigChild) {
     const next = [...(subGroup.children ?? [])]; next[idx] = child
@@ -774,6 +824,20 @@ function SubGroupBlock({
             {RECURRING_UNITS.map(u => <option key={u} value={u}>{u}</option>)}
           </select>
         )}
+
+        {/* Sub-group discount */}
+        <div className="relative flex items-center flex-shrink-0" title="Apply discount % to all rows in this sub-group">
+          <input
+            type="number" min="0" max="100" step="0.1"
+            value={subDiscInput}
+            onChange={e => setSubDiscInput(e.target.value)}
+            onBlur={e => applySubDisc(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') applySubDisc(subDiscInput) }}
+            placeholder="0.0"
+            className="w-14 border border-slate-200 rounded px-1.5 py-0.5 text-[11px] text-center pr-4 focus:outline-none focus:ring-1 focus:ring-amber-400 bg-white"
+          />
+          <span className="absolute right-1.5 text-[10px] text-slate-400 pointer-events-none">%</span>
+        </div>
 
         <span className="text-xs font-semibold text-slate-500 flex-shrink-0">
           {dispFmt(dispTotal)}
