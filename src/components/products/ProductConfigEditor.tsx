@@ -1285,11 +1285,9 @@ function ConfigRowEditor({
         ${selected ? 'bg-blue-50' : ''}
         ${dragOver ? 'border-t-2 border-blue-400' : ''}
       `}
-      style={{ gridTemplateColumns: cols, paddingLeft: '8px', ...rowBorderStyle }}
+      style={{ gridTemplateColumns: cols, paddingLeft: '8px', ...(selected ? {} : (rowBgStyle ?? {})), ...rowBorderStyle }}
     >
-      <div style={selected ? undefined : rowBgStyle} className="flex items-center justify-center rounded-sm">
-        <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
-      </div>
+      <input type="checkbox" checked={selected} onChange={onToggleSelect} className="w-3 h-3 cursor-pointer" />
       <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-center text-xs" title="Drag to reorder">⠿</span>
       <div className={hiddenCols.has(0) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(0) && <input value={row.productCode ?? ''} onChange={e => setField('productCode', e.target.value || undefined)}
