@@ -503,9 +503,6 @@ export default function ProductsPage() {
               onConfigsChange={cfgs => existing && handleConfigsChange(existing.id, cfgs)}
               onClone={handleClone}
               nameRef={nameRef}
-              fmt={fmt}
-              fmtAud={fmtAud}
-              showSecondary={showSecondary}
             />
           )}
         </div>
@@ -519,7 +516,7 @@ export default function ProductsPage() {
 function ProductDetailPane({
   form, dirty, isNew, existing, configs,
   set, onSave, onDelete, onDeleteHistoryIds, onConfigsChange, onClone,
-  nameRef, fmt, fmtAud, showSecondary,
+  nameRef,
 }: {
   productId: string | null
   form: FormState
@@ -534,16 +531,7 @@ function ProductDetailPane({
   onDeleteHistoryIds: (ids: string[]) => void
   onConfigsChange: (cfgs: ProductConfiguration[]) => void
   nameRef: React.RefObject<HTMLInputElement | null>
-  fmt: (n: number) => string
-  fmtAud: (n: number) => string
-  showSecondary: boolean
 }) {
-  const recurringPrice = parsePrice(form.recurringPricePerPeriod)
-  const recurringFloor = parsePrice(form.recurringFloorPricePerPeriod)
-  const periods = form.recurringPeriod === 'monthly'
-    ? form.recurringTermMonths
-    : Math.ceil(form.recurringTermMonths / 12)
-
   const historyCount = existing?.priceHistory?.length ?? 0
 
   return (
@@ -605,57 +593,6 @@ function ProductDetailPane({
             </div>
 
             {/* Price tiles — one-time */}
-            {/* Price tiles — recurring */}
-            {form.pricingType === 'recurring' && (
-              <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex bg-slate-100 rounded-lg p-0.5 gap-0.5">
-                    {(['monthly', 'annual'] as RecurringPeriod[]).map(p => (
-                      <button key={p} type="button" onClick={() => set('recurringPeriod', p)}
-                        className={`text-xs px-2.5 py-1 rounded font-semibold capitalize transition-colors ${form.recurringPeriod === p ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}>
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                    <input type="number" min="1" step="1" value={form.recurringTermMonths || ''}
-                      onChange={e => set('recurringTermMonths', parseInt(e.target.value) || 12)}
-                      className="w-14 px-2 py-1 border border-slate-200 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-500 text-center" />
-                    <span>months</span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <PriceTile label={`Price / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
-                    value={form.recurringPricePerPeriod} displayFmt={fmt(recurringPrice)}
-                    secondaryFmt={showSecondary ? fmtAud(recurringPrice) : undefined}
-                    onChange={v => set('recurringPricePerPeriod', v)} locked={false} highlight />
-                  <PriceTile label={`Floor / ${form.recurringPeriod === 'monthly' ? 'mo' : 'yr'}`}
-                    value={form.recurringFloorPricePerPeriod} displayFmt={fmt(recurringFloor)}
-                    secondaryFmt={showSecondary ? fmtAud(recurringFloor) : undefined}
-                    onChange={v => set('recurringFloorPricePerPeriod', v)} locked={false} />
-                </div>
-                {recurringPrice > 0 && (
-                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl px-4 py-3 flex items-center gap-6">
-                    <div>
-                      <p className="text-[11px] font-bold text-indigo-500 uppercase tracking-wide">Total Contract Value</p>
-                      <p className="text-base font-bold text-indigo-800">{fmt(recurringPrice * periods)}</p>
-                    </div>
-                    <div>
-                      <p className="text-[11px] font-bold text-indigo-400 uppercase tracking-wide">Cost (full term)</p>
-                      <div className="flex items-center gap-1 mt-0.5">
-                        <span className="text-indigo-400 text-sm">$</span>
-                        <input type="text" inputMode="decimal" value={form.recurringCostPrice}
-                          onChange={e => set('recurringCostPrice', e.target.value)}
-                          placeholder="0"
-                          className="w-28 text-base font-bold text-indigo-800 bg-transparent focus:outline-none border-b border-indigo-200 focus:border-indigo-400" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-
             {/* Configurations */}
             {existing && (
               <div className="border-t border-slate-100 pt-4">
@@ -677,46 +614,6 @@ function ProductDetailPane({
             )}
           </form>
       </div>
-    </div>
-  )
-}
-
-// ─── Price tile ───────────────────────────────────────────────────────────────
-
-function PriceTile({
-  label, value, displayFmt, secondaryFmt, onChange, locked, highlight,
-}: {
-  label: string
-  value: string
-  displayFmt: string
-  secondaryFmt?: string
-  onChange: (v: string) => void
-  locked: boolean
-  highlight?: boolean
-}) {
-  return (
-    <div className={`rounded-xl p-3 flex flex-col gap-0.5 transition-colors ${highlight ? 'bg-white border border-slate-200' : 'bg-slate-50'}`}>
-      <p className="text-[11px] text-slate-400 font-semibold uppercase tracking-wide">{label}</p>
-      {locked ? (
-        <>
-          <p className="text-base font-bold text-slate-900">{displayFmt}</p>
-          {secondaryFmt && <p className="text-xs text-slate-400">{secondaryFmt}</p>}
-          <p className="text-[10px] text-blue-400">from config</p>
-        </>
-      ) : (
-        <div className="flex items-center gap-1">
-          <span className="text-slate-400 text-sm">$</span>
-          <input
-            type="text"
-            inputMode="decimal"
-            value={value}
-            onChange={e => onChange(e.target.value)}
-            placeholder="0"
-            className="flex-1 text-base font-bold text-slate-900 bg-transparent focus:outline-none w-full min-w-0"
-          />
-        </div>
-      )}
-      {!locked && secondaryFmt && value && <p className="text-xs text-slate-400">{secondaryFmt}</p>}
     </div>
   )
 }

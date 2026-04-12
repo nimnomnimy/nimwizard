@@ -489,13 +489,6 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
             <div className="p-6 text-center text-slate-400 text-sm">No groups yet. Click <strong>+ Group</strong> to add one.</div>
           ) : (
             <div className="flex flex-col">
-              {/* Sticky column header */}
-              <div className="sticky top-0 z-20">
-                <ConfigTableHeader
-                  isRecurring={activeConfig.groups.some(g => g.pricingType === 'recurring')}
-                  colWidths={colWidths} onColResize={handleColResize} hiddenCols={hiddenCols}
-                />
-              </div>
               {/* Scrollable groups area */}
               <div className="divide-y divide-slate-100 overflow-y-auto" style={{ maxHeight: 520 }}>
                 {activeConfig.groups.map((group, gi) => (
@@ -835,6 +828,11 @@ function TopGroupBlock({
 
       {!group.collapsed && (group.children ?? []).length > 0 && (
         <div>
+          {/* Column header row — scoped to this group's recurring type */}
+          <ConfigTableHeader
+            isRecurring={isRecurring}
+            colWidths={colWidths} onColResize={onColResize} hiddenCols={hiddenCols}
+          />
           {(group.children ?? []).map((child, ci) => {
             if (child.type === 'row') {
               return (
