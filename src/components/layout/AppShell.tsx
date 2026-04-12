@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { useAppStore } from '../../store/useAppStore'
+import { useRegisterSW } from 'virtual:pwa-register/react'
 
 // ─── Nav structure ─────────────────────────────────────────────────────────────
 
@@ -56,11 +57,33 @@ export default function AppShell() {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set(['people', 'projects', 'selling']))
   // Mobile bottom nav: null = top-level groups, string = drilled into a group
   const [mobileGroup, setMobileGroup] = useState<string | null>(null)
+  // Version update state
+  const [checking, setChecking] = useState(false)
+  const [updateReady, setUpdateReady] = useState(false)
+
+  const { needRefresh: [needRefresh], updateServiceWorker } = useRegisterSW()
 
   const syncing = useAppStore(s => s.syncing)
   const version = __APP_VERSION__
   const location = useLocation()
   const activeGroup = groupForPath(location.pathname)
+
+  useEffect(() => {
+    if (needRefresh) setUpdateReady(true)
+  }, [needRefresh])
+
+  async function handleVersionClick() {
+    if (updateReady) {
+      updateServiceWorker(true)
+      return
+    }
+    setChecking(true)
+    try {
+      const reg = await navigator.serviceWorker?.getRegistration()
+      await reg?.update()
+    } catch { /* ignore */ }
+    setTimeout(() => setChecking(false), 1200)
+  }
 
   function toggleGroup(id: string) {
     setExpandedGroups(prev => {
@@ -71,13 +94,19 @@ export default function AppShell() {
     })
   }
 
-  // When navigating, close sidebar on mobile
+  // Close sidebar on mobile nav click — but keep mobileGroup so the bottom
+  // bar stays drilled into the active group
   function handleNavClick() {
     setSidebarOpen(false)
-    setMobileGroup(null)
   }
 
-  const currentMobileGroup = mobileGroup ? GROUPS.find(g => g.id === mobileGroup) : null
+  // Derived: which group panel is showing in the mobile bottom bar.
+  // '__back__' is a sentinel meaning "user explicitly went back to top level".
+  // Otherwise: if user drilled in manually use that; if they navigated via
+  // sidebar/deep-link to a known group, follow it automatically.
+  const atTopLevel = mobileGroup === '__back__' || (mobileGroup === null && activeGroup === null)
+  const effectiveMobileGroup = atTopLevel ? null : (mobileGroup && mobileGroup !== '__back__' ? mobileGroup : activeGroup)
+  const currentMobileGroup = effectiveMobileGroup ? GROUPS.find(g => g.id === effectiveMobileGroup) : null
 
   return (
     <div className="flex h-dvh bg-slate-100 overflow-hidden">
@@ -164,7 +193,18 @@ export default function AppShell() {
             Settings
           </NavLink>
           <div className="flex items-center justify-between px-3 pt-1">
-            <span className="text-[10px] text-white/20 font-mono">v{version}</span>
+            <button
+              onClick={handleVersionClick}
+              className={`text-xs font-mono px-2 py-1 rounded-md transition-colors ${
+                updateReady
+                  ? 'bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 animate-pulse'
+                  : checking
+                  ? 'text-white/40'
+                  : 'text-white/30 hover:text-white/60 hover:bg-white/5'
+              }`}
+              title={updateReady ? 'Update available — click to reload' : 'Check for updates'}>
+              {updateReady ? '↑ Update' : checking ? 'Checking…' : `v${version}`}
+            </button>
             {syncing && <span className="text-[10px] text-white/20">Syncing…</span>}
           </div>
         </div>
@@ -183,7 +223,14 @@ export default function AppShell() {
             </svg>
           </button>
           <span className="text-white font-bold text-base">NimWizard</span>
-          <span className="text-[10px] text-white/30 font-mono pr-1">v{version}</span>
+          <button
+            onClick={handleVersionClick}
+            className={`text-xs font-mono pr-1 px-2 py-1 rounded-md transition-colors ${
+              updateReady ? 'text-blue-300 animate-pulse' : checking ? 'text-white/40' : 'text-white/40 hover:text-white/70'
+            }`}
+            title={updateReady ? 'Update available' : 'Check for updates'}>
+            {updateReady ? '↑ Update' : checking ? '…' : `v${version}`}
+          </button>
         </header>
 
         {/* Page content */}
@@ -198,9 +245,9 @@ export default function AppShell() {
           {currentMobileGroup ? (
             // ── Drilled into a group — show group items + Back ─────────────────
             <>
-              {/* Back button */}
+              {/* Back — explicitly returns to top-level view */}
               <button
-                onClick={() => setMobileGroup(null)}
+                onClick={() => setMobileGroup('__back__')}
                 className="flex-1 flex flex-col items-center justify-center py-2 text-[10px] font-medium gap-1 transition-colors min-h-[52px] text-white/40 hover:text-white/70">
                 <BackIcon />
                 Back
@@ -218,7 +265,7 @@ export default function AppShell() {
               ))}
             </>
           ) : (
-            // ── Top-level: 4 group buttons + Settings ──────────────────────────
+            // ── Top-level: 3 group buttons + Settings ──────────────────────────
             <>
               {GROUPS.map(group => (
                 <button key={group.id}
