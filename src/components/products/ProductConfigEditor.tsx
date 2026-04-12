@@ -56,7 +56,7 @@ function buildDestinations(
   const result: { id: string; label: string; indent: number }[] = []
   for (const g of cfg.groups) {
     if (g.id !== excludeGroupId) result.push({ id: g.id, label: g.label || '(group)', indent: 0 })
-    for (const c of g.children) {
+    for (const c of (g.children ?? [])) {
       if (c.type === 'subgroup' && c.group.id !== excludeGroupId) {
         result.push({ id: c.group.id, label: `${g.label ? g.label + ' › ' : ''}${c.group.label || '(sub-group)'}`, indent: 1 })
       }
@@ -69,7 +69,7 @@ function buildDestinations(
 function findGroup(cfg: ProductConfiguration, id: string): { group: ConfigGroup; parentGroup: ConfigGroup | null } | null {
   for (const g of cfg.groups) {
     if (g.id === id) return { group: g, parentGroup: null }
-    for (const c of g.children) {
+    for (const c of (g.children ?? [])) {
       if (c.type === 'subgroup' && c.group.id === id) return { group: c.group, parentGroup: g }
     }
   }
@@ -197,9 +197,9 @@ export default function ProductConfigEditor({ configs, onChange, activeConfigId:
     if (!found) return
     const destFound = findGroup(cfg, destGroupId)
     if (!destFound) return
-    const rowsToMove = found.group.children.filter(c => c.type === 'row' && rowIds.has(c.row.id))
-    const updatedSource: ConfigGroup = { ...found.group, children: found.group.children.filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
-    const updatedDest: ConfigGroup = { ...destFound.group, children: [...destFound.group.children, ...rowsToMove] }
+    const rowsToMove = (found.group.children ?? []).filter(c => c.type === 'row' && rowIds.has(c.row.id))
+    const updatedSource: ConfigGroup = { ...found.group, children: (found.group.children ?? []).filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
+    const updatedDest: ConfigGroup = { ...destFound.group, children: [...(destFound.group.children ?? []), ...rowsToMove] }
     let next = updateGroupInConfig(cfg, updatedSource)
     next = updateGroupInConfig(next, updatedDest)
     updateConfig(next)
@@ -349,35 +349,36 @@ function TopGroupBlock({
 
   function commitLabel() { onUpdate({ ...group, label: labelVal.trim() || group.label }); setEditLabel(false) }
 
-  function addRow() { onUpdate({ ...group, children: [...group.children, { type: 'row', row: emptyRow() }] }) }
+  function addRow() { onUpdate({ ...group, children: [...(group.children ?? []), { type: 'row', row: emptyRow() }] }) }
 
   function addSubGroup() {
     const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
     sg.children = [{ type: 'row', row: emptyRow() }]
     // Insert at position 0 so the new sub-group appears at the top
-    onUpdate({ ...group, children: [{ type: 'subgroup', group: sg }, ...group.children] })
+    onUpdate({ ...group, children: [{ type: 'subgroup', group: sg }, ...(group.children ?? [])] })
   }
 
   function updateChild(idx: number, child: ConfigChild) {
-    const next = [...group.children]; next[idx] = child
+    const next = [...(group.children ?? [])]; next[idx] = child
     onUpdate({ ...group, children: next })
   }
 
   function deleteChild(idx: number) {
-    onUpdate({ ...group, children: group.children.filter((_, i) => i !== idx) })
+    onUpdate({ ...group, children: (group.children ?? []).filter((_, i) => i !== idx) })
   }
 
   function reorderChildren(from: number, to: number) {
-    onUpdate({ ...group, children: reorder(group.children, from, to) })
+    onUpdate({ ...group, children: reorder(group.children ?? [], from, to) })
   }
 
   // Promote selected rows into a new sub-group at the position of the first selected row
   function promoteToSubGroup() {
     if (selected.size === 0) return
-    const firstIdx = group.children.findIndex(c => c.type === 'row' && selected.has(c.row.id))
+    const children = group.children ?? []
+    const firstIdx = children.findIndex(c => c.type === 'row' && selected.has(c.row.id))
     if (firstIdx < 0) return
-    const rowsToMove = group.children.filter(c => c.type === 'row' && selected.has(c.row.id))
-    const remaining  = group.children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
+    const rowsToMove = children.filter(c => c.type === 'row' && selected.has(c.row.id))
+    const remaining  = children.filter(c => !(c.type === 'row' && selected.has((c as {type:'row';row:ConfigRow}).row.id)))
     const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
     sg.children = rowsToMove
     // Insert the sub-group at firstIdx within the remaining list
@@ -513,15 +514,15 @@ function TopGroupBlock({
                 onMoveRowsToParent={(rowChildren) => {
                   // Move selected rows from subgroup back into the parent group at the subgroup's position
                   const rowIds = new Set(rowChildren.filter(c => c.type === 'row').map(c => (c as {type:'row';row:ConfigRow}).row.id))
-                  const updatedSg = { ...child.group, children: child.group.children.filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
-                  const nextChildren: typeof group.children = []
-                  for (let i = 0; i < group.children.length; i++) {
+                  const updatedSg = { ...child.group, children: (child.group.children ?? []).filter(c => !(c.type === 'row' && rowIds.has(c.row.id))) }
+                  const groupChildren = group.children ?? []
+                  const nextChildren: typeof groupChildren = []
+                  for (let i = 0; i < groupChildren.length; i++) {
                     if (i === ci) {
-                      // insert the extracted rows at this position, then the updated subgroup
                       nextChildren.push(...rowChildren)
                       nextChildren.push({ type: 'subgroup', group: updatedSg })
                     } else {
-                      nextChildren.push(group.children[i])
+                      nextChildren.push(groupChildren[i])
                     }
                   }
                   onUpdate({ ...group, children: nextChildren })
@@ -532,17 +533,17 @@ function TopGroupBlock({
                   // Move the dragged row child into this subgroup
                   const fromIdx = dragChildIdx.current
                   if (fromIdx === null || fromIdx === ci) { dragChildIdx.current = null; return }
-                  const dragged = group.children[fromIdx]
+                  const groupChildren2 = group.children ?? []
+                  const dragged = groupChildren2[fromIdx]
                   if (!dragged || dragged.type !== 'row') { dragChildIdx.current = null; return }
-                  // Build new children: remove row at fromIdx, update subgroup at ci
-                  const updatedSg = { ...child.group, children: [...child.group.children, dragged] }
-                  const nextChildren: typeof group.children = []
-                  for (let i = 0; i < group.children.length; i++) {
-                    if (i === fromIdx) continue // drop the moved row
-                    if (i === ci) nextChildren.push({ type: 'subgroup', group: updatedSg })
-                    else nextChildren.push(group.children[i])
+                  const updatedSg = { ...child.group, children: [...(child.group.children ?? []), dragged] }
+                  const nextChildren2: typeof groupChildren2 = []
+                  for (let i = 0; i < groupChildren2.length; i++) {
+                    if (i === fromIdx) continue
+                    if (i === ci) nextChildren2.push({ type: 'subgroup', group: updatedSg })
+                    else nextChildren2.push(groupChildren2[i])
                   }
-                  onUpdate({ ...group, children: nextChildren })
+                  onUpdate({ ...group, children: nextChildren2 })
                   dragChildIdx.current = null
                 }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
@@ -588,19 +589,19 @@ function SubGroupBlock({
   const effectiveDefaultUnit = subGroup.defaultUnit ?? parentDefaultUnit
 
   function commitLabel() { onUpdate({ ...subGroup, label: labelVal.trim() || subGroup.label }); setEditLabel(false) }
-  function addRow() { onUpdate({ ...subGroup, children: [...subGroup.children, { type: 'row', row: emptyRow() }] }) }
+  function addRow() { onUpdate({ ...subGroup, children: [...(subGroup.children ?? []), { type: 'row', row: emptyRow() }] }) }
 
   function updateChild(idx: number, child: ConfigChild) {
-    const next = [...subGroup.children]; next[idx] = child
+    const next = [...(subGroup.children ?? [])]; next[idx] = child
     onUpdate({ ...subGroup, children: next })
   }
 
   function deleteChild(idx: number) {
-    onUpdate({ ...subGroup, children: subGroup.children.filter((_, i) => i !== idx) })
+    onUpdate({ ...subGroup, children: (subGroup.children ?? []).filter((_, i) => i !== idx) })
   }
 
   function reorderChildren(from: number, to: number) {
-    onUpdate({ ...subGroup, children: reorder(subGroup.children, from, to) })
+    onUpdate({ ...subGroup, children: reorder(subGroup.children ?? [], from, to) })
   }
 
   const rows = rowsOf(subGroup)
