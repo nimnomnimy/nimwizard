@@ -66,11 +66,6 @@ function formatDate(d: string | undefined): string {
   return `${day}/${m}/${y}`
 }
 
-function applyUplift(price: number, uplift: UpliftConfig | undefined): number {
-  if (!uplift || uplift.type === 'none' || uplift.percentage === 0) return price
-  return price * (1 + uplift.percentage / 100)
-}
-
 function upliftLabel(uplift: UpliftConfig | undefined): string | null {
   if (!uplift || uplift.type === 'none') return null
   const tag = uplift.label || (uplift.type === 'cpi' ? 'CPI' : 'Uplift')
@@ -401,7 +396,6 @@ export default function PricebookPage() {
               draft={draft}
               dirty={dirty}
               products={products}
-              fmt={fmt}
               fmtAud={fmtAud}
               showSecondary={showSecondary}
               nameRef={nameRef}
@@ -427,7 +421,7 @@ export default function PricebookPage() {
 // ─── Detail / edit pane ───────────────────────────────────────────────────────
 
 function PricebookDetailPane({
-  isNew, existing, draft, dirty, products, fmt, fmtAud, showSecondary,
+  isNew, existing, draft, dirty, products, fmtAud, showSecondary,
   nameRef, patch, setEntry, handleProductSelect, setDefaultUplift,
   addTerm, setTerm, removeTerm, onSave, onDelete, onAddEntry, onRemoveEntry,
 }: {
@@ -435,8 +429,7 @@ function PricebookDetailPane({
   existing: Pricebook | null
   draft: DraftState
   dirty: boolean
-  products: ReturnType<typeof useAppStore>['dealProducts'] extends never ? never : any[]
-  fmt: (n: number) => string
+  products: import('../types').DealProduct[]
   fmtAud: (n: number) => string
   showSecondary: boolean
   nameRef: React.RefObject<HTMLInputElement | null>
