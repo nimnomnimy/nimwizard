@@ -1319,31 +1319,68 @@ function ConfigRowEditor({
   const totalNetUsd = rowNetUsd(row) * (row.quantity ?? 1) * (isRecurring ? (row.termMonths ?? 1) : 1)
   const belowFloor = row.floorPriceUsd > 0 && row.sellPriceUsd < row.floorPriceUsd
 
+  const [costInput, setCostInput] = useState(() => dispCost === 0 ? '' : dispCost.toFixed(2))
+  const [floorInput, setFloorInput] = useState(() => dispFloor === 0 ? '' : dispFloor.toFixed(2))
+  const [sellInput, setSellInput] = useState(() => dispSell === 0 ? '' : dispSell.toFixed(2))
   const [discInput, setDiscInput] = useState(() => discPct.toFixed(1))
   const [netInput, setNetInput] = useState(() => dispNet.toFixed(2))
 
   // Keep inputs in sync when row or currency changes externally
   const prevDisc = useRef(row.discountPct)
   const prevSell = useRef(row.sellPriceUsd)
+  const prevCost = useRef(row.costPriceUsd)
+  const prevFloor = useRef(row.floorPriceUsd)
   const prevInputIsAud = useRef(inputIsAud)
   const prevRate = useRef(usdToAudRate)
   if (prevDisc.current !== row.discountPct || prevSell.current !== row.sellPriceUsd
+      || prevCost.current !== row.costPriceUsd || prevFloor.current !== row.floorPriceUsd
       || prevInputIsAud.current !== inputIsAud || prevRate.current !== usdToAudRate) {
     prevDisc.current = row.discountPct
     prevSell.current = row.sellPriceUsd
+    prevCost.current = row.costPriceUsd
+    prevFloor.current = row.floorPriceUsd
     prevInputIsAud.current = inputIsAud
     prevRate.current = usdToAudRate
+    const newDispCost  = toDisplay(row.costPriceUsd)
+    const newDispFloor = toDisplay(row.floorPriceUsd)
+    const newDispSell  = toDisplay(row.sellPriceUsd)
+    setCostInput(newDispCost === 0 ? '' : newDispCost.toFixed(2))
+    setFloorInput(newDispFloor === 0 ? '' : newDispFloor.toFixed(2))
+    setSellInput(newDispSell === 0 ? '' : newDispSell.toFixed(2))
     setDiscInput((row.discountPct ?? 0).toFixed(1))
-    setNetInput((toDisplay(row.sellPriceUsd) * (1 - (row.discountPct ?? 0) / 100)).toFixed(2))
+    setNetInput((newDispSell * (1 - (row.discountPct ?? 0) / 100)).toFixed(2))
+  }
+
+  function applySell(val: string) {
+    const n = parseFloat(val)
+    const v = isNaN(n) ? 0 : n
+    setField('sellPriceUsd', toUsd(v))
+    setSellInput(v === 0 ? '' : v.toFixed(2))
+    setNetInput((v * (1 - discPct / 100)).toFixed(2))
+  }
+
+  function applyCost(val: string) {
+    const n = parseFloat(val)
+    const v = isNaN(n) ? 0 : n
+    setField('costPriceUsd', toUsd(v))
+    setCostInput(v === 0 ? '' : v.toFixed(2))
+  }
+
+  function applyFloor(val: string) {
+    const n = parseFloat(val)
+    const v = isNaN(n) ? 0 : n
+    setField('floorPriceUsd', toUsd(v))
+    setFloorInput(v === 0 ? '' : v.toFixed(2))
   }
 
   function applyDiscount(val: string) {
     const d = parseFloat(val)
+    const currentSell = parseFloat(sellInput) || 0
     if (!isNaN(d)) {
-      const clamped = Math.min(100, d)   // allow negative (markup), cap at 100
+      const clamped = Math.min(100, d)
       setField('discountPct', clamped)
       setDiscInput(clamped.toFixed(1))
-      setNetInput((dispSell * (1 - clamped / 100)).toFixed(2))
+      setNetInput((currentSell * (1 - clamped / 100)).toFixed(2))
     } else {
       setDiscInput(discPct.toFixed(1))
     }
@@ -1351,11 +1388,12 @@ function ConfigRowEditor({
 
   function applyNet(val: string) {
     const n = parseFloat(val)
-    if (!isNaN(n) && dispSell > 0) {
-      const newDisc = Math.min(100, (1 - n / dispSell) * 100)  // allow negative markup
+    const currentSell = parseFloat(sellInput) || 0
+    if (!isNaN(n) && currentSell > 0) {
+      const newDisc = Math.min(100, (1 - n / currentSell) * 100)
       setField('discountPct', newDisc)
       setDiscInput(newDisc.toFixed(1))
-      setNetInput((dispSell * (1 - newDisc / 100)).toFixed(2))
+      setNetInput((currentSell * (1 - newDisc / 100)).toFixed(2))
     } else {
       setNetInput(dispNet.toFixed(2))
     }
@@ -1396,20 +1434,26 @@ function ConfigRowEditor({
       </div>
       <div className={hiddenCols.has(3) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(3) && <input type="number" min="0" step="0.01"
-          value={dispCost === 0 ? '' : dispCost.toFixed(2)}
-          onChange={e => setField('costPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          value={costInput}
+          onChange={e => setCostInput(e.target.value)}
+          onBlur={e => applyCost(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') applyCost(costInput) }}
           placeholder="0.00" className={`${iCls} text-right`} />}
       </div>
       <div className={hiddenCols.has(4) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(4) && <input type="number" min="0" step="0.01"
-          value={dispFloor === 0 ? '' : dispFloor.toFixed(2)}
-          onChange={e => setField('floorPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          value={floorInput}
+          onChange={e => setFloorInput(e.target.value)}
+          onBlur={e => applyFloor(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') applyFloor(floorInput) }}
           placeholder="0.00" className={`${iCls} text-right`} />}
       </div>
       <div className={hiddenCols.has(5) ? 'overflow-hidden' : ''}>
         {!hiddenCols.has(5) && <input type="number" min="0" step="0.01"
-          value={dispSell === 0 ? '' : dispSell.toFixed(2)}
-          onChange={e => setField('sellPriceUsd', toUsd(parseFloat(e.target.value) || 0))}
+          value={sellInput}
+          onChange={e => setSellInput(e.target.value)}
+          onBlur={e => applySell(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') applySell(sellInput) }}
           placeholder="0.00" className={`${iCls} text-right ${belowFloor ? 'border-red-300 bg-red-50' : ''}`} />}
       </div>
       {isRecurring && (
