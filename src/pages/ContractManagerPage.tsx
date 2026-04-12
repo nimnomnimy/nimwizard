@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { useAppStore } from '../store/useAppStore'
 import { useCurrency } from '../store/useCurrency'
 import { uid } from '../lib/utils'
@@ -76,6 +76,8 @@ export default function ContractManagerPage() {
   const [search, setSearch]       = useState('')
   const [filterType, setFilterType] = useState<ContractType | 'all'>('all')
   const [tab, setTab]             = useState<'details' | 'notifications'>('details')
+  const [groupByCustomer, setGroupByCustomer] = useState(false)
+  const [collapsedCustomers, setCollapsedCustomers] = useState<Set<string>>(new Set())
 
   const sorted = [...contracts]
     .filter(c => {
@@ -204,9 +206,17 @@ export default function ContractManagerPage() {
         <div className="p-3 border-b border-slate-100 flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold text-slate-500">All Contracts ({contracts.length})</span>
-            <button onClick={() => left.setIsOpen(false)} className="text-slate-300 hover:text-slate-500 p-1 rounded" title="Collapse">
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setGroupByCustomer(v => !v)}
+                className={`text-[11px] px-2 py-0.5 rounded-full font-semibold transition-colors ${groupByCustomer ? 'bg-slate-700 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                title="Group by customer">
+                By Customer
+              </button>
+              <button onClick={() => left.setIsOpen(false)} className="text-slate-300 hover:text-slate-500 p-1 rounded" title="Collapse">
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M8 2L4 6l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+              </button>
+            </div>
           </div>
           <input value={search} onChange={e => setSearch(e.target.value)}
             placeholder="Search…"
@@ -238,24 +248,48 @@ export default function ContractManagerPage() {
           {sorted.length === 0 && (
             <p className="text-xs text-slate-400 text-center py-8">No contracts</p>
           )}
-          {sorted.map(c => (
-            <button key={c.id} onClick={() => setActiveId(c.id)}
-              className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === c.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
-              <div className="flex items-start justify-between gap-1">
-                <p className="font-semibold text-slate-800 truncate flex-1">{c.title}</p>
-                {statusBadge(c)}
-              </div>
-              <p className="text-[11px] text-slate-400 mt-0.5">{c.customerName}</p>
-              <div className="flex items-center gap-1.5 mt-1">
-                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${TYPE_COLORS[c.type]}`}>
-                  {CONTRACT_TYPE_LABELS[c.type]}
-                </span>
-                {c.contractNumber && (
-                  <span className="text-[10px] text-slate-400">{c.contractNumber}</span>
-                )}
-              </div>
-            </button>
-          ))}
+          {!groupByCustomer ? (
+            sorted.map(c => (
+              <ContractListItem key={c.id} c={c} activeId={activeId} onSelect={setActiveId} statusBadge={statusBadge} />
+            ))
+          ) : (() => {
+            // Group by customerName, preserving sort order within each group
+            const groups = new Map<string, typeof sorted>()
+            for (const c of sorted) {
+              const key = c.customerName || '(No Customer)'
+              if (!groups.has(key)) groups.set(key, [])
+              groups.get(key)!.push(c)
+            }
+            const customerNames = [...groups.keys()].sort((a, b) => a.localeCompare(b))
+            return customerNames.map(customer => {
+              const items = groups.get(customer)!
+              const collapsed = collapsedCustomers.has(customer)
+              const toggleCollapse = () => setCollapsedCustomers(prev => {
+                const next = new Set(prev)
+                next.has(customer) ? next.delete(customer) : next.add(customer)
+                return next
+              })
+              return (
+                <div key={customer}>
+                  <button
+                    onClick={toggleCollapse}
+                    className="w-full flex items-center gap-1.5 px-2 py-1.5 text-left hover:bg-slate-50 rounded-lg transition-colors group">
+                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none"
+                      className={`flex-shrink-0 text-slate-400 transition-transform ${collapsed ? '-rotate-90' : ''}`}>
+                      <path d="M2 3.5l3 3 3-3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <span className="text-xs font-bold text-slate-600 truncate flex-1">{customer}</span>
+                    <span className="text-[10px] text-slate-400 flex-shrink-0">{items.length}</span>
+                  </button>
+                  {!collapsed && items.map(c => (
+                    <div key={c.id} className="pl-3">
+                      <ContractListItem c={c} activeId={activeId} onSelect={setActiveId} statusBadge={statusBadge} hideCustomer />
+                    </div>
+                  ))}
+                </div>
+              )
+            })
+          })()}
         </div>
         </div>{/* end left panel */}
         <div {...left.dragHandleProps} className="w-1.5 flex-shrink-0 cursor-col-resize group">
@@ -593,6 +627,33 @@ export default function ContractManagerPage() {
       )}
       </div>{/* end panel row */}
     </div>
+  )
+}
+
+function ContractListItem({ c, activeId, onSelect, statusBadge, hideCustomer }: {
+  c: Contract
+  activeId: string | null
+  onSelect: (id: string) => void
+  statusBadge: (c: Contract) => React.ReactNode
+  hideCustomer?: boolean
+}) {
+  return (
+    <button onClick={() => onSelect(c.id)}
+      className={`w-full text-left px-3 py-2.5 rounded-xl text-sm transition-colors ${activeId === c.id ? 'bg-blue-50 border border-blue-200' : 'hover:bg-slate-50 border border-transparent'}`}>
+      <div className="flex items-start justify-between gap-1">
+        <p className="font-semibold text-slate-800 truncate flex-1">{c.title}</p>
+        {statusBadge(c)}
+      </div>
+      {!hideCustomer && <p className="text-[11px] text-slate-400 mt-0.5">{c.customerName}</p>}
+      <div className="flex items-center gap-1.5 mt-1">
+        <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${TYPE_COLORS[c.type]}`}>
+          {CONTRACT_TYPE_LABELS[c.type]}
+        </span>
+        {c.contractNumber && (
+          <span className="text-[10px] text-slate-400">{c.contractNumber}</span>
+        )}
+      </div>
+    </button>
   )
 }
 

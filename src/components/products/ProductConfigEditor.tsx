@@ -348,7 +348,8 @@ function TopGroupBlock({
   function addSubGroup() {
     const sg = emptyGroup(`Sub-group ${subGroupsOf(group).length + 1}`, group.pricingType)
     sg.children = [{ type: 'row', row: emptyRow() }]
-    onUpdate({ ...group, children: [...group.children, { type: 'subgroup', group: sg }] })
+    // Insert at position 0 so the new sub-group appears at the top
+    onUpdate({ ...group, children: [{ type: 'subgroup', group: sg }, ...group.children] })
   }
 
   function updateChild(idx: number, child: ConfigChild) {
@@ -503,6 +504,23 @@ function TopGroupBlock({
                 onDelete={() => deleteChild(ci)}
                 onDragStart={() => { dragChildIdx.current = ci }}
                 onDrop={() => { if (dragChildIdx.current !== null && dragChildIdx.current !== ci) reorderChildren(dragChildIdx.current, ci); dragChildIdx.current = null }}
+                onDropRowInto={() => {
+                  // Move the dragged row child into this subgroup
+                  const fromIdx = dragChildIdx.current
+                  if (fromIdx === null || fromIdx === ci) { dragChildIdx.current = null; return }
+                  const dragged = group.children[fromIdx]
+                  if (!dragged || dragged.type !== 'row') { dragChildIdx.current = null; return }
+                  // Build new children: remove row at fromIdx, update subgroup at ci
+                  const updatedSg = { ...child.group, children: [...child.group.children, dragged] }
+                  const nextChildren: typeof group.children = []
+                  for (let i = 0; i < group.children.length; i++) {
+                    if (i === fromIdx) continue // drop the moved row
+                    if (i === ci) nextChildren.push({ type: 'subgroup', group: updatedSg })
+                    else nextChildren.push(group.children[i])
+                  }
+                  onUpdate({ ...group, children: nextChildren })
+                  dragChildIdx.current = null
+                }}
                 fmt={fmt} fmtAud={fmtAud} showSecondary={showSecondary} usdToAudRate={usdToAudRate}
               />
             )
@@ -517,19 +535,20 @@ function TopGroupBlock({
 
 function SubGroupBlock({
   subGroup, childIndex, totalChildren: _totalChildren, cfg, parentIsRecurring: _parentIsRecurring, parentDefaultUnit,
-  onUpdate, onDelete, onDragStart, onDrop,
+  onUpdate, onDelete, onDragStart, onDrop, onDropRowInto,
   fmt, fmtAud, showSecondary, usdToAudRate,
 }: {
   subGroup: ConfigGroup; childIndex: number; totalChildren: number; cfg: ProductConfiguration
   parentIsRecurring: boolean; parentDefaultUnit: ConfigRowUnit
   onUpdate: (g: ConfigGroup) => void; onDelete: () => void
-  onDragStart: () => void; onDrop: () => void
+  onDragStart: () => void; onDrop: () => void; onDropRowInto: () => void
   fmt: (n: number) => string; fmtAud: (n: number) => string; showSecondary: boolean; usdToAudRate: number
 }) {
   const [editLabel, setEditLabel] = useState(false)
   const [labelVal, setLabelVal] = useState(subGroup.label)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState(false)
+  const [headerDragOver, setHeaderDragOver] = useState(false)
   const dragChildIdx = useRef<number | null>(null)
 
   // Sub-group inherits pricing type from parent (user can override)
@@ -570,7 +589,12 @@ function SubGroupBlock({
       onDrop={e => { e.preventDefault(); setDragOver(false); onDrop() }}
       className={dragOver ? 'border-t-2 border-blue-400' : ''}
     >
-      <div className={`flex items-center gap-1.5 px-3 py-1.5 pl-5 ${subBg} border-t border-slate-100`}>
+      <div
+        onDragOver={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(true) }}
+        onDragLeave={e => { e.stopPropagation(); setHeaderDragOver(false) }}
+        onDrop={e => { e.preventDefault(); e.stopPropagation(); setHeaderDragOver(false); onDropRowInto() }}
+        className={`flex items-center gap-1.5 px-3 py-1.5 pl-5 ${subBg} border-t border-slate-100 ${headerDragOver ? 'ring-2 ring-inset ring-blue-400' : ''}`}
+      >
         {/* Drag handle for sub-group */}
         <span className="cursor-grab text-slate-300 hover:text-slate-500 select-none text-xs flex-shrink-0" title="Drag to reorder">⠿</span>
 
