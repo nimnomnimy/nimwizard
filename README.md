@@ -1,73 +1,102 @@
-# React + TypeScript + Vite
+# NimWizard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+A private sales productivity app built with React, TypeScript, Vite, Tailwind CSS, Zustand, and Firebase. All data is stored per-user in Firestore and synced in real time across devices.
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Tech Stack
 
-## React Compiler
+| Layer | Technology |
+|---|---|
+| Frontend | React 19 + TypeScript + Vite |
+| Styling | Tailwind CSS v4 |
+| State | Zustand (with localStorage persistence) |
+| Backend / Auth | Firebase (Firestore + Auth) |
+| Deployment | Vercel (auto-deploy from `main`) |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+---
 
-## Expanding the ESLint configuration
+## Modules
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Org Chart
+Build and visualise organisational hierarchies. Drag contacts onto a canvas, draw solid reporting lines, dotted lines, and peer relationships. Save named charts and switch between them.
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+### Contacts
+Manage a contact list with name, title, organisation, level, email, and phone. Contacts are shared across Org Chart and Meetings.
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+### Meetings
+Record meeting notes and action items. Assign actions to attendees with priority and due date. Link actions to Tasks.
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Tasks
+Kanban-style task board with buckets, sub-tasks, priorities, start/due dates, progress tracking, and Gantt-style predecessor relationships. Tasks can be linked to Timeline items.
+
+### Timelines
+Interactive Gantt-style timelines with swim lanes, milestones, freeze periods, and configurable timescales (days → years). Supports calendar and Australian financial year modes. Items can be linked to Tasks.
+
+### Diagrams
+Embed and edit draw.io diagrams stored in Firestore. Full draw.io editor opens inline.
+
+### Products (Deal Engine — Products)
+Product catalogue with pricing configurations:
+- Products have one or more **configuration tables** (groups of line items)
+- Each **group** is One-Time or Recurring, with a qty multiplier
+- Groups contain direct **rows** and/or **subgroups**
+- Rows have: product code, description, qty, cost, floor, sell price, discount %, net, total
+- **Subgroup net** = sum of its rows; editing it proportionally scales all rows
+- **Group net** = direct rows + subgroup display-nets; editing scales unlocked rows only
+- **Price locking**: individual rows can be locked (padlock icon) — locked rows are excluded from group/subgroup net scaling; unlocked rows absorb the difference
+- USD / AUD toggle with live FX rate; all prices convert in real time
+- Clone, delete products from the left panel
+- Export to JSON or Excel; import from JSON; paste rows directly from Excel
+
+### Deal Engine — Deals
+Build deals from products. Add line items, set quantities and sell prices, configure freight (ocean / air / mixed), apply discount rules, and compare scenarios side by side.
+
+### Pricebook
+Generate customer-specific pricebooks from the product catalogue. Set per-entry FX overrides, freight inclusion, special terms, and annual uplift (CPI or fixed %).
+
+### Customer Configs
+Record what products a customer currently has deployed. Reference products by ID or free text.
+
+### Contract Manager
+Track contracts (master agreements, SOWs, amendments, renewals) with start/end dates, billing model, payment terms, notifications, and file attachments.
+
+---
+
+## Development
+
+```bash
+npm install
+npm run dev        # local dev server (http://localhost:5173)
+npm run build      # production build
+npm run preview    # preview production build locally
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+TypeScript strict check (runs on Vercel CI):
+```bash
+npx tsc -p tsconfig.app.json --noEmit
 ```
+
+---
+
+## Project Structure
+
+```
+src/
+  components/         # Shared UI + feature-specific components
+    products/         # ProductConfigEditor (the main pricing table)
+    ui/               # CurrencyBar, Toast, etc.
+    deals/            # Deal builder components
+  engine/             # Pure TS pricing/freight/metrics/optimization logic
+  hooks/              # useResizable, etc.
+  lib/                # utils, exportUtils, firestore helpers
+  pages/              # One file per route
+  store/              # Zustand stores (useAppStore, useCurrency)
+  types/              # index.ts — all shared TypeScript types
+```
+
+---
+
+## Deployment
+
+Push to `main` → Vercel auto-builds and deploys. Build command: `npm run build`. Output: `dist/`.

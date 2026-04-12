@@ -1,414 +1,336 @@
-# Deal Engine — Implementation Plan
+# NimWizard — User Guide
 
-## Context
-This plan is a session-resumption guide. The Deal Engine is a new section of the NimWizard app
-(React + Vite + TypeScript + Tailwind + Zustand + Firestore). There is NO backend — all logic is
-pure TypeScript in the engine layer, persisted via Firestore using the same patterns as the rest
-of the app.
+## Contents
 
-The working directory is:
-`c:\Users\nima\OneDrive\Desktop\NimWork\nimwizard`
-
----
-
-## Architecture Overview
-
-```
-src/
-  engine/                      ← pure TS pricing/freight/optimization logic (no React)
-    pricing.ts                 ← tiered pricing, direct/volume/category discounts
-    freight.ts                 ← ocean/air/mixed freight cost calculations
-    metrics.ts                 ← margin $, margin %, floor-price checks, value metrics
-    optimization.ts            ← optimizer + explainability recommendations
-
-  types/index.ts               ← add DealProduct, Deal, DealLineItem, DealScenario, etc.
-  store/useAppStore.ts         ← add dealProducts[], deals[] slices + Firestore listeners
-  pages/
-    DealEnginePage.tsx         ← top-level page, two tabs: Products | Deals
-  components/deals/
-    ProductDrawer.tsx          ← add/edit product side drawer
-    DealLineItem.tsx           ← single line item row in the deal builder table
-    DealSummaryPanel.tsx       ← right panel: totals, margin, floor warnings
-    OptimizationPanel.tsx      ← right panel: optimizer output + explanations
-    ScenarioComparison.tsx     ← modal/panel: side-by-side A/B/C scenarios
-    DealCharts.tsx             ← recharts: margin breakdown, freight, discount charts
-```
+1. [Global Controls](#1-global-controls)
+2. [Org Chart](#2-org-chart)
+3. [Contacts](#3-contacts)
+4. [Meetings](#4-meetings)
+5. [Tasks](#5-tasks)
+6. [Timelines](#6-timelines)
+7. [Diagrams](#7-diagrams)
+8. [Products](#8-products)
+9. [Deal Engine](#9-deal-engine)
+10. [Pricebook](#10-pricebook)
+11. [Customer Configs](#11-customer-configs)
+12. [Contract Manager](#12-contract-manager)
 
 ---
 
-## Types to Add (`src/types/index.ts`)
+## 1. Global Controls
 
-```typescript
-export type ProductCategory =
-  | 'Software' | 'Hardware' | 'Professional Services'
-  | 'Technical Services' | 'Maintenance'
+### Currency Toggle (USD / AUD)
+The **CurrencyBar** appears in the Products and Deal Engine top bars.
 
-export type FreightMethod = 'ocean' | 'air' | 'mixed'
-export type LineItemStatus = 'paid' | 'discounted' | 'free'
-export type DiscountType = 'percent' | 'fixed'
-export type OptimizationGoal = 'margin' | 'perceived-value'
-
-export interface PricingTier {
-  minQty: number
-  maxQty: number | null   // null = unlimited
-  discountPercent: number
-}
-
-export interface DealProduct {
-  id: string
-  name: string
-  category: ProductCategory
-  costPrice: number           // USD
-  floorSellPrice: number      // USD — hard minimum
-  defaultSellPrice: number    // USD
-  fxOverride?: number         // USD→AUD override rate (null = use global)
-  pricingTiers?: PricingTier[]
-  createdAt: number
-}
-
-export interface FreightConfig {
-  method: FreightMethod
-  oceanCostPerUnit?: number   // USD
-  airCostPerUnit?: number     // USD
-  oceanQty?: number           // units via ocean (mixed mode)
-  airQty?: number             // units via air (mixed mode)
-}
-
-export interface DealLineItem {
-  id: string
-  productId: string
-  quantity: number
-  sellPriceUsd: number        // per unit, proposed
-  status: LineItemStatus      // paid | discounted | free
-  discountType?: DiscountType
-  discountValue?: number      // % or $ depending on discountType
-  freight?: FreightConfig
-  notes?: string
-}
-
-export interface DiscountRule {
-  id: string
-  type: 'direct' | 'volume-units' | 'volume-value' | 'category' | 'conditional'
-  discountType: DiscountType
-  discountValue: number
-  // volume-units: threshold qty; volume-value: threshold $ total
-  threshold?: number
-  // category: applies only to this category
-  category?: ProductCategory
-  // conditional: "if productId X in deal, discount productId Y"
-  ifProductId?: string
-  thenProductId?: string
-  label?: string
-}
-
-export interface Deal {
-  id: string
-  name: string
-  lineItems: DealLineItem[]
-  discountRules: DiscountRule[]
-  discountBudgetUsd: number   // total $ budget for discounts/freebies
-  globalFxRate: number        // USD→AUD
-  notes?: string
-  createdAt: number
-  updatedAt: number
-}
-
-export interface DealScenario {
-  id: string
-  dealId: string
-  label: string               // "Scenario A", "Scenario B", etc.
-  lineItems: DealLineItem[]
-  discountRules: DiscountRule[]
-  discountBudgetUsd: number
-}
-
-// Computed (not stored — derived by engine)
-export interface LineMetrics {
-  lineItemId: string
-  costUsd: number
-  freightCostUsd: number
-  totalCostUsd: number
-  listPriceUsd: number
-  sellPriceUsd: number
-  discountUsd: number
-  marginUsd: number
-  marginPercent: number
-  belowFloor: boolean
-  perceivedValueUsd: number   // list price × qty (what customer "would have paid")
-  costAud: number
-  sellAud: number
-}
-
-export interface DealMetrics {
-  lines: LineMetrics[]
-  totalCostUsd: number
-  totalFreightUsd: number
-  totalSellUsd: number
-  totalMarginUsd: number
-  totalMarginPercent: number
-  totalListValueUsd: number
-  totalDiscountUsd: number
-  totalFreeValueUsd: number   // cost of gratis items
-  perceivedSavingsPercent: number
-  discountBudgetUsed: number
-  discountBudgetRemaining: number
-  hasFloorViolation: boolean
-  violatingLineIds: string[]
-  totalSellAud: number
-  totalCostAud: number
-}
-
-export interface OptimizationRecommendation {
-  type: 'switch-to-ocean' | 'switch-to-air' | 'give-free-units' | 'apply-discount'
-         | 'reduce-discount' | 'adjust-sell-price'
-  lineItemId: string
-  description: string         // human-readable explanation
-  why: string                 // "Switching to ocean increases margin by 8%"
-  marginImpactUsd: number     // positive = margin improves
-  perceivedValueImpactUsd: number
-  priority: 'high' | 'medium' | 'low'
-}
-
-export interface OptimizationResult {
-  goal: OptimizationGoal
-  recommendations: OptimizationRecommendation[]
-  projectedMetrics: DealMetrics
-  summary: string
-}
-```
+- **USD** — all price inputs and displays are in US dollars. FX label shows `1 USD = x AUD`.
+- **AUD** — all price inputs and displays are in Australian dollars. FX label shows `1 AUD = y USD`.
+- The FX rate field is always visible. Enter the exchange rate for the active direction and press **Enter** or click away to apply.
+- Switching modes instantly recalculates all displayed prices, sell inputs, and net inputs across the entire table.
 
 ---
 
-## Engine Layer (`src/engine/`)
+## 2. Org Chart
 
-### `pricing.ts`
-Functions:
-- `applyPricingTiers(product, qty) → discountPercent`
-- `applyDirectDiscount(price, rule) → newPrice`
-- `applyVolumeDiscount(lineItems, products, rule) → Map<lineItemId, newPrice>`
-- `applyCategoryDiscount(lineItems, products, rule) → Map<lineItemId, newPrice>`
-- `applyConditionalDiscount(lineItems, rule) → Map<lineItemId, newPrice>`
-- `applyAllRules(deal, products) → Map<lineItemId, resolvedSellPrice>`
+Build a visual reporting hierarchy for your accounts.
 
-### `freight.ts`
-Functions:
-- `calcFreightCostPerUnit(config, qty) → { costPerUnit, totalCost, breakdown }`
-- `blendedFreightCostPerUnit(config, qty) → number`
-  - Ocean: `oceanQty × oceanCostPerUnit`
-  - Air: `airQty × airCostPerUnit`
-  - Mixed: weighted average
+### Adding contacts to the chart
+1. Select contacts from the left panel — they appear as nodes on the canvas.
+2. Drag nodes to position them.
 
-### `metrics.ts`
-Functions:
-- `calcLineMetrics(lineItem, product, fxRate) → LineMetrics`
-- `calcDealMetrics(deal, products) → DealMetrics`
-- `isFloorViolation(lineItem, product) → boolean`
-- `toAud(usd, fxRate, fxOverride?) → number`
+### Drawing relationships
+- **Solid line** — standard reporting line (drag from one node to another).
+- **Dotted line** — indirect / matrix reporting.
+- **Peer line** — same-level relationship (no hierarchy implied).
 
-### `optimization.ts`
-Functions:
-- `optimizeDeal(deal, products, goal) → OptimizationResult`
-
-Algorithm (all logic must be commented):
-1. Compute baseline `DealMetrics`
-2. For each line item:
-   a. Check floor violations → recommend `adjust-sell-price` if violated
-   b. If freight is `air` and margin < threshold → recommend `switch-to-ocean`, calc margin delta
-   c. Compare giving N free units vs applying X% discount for same discount budget:
-      - Free units: cost = N × costPrice; perceived value = N × listPrice
-      - Discount: cost = discount × qty × sellPrice; perceived value = same dollar amount
-      - Prefer free units if `perceivedValue / cost` ratio is higher
-3. If `discountBudgetUsed > discountBudgetUsd` → flag over-budget
-4. Sort recommendations by `marginImpactUsd` descending
-5. Build `projectedMetrics` applying top recommendations
-6. Return with `why` explanation strings for each
+### Saving charts
+- Click **Save Chart** to name and store the current layout.
+- Switch between saved charts using the dropdown at the top.
+- Each saved chart stores its own node positions and relationship lines.
 
 ---
 
-## Firestore Schema (new collections)
+## 3. Contacts
 
-```
-users/{uid}/dealProducts/{productId}
-users/{uid}/deals/{dealId}             ← includes lineItems[], discountRules[], scenarios[]
-```
+A shared contact list used across Org Chart, Meetings, and other modules.
 
-Both collections follow the same `onSnapshot` → optimistic write → rollback pattern used by
-contacts, timelines, etc. `TOTAL_COLLECTIONS` bumps from 5 → 7.
+### Fields
+| Field | Notes |
+|---|---|
+| Name | Required |
+| Title | Job title |
+| Organisation | Company / account |
+| Level | c-level → individual contributor |
+| Email | Clickable mailto link |
+| Phone | Free text |
 
----
-
-## Store Additions (`src/store/useAppStore.ts`)
-
-New state:
-```typescript
-dealProducts: DealProduct[]
-deals: Deal[]
-```
-
-New actions:
-```typescript
-// Products
-addDealProduct(p: DealProduct): void
-updateDealProduct(p: DealProduct): void
-deleteDealProduct(id: string): void
-
-// Deals
-addDeal(d: Deal): void
-updateDeal(d: Deal): void
-deleteDeal(id: string): void
-```
+### Operations
+- **Add** — click **+ New Contact** in the top bar.
+- **Edit** — click any contact row to open the edit drawer.
+- **Delete** — use the delete button inside the drawer.
+- **Search** — live filter by name, title, or organisation.
 
 ---
 
-## Page Layout (`src/pages/DealEnginePage.tsx`)
+## 4. Meetings
 
-Two tabs at top: **Products** | **Deals**
+Record meeting notes and track action items.
 
-### Products Tab
-- Grid of product cards
-- "New Product" → opens `ProductDrawer`
-- Each card shows: name, category badge, cost/floor/sell prices (USD + AUD), tier count
+### Creating a meeting
+1. Click **+ New Meeting**.
+2. Set title, date, and attendees (picked from your Contacts list).
+3. Add discussion notes in the free-text field.
 
-### Deals Tab
-Three-column layout:
-```
-[Left: Deal List 240px] | [Center: Deal Builder flex-1] | [Right: Summary+Optimizer 320px]
-```
-
-**Left column:**
-- List of saved deals
-- "New Deal" button
-- Click deal → opens in center
-
-**Center column (Deal Builder):**
-- Deal name (editable)
-- FX rate input (global, per-deal)
-- Discount budget input
-- Line items table:
-  - Product selector (dropdown)
-  - Qty
-  - Sell price (editable, shows tier-adjusted price)
-  - Status badge (paid/discounted/free)
-  - Freight config (expand inline)
-  - Margin % per line (color coded: green ≥20%, amber 10-20%, red <10% or floor violation)
-  - Delete row
-- "Add Line Item" button
-- Discount Rules section (collapsible):
-  - Add rules: direct / volume / category / conditional
-- Scenarios section (collapsible):
-  - Clone current deal as Scenario A/B/C
-  - "Compare Scenarios" button → opens `ScenarioComparison`
-
-**Right column:**
-Two panels stacked:
-
-*Summary Panel (top):*
-- Total Cost | Total Sell | Margin $ | Margin %
-- List Value | Customer Pays | Perceived Savings %
-- USD + AUD for all
-- Discount budget used / remaining progress bar
-- Floor violation alert (red banner if any line violates)
-
-*Optimization Panel (below):*
-- Goal toggle: Maximize Margin ↔ Maximize Perceived Value
-- "Optimize Deal" button
-- Results list: each recommendation card shows:
-  - Type badge
-  - Description
-  - "Why:" explanation
-  - Margin impact (+$X)
-  - Apply button
+### Action items
+- Add action items with text, assignee, priority (low / medium / high), and due date.
+- Mark items done with the checkbox.
+- Link an action to an existing Task using the **Task** picker — the task progress updates automatically.
 
 ---
 
-## Components
+## 5. Tasks
 
-### `ProductDrawer.tsx`
-- Right-side drawer (same pattern as ContactDrawer)
-- Fields: name, category, costPrice, floorSellPrice, defaultSellPrice, fxOverride
-- Pricing tiers section: add/remove tier rows (minQty, maxQty, discountPercent)
+Bucket-based task management with sub-tasks and scheduling.
 
-### `DealLineItem.tsx`
-- Single `<tr>` in the deal builder table
-- Inline freight expander (click freight icon → shows ocean/air/mixed config)
-- Color-coded margin cell
-- Floor violation highlight (red row background)
+### Buckets
+- Buckets are columns (e.g. "Backlog", "In Progress", "Done").
+- Add, rename, reorder, and colour-code buckets from the bucket menu.
 
-### `DealSummaryPanel.tsx`
-- Pure display component, receives `DealMetrics` as prop
-- Recharts `PieChart` for margin breakdown (cost vs margin vs freight)
+### Tasks
+Each task has:
+- **Text** — the task name / description.
+- **Priority** — low / medium / high.
+- **Start date / Due date** — displayed in the Gantt view.
+- **Progress** — 0–100 % slider.
+- **Notes** — free-text notes.
+- **Sub-tasks** — nested items, each with their own priority, dates, and progress.
+- **Predecessors** — link to other tasks that must complete first.
+- **Timeline link** — associate with a swim lane item in a Timeline.
 
-### `OptimizationPanel.tsx`
-- Receives `deal`, `products`, calls `optimizeDeal()` on demand
-- Shows recommendation cards with `why` text
-- "Apply All" button applies all recommendations to deal line items
-
-### `ScenarioComparison.tsx`
-- Full-screen modal
-- Table: rows = metrics, columns = scenarios
-- Recharts `BarChart` comparing revenue/margin/discount/perceived-value per scenario
-
-### `DealCharts.tsx`
-- Three charts (tabs or stacked):
-  1. **Margin Breakdown** — stacked bar per line item (cost / freight / margin)
-  2. **Discount Allocation** — pie chart (direct discounts / free items / remaining budget)
-  3. **Freight Comparison** — grouped bar: current vs if-all-ocean vs if-all-air cost
+### Views
+- **Board** — Kanban columns.
+- **Timeline** — Gantt chart of all tasks and sub-tasks with drag-to-reschedule.
 
 ---
 
-## Dependencies to Install
+## 6. Timelines
 
-```bash
-npm install recharts
-npm install @types/recharts   # if needed
-```
-recharts is MIT-licensed, tree-shakeable, works with React 19.
+Interactive Gantt-style timelines.
 
----
+### Timescales
+Days · Weeks · Months · Quarters · Years. Each supports a secondary sub-timescale for the row headers.
 
-## Implementation Order (session checkpoints)
+### Year modes
+- **Calendar** — Jan–Dec.
+- **Financial (AU)** — Jul–Jun.
 
-| # | Task | Files | Status |
-|---|------|-------|--------|
-| 1 | Write `plan.md` | `plan.md` | ✅ Done |
-| 2 | Install recharts | `package.json` | ✅ Done |
-| 3 | Add types | `src/types/index.ts` | ✅ Done |
-| 4 | Add store slice | `src/store/useAppStore.ts` | ✅ Done |
-| 5 | Write `src/engine/metrics.ts` | new file | ✅ Done |
-| 6 | Write `src/engine/pricing.ts` | new file | ✅ Done |
-| 7 | Write `src/engine/freight.ts` | new file | ✅ Done |
-| 8 | Write `src/engine/optimization.ts` | new file | ✅ Done |
-| 9 | Write `ProductDrawer.tsx` | new file | ✅ Done |
-| 10 | Write `DealLineItem.tsx` | new file | ✅ Done |
-| 11 | Write `DealSummaryPanel.tsx` | new file | ✅ Done |
-| 12 | Write `OptimizationPanel.tsx` | new file | ✅ Done |
-| 13 | Write `ScenarioComparison.tsx` | new file | ✅ Done |
-| 14 | Write `DealCharts.tsx` | new file | ✅ Done |
-| 15 | Write `DealEnginePage.tsx` | new file | ✅ Done |
-| 16 | Wire route + nav | `App.tsx`, `AppShell.tsx` | ✅ Done |
-| 17 | Commit & push | git | ✅ Done |
+### Swim lanes
+- Add lanes with a label and colour.
+- Lanes can be nested (drag to create parent–child lane groups).
+- Collapse lanes to save screen space.
 
----
+### Items
+Each timeline item is a **bar** or **milestone**:
+- Set start/end dates, progress, colour, and notes.
+- Link to a Task (progress stays in sync).
+- Add **sub-items** inside a bar for finer breakdown.
+- Set predecessor items for dependency arrows.
 
-## How to Resume a Session
+### Milestones
+- Diamond-shaped markers at a specific date.
+- Show as a vertical line across all lanes.
 
-Tell Claude:
-> "Read plan.md at c:\Users\nima\OneDrive\Desktop\NimWork\nimwizard\plan.md and continue
-> building the Deal Engine from where it left off. Check the Implementation Order table
-> for the last completed step."
+### Freeze periods
+Shade a date range to indicate a code freeze, holiday, or blackout window.
 
-Then update the table's Status column as each step completes (✅ Done).
+### Column width
+- Drag column resize handles to widen/narrow date columns.
+- Per-column overrides are saved.
 
 ---
 
-## Key Conventions (must match rest of app)
+## 7. Diagrams
 
-- All components use Tailwind utility classes only — no CSS files
-- Drawer pattern: `fixed z-50`, right side, `translate-x-full` when closed
-- Form inputs: `px-3 py-3 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 min-h-[48px]`
-- Action buttons: blue-500 primary, slate-200 border secondary, red-500 destructive
-- Toast notifications: `showToast(message, 'success' | undefined)`
-- IDs: always `uid()` from `src/lib/utils`
-- Firestore writes: optimistic update → write → rollback on error (same as contacts/timelines)
-- `stripUndefined()` before all Firestore writes
-- No backend — pure frontend + Firestore
+Embed draw.io diagrams stored in your account.
+
+- Click **+ New Diagram** to open a blank draw.io canvas.
+- All draw.io tools are available (shapes, connectors, tables, etc.).
+- Diagrams auto-save to Firestore on close.
+- Click any diagram card to reopen it in the editor.
+
+---
+
+## 8. Products
+
+The product catalogue. Each product has a pricing **configuration table** — a structured bill-of-materials with groups, subgroups, and individual rows.
+
+### Left panel
+- Lists all products with their config total in the active currency.
+- Search by name; filter by pricing type (One-Time / Recurring).
+- Click a product to open it in the right pane.
+- **Clone** / **Delete** buttons appear below the active product name.
+- Click **+ New Product** in the top bar to create one.
+
+### Product detail pane
+
+#### Toolbar
+- **Product name** — edit inline at the left of the toolbar.
+- **+ Row** — add a row to the selected group (or to the only group if there is one).
+- **+ Group** — add a new top-level group.
+- **Columns** — show/hide individual columns (Cost, Floor, Unit, Term, etc.).
+- **Paste Excel** — import rows from an Excel copy-paste.
+- **Save** — saves the product and syncs the config name with the product name.
+
+#### Groups
+A product can have multiple top-level **groups**, each independently set to **One-Time** or **Recurring**.
+
+| Control | Purpose |
+|---|---|
+| Group label | Click to rename |
+| One-Time / Recurring | Toggle pricing type |
+| Qty (multiplier) | Scales the entire group's total (e.g. 3 sites) |
+| Disc% | Applies a uniform discount to all rows in the group |
+| Net | Editable — changes here proportionally scale unlocked rows |
+| Total | Net × group qty; read-only |
+| ▲ ▼ | Reorder groups |
+| × | Delete group |
+
+#### Subgroups
+Inside a group you can add **subgroups** — coloured blocks that visually bundle related rows.
+
+| Control | Purpose |
+|---|---|
+| Subgroup label | Click to rename |
+| Qty | Multiplier applied to the subgroup's total |
+| Disc% | Group-level discount applied to all rows inside |
+| Net | Sum of child rows; edit to proportionally scale unlocked rows |
+| Total | Subgroup net × subgroup qty |
+| Colour picker | Pick a highlight colour for the subgroup block |
+| × | Delete subgroup |
+
+#### Rows
+Each row in a group or subgroup has:
+
+| Column | Notes |
+|---|---|
+| Code | Product / SKU code |
+| Description | Line item label |
+| Qty | Unit quantity |
+| Cost | Cost price (hidden by default) |
+| Floor | Floor sell price (hidden by default) |
+| Sell | Sell price per unit |
+| Unit | Billing unit (recurring groups only): months / years / per unit / per site / per user |
+| Term | Contract term in months (recurring groups only) |
+| Disc% | Discount % applied to sell price |
+| Net | Sell × (1 − disc%); edit to back-calculate the discount |
+| Total | Net × qty × term (recurring) or Net × qty (one-time) |
+| 🔒 | Price lock toggle |
+| × | Delete row |
+
+#### Price locking
+Click the **padlock icon** on any row to lock its sell price:
+
+- **Unlocked** (grey padlock) — row scales normally when the group or subgroup net is edited.
+- **Locked** (amber padlock) — row's sell price is fixed. When you edit a group or subgroup net, locked rows stay exactly as-is. Only the unlocked rows are scaled proportionally to reach the target net.
+- If all rows in a group are locked, editing the group net is a no-op.
+- Useful for fixed-price components (e.g. hardware with a set cost) that should never be discounted when you adjust the overall deal value.
+
+#### Net editing — how scaling works
+When you type a new value in a **Group Net** or **Subgroup Net** field:
+
+1. The locked rows' net contribution is calculated and held fixed.
+2. The remaining target (= entered net − locked net) is distributed proportionally across unlocked rows — each unlocked row's sell price scales by the same ratio, preserving relative proportions.
+3. If the group/subgroup is recurring, term months are factored in correctly.
+
+**Group net** = direct rows net + sum of subgroup display-nets (subgroup qty applies to TOTAL only, not to the group net field).
+
+**Subgroup net** = sum of its direct rows.
+
+#### Column visibility
+Click **Columns** in the toolbar to toggle Cost, Floor, Unit, Term, and other columns. Hidden columns take no space in the table.
+
+#### Paste from Excel
+1. Copy rows from Excel (columns: Description, ProductID, Quantity, Cost Price, Floor Price, Sell Price, Unit, Term).
+2. Click **Paste Excel** in the toolbar.
+3. Paste into the text area and click **Apply**.
+4. Rows with no ProductID and no prices are interpreted as group/subgroup headers.
+
+#### Export / Import
+- **Export JSON** — full product catalogue export (all products, all configs).
+- **Export Excel (all fields)** — spreadsheet with every product field.
+- **Export Config Excel** — active product's configuration table only (for sharing with customers).
+- **Import JSON** — re-import a previously exported JSON file; existing products with matching IDs are updated.
+
+---
+
+## 9. Deal Engine
+
+Build quotes from the product catalogue.
+
+### Line items
+- Add products from the catalogue with a quantity and sell price.
+- Each line item shows cost, sell, margin $, and margin % (colour-coded: green ≥ 20 %, amber 10–20 %, red < 10 % or floor violation).
+- Freight config: ocean / air / mixed, with per-unit costs.
+
+### Discount rules
+- **Direct** — fixed % or $ off a specific line.
+- **Volume (units)** — discount kicks in above a qty threshold.
+- **Volume (value)** — discount kicks in above a $ value threshold.
+- **Category** — discount applied to all items in a product category.
+- **Conditional** — if product A is in the deal, discount product B.
+
+### Scenarios
+Clone the current deal as Scenario A / B / C and compare them side by side in the scenario comparison view.
+
+### Summary panel
+Shows: total cost, total sell, total margin, list value, perceived savings %, discount budget used / remaining. Highlights any floor price violations.
+
+### Optimizer
+Toggle the goal (Maximize Margin / Maximize Perceived Value), click **Optimize Deal**, and review recommendations with impact estimates. Apply individual recommendations or all at once.
+
+---
+
+## 10. Pricebook
+
+Create customer-specific pricebooks.
+
+- Pick products from the catalogue and set a unit price for each entry.
+- Override the FX rate per entry or set a pricebook-level default FX rate.
+- Toggle freight inclusion per line.
+- Add special terms (free-text lines) per entry.
+- Set **uplift** — CPI-linked or fixed % — applied annually or at renewal.
+- Set validity window (valid from / valid to dates).
+- Export to share with the customer.
+
+---
+
+## 11. Customer Configs
+
+Record what a customer currently has installed or licensed.
+
+- Add line items by linking to a product in the catalogue (or entering free text if no match exists).
+- Track quantity and notes per line.
+- Useful as a reference when building a renewal deal or upgrade quote.
+
+---
+
+## 12. Contract Manager
+
+Track contracts across your accounts.
+
+### Contract types
+Master Agreement · SOW · Amendment · Renewal
+
+### Fields
+- Contract number, title, customer, type
+- Start date / end date
+- Contract value (USD)
+- Billing model: subscription / one-time / mixed
+- Payment terms: Net-30 / Net-60 / Net-90 / upfront / milestone / custom
+- Special terms (free text)
+- Parent contract (SOWs link back to their master agreement)
+
+### Notifications
+Add named notification dates (e.g. "Renewal Notice 90 days out") and mark them as notified when actioned.
+
+### Attachments
+Upload contract PDFs and supporting documents. Files are stored in Firebase Storage and linked to the contract record.
